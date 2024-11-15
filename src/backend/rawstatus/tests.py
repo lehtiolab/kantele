@@ -246,7 +246,7 @@ class TestUploadScript(BaseIntegrationTest):
         with open(os.path.join(tmpdir, 'config.json'), 'w') as fp:
             json.dump({'client_id': self.prod.client_id, 'host': self.live_server_url,
 
-                'token': self.token, 'outbox': outbox, 'raw_is_folder': False,
+                'token': self.token, 'outbox': outbox, 'raw_is_folder': True,
                 'filetype_id': self.ft.pk, 'acq_process_names': ['TEST'],
                 'injection_waittime': 5}, fp)
         self.assertFalse(os.path.exists(os.path.join(tmpdir, 'skipbox', self.f3sf.filename)))
@@ -258,7 +258,7 @@ class TestUploadScript(BaseIntegrationTest):
         os.killpg(os.getpgid(sp.pid), signal.SIGTERM)
         spout, sperr = sp.stdout.read(), sp.stderr.read()
         print(sperr)
-        print(tmpdir, os.path.listdir(tmpdir))
+        print(tmpdir, os.listdir(tmpdir))
         newraw = rm.RawFile.objects.last()
         newsf = rm.StoredFile.objects.last()
         self.assertEqual(newraw.pk, lastraw.pk + 1)
@@ -386,7 +386,7 @@ class TestUploadScript(BaseIntegrationTest):
         with open(os.path.join(tmpdir, 'config.json'), 'w') as fp:
             json.dump({'client_id': self.prod.client_id, 'host': self.live_server_url,
 
-                'token': self.token, 'outbox': outbox, 'raw_is_folder': False,
+                'token': self.token, 'outbox': outbox, 'raw_is_folder': True,
                 'filetype_id': self.ft.pk, 'acq_process_names': ['TEST'],
                 'injection_waittime': 5}, fp)
         sp = self.run_script(False, config=os.path.join(tmpdir, 'config.json'), session=True)
@@ -526,7 +526,7 @@ class TestUploadScript(BaseIntegrationTest):
         with open(os.path.join(tmpdir, 'config.json'), 'w') as fp:
             json.dump({'client_id': self.prod.client_id, 'host': self.live_server_url,
 
-                'token': self.token, 'outbox': outbox, 'raw_is_folder': False,
+                'token': self.token, 'outbox': outbox, 'raw_is_folder': True,
                 'filetype_id': self.ft.pk, 'acq_process_names': ['flock'],
                 'injection_waittime': 0}, fp)
         # Lock analysis.tdf for 3 seconds to pretend we are the acquisition software
@@ -605,7 +605,7 @@ class TestUploadScript(BaseIntegrationTest):
         with open(os.path.join(tmpdir, 'config.json'), 'w') as fp:
             json.dump({'client_id': self.prod.client_id, 'host': self.live_server_url,
 
-                'token': self.token, 'outbox': outbox, 'raw_is_folder': False,
+                'token': self.token, 'outbox': outbox, 'raw_is_folder': True,
                 'filetype_id': self.ft.pk, 'acq_process_names': ['TEST'],
                 'injection_waittime': 5}, fp)
         sp = self.run_script(False, config=os.path.join(tmpdir, 'config.json'), session=True)
