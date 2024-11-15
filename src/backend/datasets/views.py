@@ -33,13 +33,14 @@ def new_dataset(request):
 @login_required
 def show_dataset(request, dataset_id):
     try:
-        dset = models.Dataset.objects.filter(purged=False, pk=dataset_id).select_related(
-            'runname__experiment__project').get()
+        dset = models.Dataset.objects.filter(purged=False, pk=dataset_id).values('pk', 'deleted',
+                'runname__experiment__project__projtype__ptype_id').get()
     except models.Dataset.DoesNotExist:
         return HttpResponseNotFound()
-    context = {'dataset_id': dataset_id, 'newdataset': False,
-               'is_owner': {True: 'true', False: 'false'}[
-                   check_ownership(request.user, dset)]}
+    dsown_ids = [x['user_id'] for x in models.DatasetOwner.objects.filter(dataset_id=dset['pk']).values('user_id')]
+    is_owner = check_ownership(request.user, dset['runname__experiment__project__projtype__ptype_id'],
+        dset['deleted'], dsown_ids)
+    context = {'dataset_id': dataset_id, 'newdataset': False, 'is_owner': json.dumps(is_owner)}
     return render(request, 'datasets/dataset.html', context)
 
 
@@ -382,7 +383,8 @@ def update_dataset(data):
             models.DatasetRawFile.objects.filter(dataset_id=dset.id).count()):
         # Update storage loc, first check if dataset needs moving
         if dset.storageshare != prim_share:
-            if error := move_dset_project_servershare(dset, settings.PRIMARY_STORAGESHARENAME):
+            if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
+                    settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
                 return JsonResponse({'error': error}, status=403)
         job = create_job('rename_dset_storage_loc', dset_id=dset.id, dstpath=new_storage_loc)
         if job['error']: 
@@ -460,19 +462,23 @@ def set_storage_location(project, exp, runname, dtype, prefrac, hiriefrange_id):
 def change_owners(request):
     data = json.loads(request.body.decode('utf-8'))
     try:
-        dset = models.Dataset.objects.get(pk=data['dataset_id'])
+        dset = models.Dataset.objects.filter(pk=data['dataset_id']).values('pk', 'deleted',
+                'runname__experiment__project__projtype__ptype_id').get()
     except models.Dataset.DoesNotExist:
         print('change_owners could not find dataset with that ID {}'.format(data['dataset_id']))
         return JsonResponse({'error': 'Something went wrong trying to change ownership for that dataset'}, status=403)
-    if not check_ownership(request.user, dset):
+    dsownq = models.DatasetOwner.objects.filter(dataset_id=dset['pk'])
+    if not check_ownership(request.user, dset['runname__experiment__project__projtype__ptype_id'],
+            dset['deleted'], [x['user_id'] for x in dsownq.values('user_id')]):
         return HttpResponseForbidden()
-    is_already_owner = models.DatasetOwner.objects.filter(dataset_id=dset, user_id=data['owner'])
+    is_already_ownerq = dsownq.filter(user_id=data['owner'])
+    is_already_owner = is_already_ownerq.exists()
     if data['op'] == 'add' and not is_already_owner:
         newowner = models.DatasetOwner(dataset=dset, user_id=data['owner'])
         newowner.save()
         return JsonResponse({'result': 'ok'})
     elif data['op'] == 'del' and is_already_owner and dset.datasetowner_set.count() > 1:
-        is_already_owner.delete()
+        is_already_ownerq.delete()
         return JsonResponse({'result': 'ok'})
     else:
         return JsonResponse({'result': 'error', 'message': 'Something went wrong trying to change ownership'}, status=500)
@@ -482,22 +488,21 @@ def get_dataset_owners_ids(dset):
     return [x.user.id for x in dset.datasetowner_set.all()]
 
 
-def check_ownership(user, dset):
+def check_ownership(user, ptype_id, deleted, owners):
     """
     Ownership is OK if:
     - User is staff OR
     - dataset is not deleted AND (user is dset owner OR dset is CF and user has CF admin rights)
     """
-    pt_id = dset.runname.experiment.project.projtype.ptype_id 
-    if dset.deleted and not user.is_staff:
+    if deleted and not user.is_staff:
         return False
-    elif user.id in get_dataset_owners_ids(dset) or user.is_staff:
+    elif user.id in owners or user.is_staff:
         return True
-    elif pt_id == settings.LOCAL_PTYPE_ID:
+    elif ptype_id == settings.LOCAL_PTYPE_ID:
         return False
     else:
         try:
-            models.UserPtype.objects.get(ptype_id=pt_id, user_id=user.id)
+            models.UserPtype.objects.get(ptype_id=ptype_id, user_id=user.id)
         except models.UserPtype.DoesNotExist:
             return False
     return True
@@ -506,12 +511,14 @@ def check_ownership(user, dset):
 def check_save_permission(dset_id, logged_in_user):
     '''Only datasets which are not deleted can be saved, and a check_ownership is done'''
     try:
-        dset = models.Dataset.objects.filter(purged=False, deleted=False,
-                pk=dset_id).select_related('runname__experiment__project').get()
+        ds = models.Dataset.objects.filter(purged=False, deleted=False,
+                pk=dset_id).values('runname__experiment__project__projtype__ptype_id', 'deleted').get()
     except models.Dataset.DoesNotExist:
         return HttpResponseNotFound()
     else:
-        if not check_ownership(logged_in_user, dset):
+        owner_ids = [x['user_id'] for x in models.DatasetOwner.objects.filter(dataset_id=dset_id).values('user_id')]
+        if not check_ownership(logged_in_user, ds['runname__experiment__project__projtype__ptype_id'],
+                ds['deleted'], owner_ids):
             return HttpResponseForbidden()
     return False
 
@@ -621,9 +628,12 @@ def merge_projects(request):
     for proj in projs[1:]:
         # Refresh oldexps with every merged project
         oldexps = {x.name: x for x in projs[0].experiment_set.all()}
-        dsets = models.Dataset.objects.filter(runname__experiment__project=proj)
-        if not all(check_ownership(request.user, ds) for ds in dsets):
-            return JsonResponse({'error': f'You do not have the rights to move all datasets in project {proj.name}'}, status=403)
+        for dset in  models.Dataset.objects.filter(runname__experiment__project=proj).values(
+                'pk', 'deleted'):
+            dsown_ids = [x['user_id'] for x in models.DatasetOwner.objects.filter(
+                dataset_id=dset['pk']).values('user_id')]
+            if not check_ownership(request.user, proj.projtype.ptype_id, dset['deleted'], dsown_ids):
+                return JsonResponse({'error': f'You do not have the rights to move all datasets in project {proj.name}'}, status=403)
         for exp in proj.experiment_set.all():
             runnames_pks = [x.pk for x in exp.runname_set.all()]
             runnames = models.RunName.objects.filter(pk__in=runnames_pks)
@@ -649,7 +659,8 @@ def merge_projects(request):
                 hrrange_id = pfds.hiriefdataset.hirief_id if hasattr(pfds, 'hiriefdataset') else False
                 new_storage_loc = set_storage_location(projs[0], exp, runname, dset.datatype, prefrac, hrrange_id)
                 if dset.storageshare_id != prim_share.pk:
-                    if error := move_dset_project_servershare(dset, settings.PRIMARY_STORAGESHARENAME):
+                    if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
+                            settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
                         return JsonResponse({'error': error}, status=403)
                 job = create_job('rename_dset_storage_loc', dset_id=dset.id,
                         dstpath=new_storage_loc)
@@ -677,14 +688,21 @@ def rename_project(request):
         return JsonResponse({'error': f'Cannot change name to existing name for project {proj.name}'}, status=403)
     elif is_invalid_proj_exp_runnames(data['newname']):
         return JsonResponse({'error': f'Project name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
-    dsets = [x for x in models.Dataset.objects.filter(runname__experiment__project=proj).select_related(
-            'runname__experiment__project__projtype')]
-    if not all(check_ownership(request.user, ds) for ds in dsets):
-        return JsonResponse({'error': f'You do not have the rights to change all datasets in this project'}, status=403)
+    dsets = models.Dataset.objects.filter(runname__experiment__project=proj)
+    storageshare_id = False
+    for dset in  dsets.values('pk', 'deleted', 'storageshare_id', 'storageshare__name', 'runname__experiment__project_id'):
+        if not storageshare_id:
+            # Only first dataset
+            storageshare_id = dset['storageshare_id']
+        dsown_ids = [x['user_id'] for x in models.DatasetOwner.objects.filter(dataset_id=dset['pk']).values('user_id')]
+        if not check_ownership(request.user, proj.projtype.ptype_id, dset['deleted'], dsown_ids):
+            return JsonResponse({'error': f'You do not have the rights to change all datasets in this project'}, status=403)
     # queue jobs to rename project, update project name after that since it is needed in job for path
     prim_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
-    if len(dsets) and dsets[0].storageshare_id != prim_share.pk:
-        if error := move_dset_project_servershare(dsets[0], settings.PRIMARY_STORAGESHARENAME):
+    if dsets.exists() and storageshare_id != prim_share.pk:
+        # Take leftover dset from loop
+        if error := move_dset_project_servershare(dset['pk'], dset['storageshare__name'],
+                settings.PRIMARY_STORAGESHARENAME, dset['runname__experiment__project_id']):
             return JsonResponse({'error': error}, status=403)
     job = create_job('rename_top_lvl_projectdir', newname=data['newname'], proj_id=data['projid'])
     if job['error']:
@@ -750,10 +768,10 @@ def purge_project(request):
         return JsonResponse({})
 
 
-def get_dset_storestate(dset, dsfiles=False):
+def get_dset_storestate(dset_id, dsfiles=False):
     # Dsfiles is passed in home/views, but only to cache it?
     if not dsfiles:
-        dsfiles = filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=dset)
+        dsfiles = filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dset_id)
     dsfiles = dsfiles.exclude(mzmlfile__isnull=False)
     dsfc = dsfiles.count()
     if dsfc == 0:
@@ -765,11 +783,12 @@ def get_dset_storestate(dset, dsfiles=False):
         storestate = 'active-only'
     elif coldfiles.count() == dsfc:
         storestate = 'cold'
-    elif dsfiles.filter(purged=True).count() == dsfc and dsfiles.filter(pdcbackedupfile__deleted=True) == dsfiles.filter(pdcbackedupfile__isnull=False).count():
+    elif dsfiles.filter(purged=True).count() == dsfc and dsfiles.filter(pdcbackedupfile__deleted=True).count() == dsfiles.filter(pdcbackedupfile__isnull=False).count():
+        # FIXME this is incorrect backup count?
         storestate = 'purged'
-    elif dsfiles.filter(pdcbackedupfile__deleted=True).count() > 0:
+    elif dsfiles.filter(pdcbackedupfile__deleted=True).exists():
         storestate = 'broken'
-    elif dsfiles.filter(checked=False) or dsfiles.filter(servershare__name=settings.TMPSHARENAME):
+    elif dsfiles.filter(checked=False).exists() or dsfiles.filter(servershare__name=settings.TMPSHARENAME).exists():
         storestate = 'new'
     else:
         storestate = 'unknown'
@@ -778,7 +797,7 @@ def get_dset_storestate(dset, dsfiles=False):
 
 def archive_dataset(dset):
     # FIXME dataset reactivating and archiving reports error when ok and vv? I mean, if you click archive and reactivate quickly, you will get error (still in active storage), and also in this func, storestate is not updated at same time as DB (it is result of jobs)
-    storestate = get_dset_storestate(dset)
+    storestate = get_dset_storestate(dset.pk)
     prim_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
     backing_up = False
     if storestate == 'purged':
@@ -791,7 +810,8 @@ def archive_dataset(dset):
         return {'state': 'error', 'error': 'Cannot archive dataset with unknown storage state'}
     elif storestate == 'active-only':
         if dset.storageshare_id != prim_share.pk:
-            if error := move_dset_project_servershare(dset, settings.PRIMARY_STORAGESHARENAME):
+            if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
+                    settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
                 return {'state': 'error', 'error': error}
         backing_up = True
         create_job('backup_dataset', dset_id=dset.id)
@@ -822,7 +842,7 @@ def reactivate_dataset(dset):
     #  - delete/undelete ALSO in post-job view - bad UI, dataset keeps showing in interface, should not
     #  - reactivate cancels delete job (if it is pending
     #  - 
-    storestate = get_dset_storestate(dset)
+    storestate = get_dset_storestate(dset.pk)
     if storestate == 'purged':
         return {'state': 'error', 'error': 'Cannot reactivate purged dataset'}
     elif storestate == 'broken':
@@ -853,7 +873,9 @@ def move_dataset_cold(request):
         dset = models.Dataset.objects.select_related('runname__experiment__project__projtype').get(pk=data['item_id'])
     except models.Dataset.DoesNotExist:
         return JsonResponse({'error': 'Dataset does not exist'}, status=403)
-    if not check_ownership(request.user, dset):
+    dsownq = models.DatasetOwner.objects.filter(dataset_id=dset.pk)
+    if not check_ownership(request.user, dset.runname.experiment.project.projtype.ptype_id,
+            dset.deleted, [x['user_id'] for x in dsownq.values('user_id')]):
         return JsonResponse({'error': 'Cannot archive dataset, no permission for user'}, status=403)
     archived = archive_dataset(dset)
     if archived['state'] == 'error':
@@ -898,7 +920,7 @@ def delete_dataset_from_cold(dset):
     # FIXME add check if active on primary share
     create_job('delete_active_dataset', dset_id=dset.id)
     create_job('delete_empty_directory', sf_ids=[x.id for x in filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=dset)])
-    storestate = get_dset_storestate(dset)
+    storestate = get_dset_storestate(dset.pk)
     if storestate != 'empty':
         create_job('delete_dataset_coldstorage', dset_id=dset.id)
     sfids = [sf.id for dsrf in dset.datasetrawfile_set.select_related('rawfile') for sf in dsrf.rawfile.storedfile_set.all()]
@@ -1206,24 +1228,24 @@ def empty_files_json():
                 for x in newfiles}}
 
 
-def move_dset_project_servershare(dset, dstsharename):
+def move_dset_project_servershare(dset_id, storagesharename, dstsharename, projid):
     '''Takes a dataset and moves its entire project to a new
     servershare'''
     kwargs = []
-    kw = {'dset_id': dset.pk, 'srcsharename': dset.storageshare.name, 'dstsharename': dstsharename}
+    kw = {'dset_id': dset_id, 'srcsharename': storagesharename, 'dstsharename': dstsharename}
     if not jm.Job.objects.filter(funcname='move_dset_servershare',
-            kwargs__dset_id=kw['dset_id'], kwargs__srcsharename=kw['srcsharename'],
-            kwargs__dstsharename=kw['dstsharename']).exclude(state__in=jj.JOBSTATES_DONE).exists():
+            kwargs__dset_id=dset_id, kwargs__srcsharename=storagesharename,
+            kwargs__dstsharename=dstsharename).exclude(state__in=jj.JOBSTATES_DONE).exists():
         if error := check_job_error('move_dset_servershare', **kw):
             return error
         kwargs = [kw]
     for other_ds in models.Dataset.objects.filter(deleted=False, purged=False,
-            runname__experiment__project=dset.runname.experiment.project).exclude(pk=dset.pk):
+            runname__experiment__project_id=projid).exclude(pk=dset_id):
         kw = {'dset_id': other_ds.pk, 'srcsharename': other_ds.storageshare.name,
                 'dstsharename': dstsharename}
         jobs_in_progress = jm.Job.objects.filter(funcname='move_dset_servershare',
                 kwargs__dset_id=kw['dset_id'], kwargs__srcsharename=kw['srcsharename'],
-                kwargs__dstsharename=kw['dstsharename']).exclude(state__in=jj.JOBSTATES_DONE)
+                kwargs__dstsharename=dstsharename).exclude(state__in=jj.JOBSTATES_DONE)
         if not jobs_in_progress.exists():
             if error := check_job_error('move_dset_servershare', **kw):
                 return error
@@ -1261,7 +1283,8 @@ def save_or_update_files(data):
     # All tmp files will be on primary server, so if we move server first, there is no
     # issue with them not being ok anymore
     if switch_fileserver:
-        if error := move_dset_project_servershare(dset, settings.PRIMARY_STORAGESHARENAME):
+        if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
+                settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
             return {'error': error}, 403
 
     # Errors checked, now store DB records and queue move jobs

@@ -143,12 +143,12 @@ class UploadToken(models.Model):
                 return False
             return upload
 
-    def parse_token_for_frontend(self):
+    def parse_token_for_frontend(self, host):
         ufts = self.UploadFileType
         need_desc = int(self.uploadtype in [ufts.LIBRARY, ufts.USERFILE])
-        user_token = b64encode(f'{self.token}|{settings.KANTELEHOST}|{need_desc}'.encode('utf-8'))
+        user_token = b64encode(f'{self.token}|{host}|{need_desc}'.encode('utf-8'))
         return {'user_token': user_token.decode('utf-8'), 'expired': self.expired,
-                'expires': datetime.strftime(self.expires, '%Y-%m-%d')}
+                'expires': datetime.strftime(self.expires, '%Y-%m-%d, %H:%M')}
 
     def invalidate(self):
         self.expired = True

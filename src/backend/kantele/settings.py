@@ -38,7 +38,8 @@ QUEUE_QC_NXF = os.environ.get('QUEUE_QC_NXF', 'qc_nextflow')
 QUEUE_SEARCH_INBOX = os.environ.get('QUEUE_SEARCH_INBOX', 'scaninbox')
 
 PROTOCOL = os.environ.get('PROTOCOL', 'https')
-KANTELEHOST = '{}://{}'.format(PROTOCOL, os.environ.get('KANTELEHOST'))
+KANTELEHOST_NOPROTO = os.environ.get('KANTELEHOST', False)
+KANTELEHOST = f'{PROTOCOL}://{KANTELEHOST_NOPROTO}'
 RSYNC_HOST = os.environ.get('RSYNC_HOST', urlsplit(KANTELEHOST).netloc)
 RSYNC_SSHUSER = os.environ.get('RSYNC_SSHUSER')
 RSYNC_SSHKEY = os.environ.get('RSYNC_SSHKEY')
@@ -148,7 +149,8 @@ INJ_WAITTIMES = {THERMORAW: os.environ.get('THERMO_WAIT', 15 * 60), BRUKERRAW: o
 THERMOREADER_DOCKER = os.environ.get('THERMOREAD_DOCKER', 'ghcr.io/lehtiolab/kantele-thermorawreader')
 THERMO_CLASSIFY_CMD = ['wine', 'ScanHeadsman.exe', '-u', '-d', '0'] 
 
-PRODUCER_ADMIN_NAME = 'admin'
+PRODUCER_ADMIN_NAME = os.environ.get('PRODUCER_ADMIN_NAME', 'admin')
+PRODUCER_ANALYSIS_NAME = os.environ.get('PRODUCER_ANALYSIS_NAME', 'analysis')
 
 MZREFINER_NXFWFV_ID = os.environ.get('REFINE_MZML_WFVID')
 

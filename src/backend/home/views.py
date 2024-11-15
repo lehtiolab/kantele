@@ -1,5 +1,6 @@
 from datetime import timedelta, datetime
 import json
+from base64 import b64encode
 from celery import states as tstates
 
 from django.shortcuts import render
@@ -9,7 +10,7 @@ from django.contrib.auth.models import User
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
 from django.db.models import Q, Sum, Max, Count
 from django.db.models.functions import Trunc, Greatest
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 
 from kantele import settings
 from datasets import models as dsmodels
@@ -24,6 +25,7 @@ from jobs import jobs as jj
 from jobs import views as jv
 from jobs.jobutil import create_job
 from jobs import models as jm
+from mstulos import models as mm
 
 
 @login_required
@@ -102,7 +104,8 @@ def find_datasets(request):
     dbdsets = dataset_query_creator(searchterms)
     if request.GET.get('deleted', 'false') == 'false':
         dbdsets = dbdsets.filter(deleted=False)
-    dsets = populate_dset(dbdsets, request.user)
+    dsids = [x['pk'] for x in dbdsets.values('pk')]
+    dsets = populate_dset(dsids, dbdsets, request.user)
     return JsonResponse({'items': dsets, 'order': list(dsets.keys())})
 
 
@@ -173,7 +176,8 @@ def show_datasets(request):
         # last month datasets of a user
         dbdsets = dsmodels.Dataset.objects.filter(deleted=False, datasetowner__user_id=request.user.id,
                                                   date__gt=datetime.today() - timedelta(30))
-    dsets = populate_dset(dbdsets, request.user)
+        dsids = [x['pk'] for x in dbdsets.values('pk')]
+    dsets = populate_dset(dsids, dbdsets, request.user)
     return JsonResponse({'items': dsets, 'order': list(dsets.keys())})
 
 
@@ -278,19 +282,6 @@ def populate_files(dbfns):
     return JsonResponse({'items': popfiles, 'order': order})
 
 
-def get_ds_jobs(dbdsets):
-    # FIXME probably do this in DB operation instead? its slow!
-    jobmap = {}
-    for filejob in filemodels.FileJob.objects.select_related('job').exclude(
-            job__state__in=jj.JOBSTATES_DONE).filter(
-                    storedfile__rawfile__datasetrawfile__dataset_id__in=dbdsets).distinct('job'):
-        job = filejob.job
-        try:
-            jobmap[filejob.storedfile.rawfile.datasetrawfile.dataset_id][str(job.id)] = job.state
-        except KeyError:
-            jobmap[filejob.storedfile.rawfile.datasetrawfile.dataset_id] = {str(job.id): job.state}
-    return jobmap
-
 
 @login_required
 @require_GET
@@ -345,53 +336,73 @@ def get_job_actions(job, ownership):
 
 def get_ana_actions(analysis, user):
     actions = []
-    if analysis.user != user and not user.is_staff:
+    if analysis['user_id'] != user.pk and not user.is_staff:
         actions.append('view')
     else:
-        if analysis.editable:
+        if analysis['editable']:
             actions.append('edit')
         else:
             actions.append('view')
-        if hasattr(analysis, 'nextflowsearch'):
-            if analysis.nextflowsearch.job.state in jj.JOBSTATES_JOB_INACTIVE:
+        if analysis['nextflowsearch__job_id']:
+            if analysis['nextflowsearch__job__state'] in jj.JOBSTATES_JOB_INACTIVE:
                 actions.append('run job')
-            elif analysis.nextflowsearch.job.state in jj.JOBSTATES_JOB_ACTIVE:
+            elif analysis['nextflowsearch__job__state'] in jj.JOBSTATES_JOB_ACTIVE:
                 actions.append('stop job')
     return actions
+
+class Throwaway:
+    pass
 
 
 def populate_analysis(analyses, user):
     ana_out, order = {}, []
-    for ana in analyses.select_related('nextflowsearch__job', 'nextflowsearch__workflow',
-            'nextflowsearch__nfwfversionparamset'):
-        if hasattr(ana, 'nextflowsearch'):
-            fjobs = ana.nextflowsearch.job.filejob_set.all().select_related(
-                    'storedfile__rawfile__datasetrawfile__dataset__runname__experiment__project')
-            fjobdsets = fjobs.distinct('storedfile__rawfile__datasetrawfile__dataset')
-            nfs = {'name': aj.get_ana_fullname(ana, ana.nextflowsearch.workflow.wftype),
-                    'jobstate': ana.nextflowsearch.job.state, 'jobid': ana.nextflowsearch.job_id,
-                    'wf': f'{ana.nextflowsearch.workflow.name} - {ana.nextflowsearch.nfwfversionparamset.update}',
-                    'wflink': ana.nextflowsearch.nfwfversionparamset.nfworkflow.repo,
+    tulos_keys = ['peptides', 'proteins', 'genes', 'experiments']
+    for ana in analyses.values('pk', 'name', 'user_id', 'user__username', 'date',
+            'deleted', 'purged', 'editable', 'nextflowsearch__job_id', 'nextflowsearch__job__state',
+            'nextflowsearch__workflow__wftype', 'nextflowsearch__workflow__name',
+            'nextflowsearch__nfwfversionparamset__nfworkflow__repo',
+            'nextflowsearch__nfwfversionparamset__update'):
+        ananame = Throwaway()
+        ananame.name = ana['name'] # for get_ana_fullname
+        if ana['nextflowsearch__job_id']:
+            fjobs = filemodels.FileJob.objects.filter(job_id=ana['nextflowsearch__job_id']).values('storedfile_id')
+            fjobdsets = dsmodels.Dataset.objects.filter(datasetrawfile__rawfile__storedfile__in=[x['storedfile_id'] for x in fjobs]).distinct('pk').values('pk')
+            nfs = {'name': aj.get_ana_fullname(ananame, ana['nextflowsearch__workflow__wftype']),
+                    'jobstate': ana['nextflowsearch__job__state'],
+                    'jobid': ana['nextflowsearch__job_id'],
+                    'wf': f'{ana["nextflowsearch__workflow__name"]} - {ana["nextflowsearch__nfwfversionparamset__update"]}',
+                    'wflink': ana['nextflowsearch__nfwfversionparamset__nfworkflow__repo'],
                     }
         else:
             nfs = {'jobid': False, 'fn_ids': False, 'dset_ids': False, 'wflink': False}
             fjobs, fjobdsets = [], []
-
-        ana_out[ana.id] = {
-            'id': ana.id,
-            'own': ana.user_id == user.id,
-            'usr': ana.user.username,
-            'name': nfs.get('name', ana.name), #aj.get_ana_fullname(analysis, nfs.workflow.wftype),
-            'date': datetime.strftime(ana.date, '%Y-%m-%d'),
-            'deleted': ana.deleted,
-            'purged': ana.purged,
-            'dset_ids': [x.storedfile.rawfile.datasetrawfile.dataset_id for x in fjobdsets
-                if hasattr(x.storedfile.rawfile, 'datasetrawfile')],
-            'fn_ids': [x.storedfile_id for x in fjobs],
+        tulosq = mm.Experiment.objects.filter(analysis_id=ana['pk'])
+        if tulosq.exists():
+            tulos_empty = {f'{x}': [] for x in tulos_keys}
+            tulos_empty['experiments'] = [[f'{tulosq.values("pk").get()["pk"]}', ana['name']]]
+            tulos_filt = [tulos_empty[k] for k in tulos_keys]
+            tulos_filt.extend([*['' for x in tulos_keys], *[1, 1, 1, 0], *[0, 0, 0],
+                '', {'dia': True, 'dda': True}, False])
+            tulos_filt = [b64encode(json.dumps(tulos_filt, separators=(',', ':')
+                ).encode('utf-8')).decode('utf-8')]
+        else:
+            tulos_filt = False
+            
+        ana_out[ana['pk']] = {
+            'id': ana['pk'],
+            'own': ana['user_id'] == user.id,
+            'usr': ana['user__username'],
+            'name': nfs.get('name', ana['name']),
+            'date': datetime.strftime(ana['date'], '%Y-%m-%d'),
+            'deleted': ana['deleted'],
+            'purged': ana['purged'],
+            'dset_ids': [x['pk'] for x in fjobdsets],
+            'fn_ids': [x['storedfile_id'] for x in fjobs],
+            'mstulosq': tulos_filt,
             'actions': get_ana_actions(ana, user),
             **nfs,
         }
-        order.append(ana.id)
+        order.append(ana['pk'])
     return ana_out, order
 
 
@@ -445,26 +456,40 @@ def populate_proj(dbprojs, user, showjobs=True, include_db_entry=False):
     return projs, order
 
 
-def populate_dset(dbdsets, user):
+def populate_dset(dsids, dbdsets, user):
     dsets = OrderedDict()
-    for dataset in dbdsets.select_related('runname__experiment__project__projtype__ptype',
-            'prefractionationdataset'):
-        dsfiles = filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=dataset)
-        storestate = get_dset_storestate(dataset, dsfiles)
-        ana_ids = [x['id'] for x in anmodels.Analysis.objects.filter(datasetanalysis__dataset_id=dataset.id).values('id')]
-        dsets[dataset.id] = {
-            'id': dataset.id,
-            'own': check_ownership(user, dataset),
-            'usr': dataset.datasetowner_set.select_related('user').first().user.username,
-            'deleted': dataset.deleted,
-            'proj': dataset.runname.experiment.project.name,
+    jobmap = defaultdict(dict)
+    for job in jm.Job.objects.filter(
+            filejob__storedfile__rawfile__datasetrawfile__dataset_id__in=dsids
+            ).exclude(state__in=jj.JOBSTATES_DONE).distinct('pk').values('state', 'pk',
+                    'filejob__storedfile__rawfile__datasetrawfile__dataset_id'):
+        dsid = job['filejob__storedfile__rawfile__datasetrawfile__dataset_id']
+        jobmap[dsid][str(job['pk'])] = job['state']
+    for dset in dbdsets.values('pk', 'deleted', 'runname__experiment__project__projtype__ptype_id',
+            'runname__experiment__name', 'runname__experiment__project__projtype__ptype__name',
+            'runname__experiment__project__name', 'runname__name', 'datatype__name',
+            'prefractionationdataset__prefractionation__name', 'prefractionationdataset__hiriefdataset__hirief'):
+        dsfiles = filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dset['pk'])
+        storestate = get_dset_storestate(dset['pk'], dsfiles)
+        ana_ids = [x['id'] for x in anmodels.Analysis.objects.filter(datasetanalysis__dataset_id=dset['pk']).values('id')]
+        dsfiles_ids = [x['pk'] for x in dsfiles.values('pk')]
+        ownerq = dsmodels.DatasetOwner.objects.filter(dataset_id=dset['pk'])
+        owners = [x['user_id'] for x in ownerq.values('user_id')]
+        is_owner  = check_ownership(user, dset['runname__experiment__project__projtype__ptype_id'],
+                dset['deleted'], owners) 
+        dsets[dset['pk']] = {
+            'id': dset['pk'],
+            'own': is_owner,
+            'usr': ownerq.values('user__username').first()['user__username'],
+            'deleted': dset['deleted'],
+            'proj': dset['runname__experiment__project__name'],
             'ana_ids': ana_ids,
-            'exp': dataset.runname.experiment.name,
-            'run': dataset.runname.name,
-            'dtype': dataset.datatype.name,
+            'exp': dset['runname__experiment__name'],
+            'run': dset['runname__name'],
+            'dtype': dset['datatype__name'],
             'storestate': storestate,
-            'fn_ids': [x.id for x in dsfiles],
-            'ptype': dataset.runname.experiment.project.projtype.ptype.name,
+            'fn_ids': dsfiles_ids,
+            'ptype': dset['runname__experiment__project__projtype__ptype__name'],
             'prefrac': False,
             'smallstatus': [],
         }
@@ -484,23 +509,22 @@ def populate_dset(dbdsets, user):
             if ftype in mzmlgroups:
                 state = mzmlgroups[ftype]
                 text = f'({ftype})' if state == 'deleted' else ftype
-                dsets[dataset.id]['smallstatus'].append({'text': text, 'state': state})
+                dsets[dset['pk']]['smallstatus'].append({'text': text, 'state': state})
 
         # Pending files
         if nrpenjobs := jm.Job.objects.filter(funcname='move_files_storage', state=jj.Jobstates.HOLD, 
-                kwargs__dset_id=dataset.pk).count():
-            dsets[dataset.pk]['smallstatus'].append({'text': f'{nrpenjobs} pending raw files',
+                kwargs__dset_id=dset['pk']).count():
+            dsets[dset['pk']]['smallstatus'].append({'text': f'{nrpenjobs} pending raw files',
                 'state': 'pending'})
 
         # Add job states
-        jobmap = get_ds_jobs(dbdsets)
-        dsets[dataset.id]['jobstate'] = list(jobmap[dataset.id].values()) if dataset.id in jobmap else []
-        dsets[dataset.id]['jobids'] = ','.join(list(jobmap[dataset.id].keys())) if dataset.id in jobmap else []
-        if hasattr(dataset, 'prefractionationdataset'):
-            pf = dataset.prefractionationdataset
-            dsets[dataset.id]['prefrac'] = str(pf.prefractionation.name)
-            if 'hirief' in pf.prefractionation.name.lower():
-                dsets[dataset.id]['hr'] = '{} {}'.format('HiRIEF', str(pf.hiriefdataset.hirief))
+        dsjobs = [(jobid, state) for jobid, state in jobmap[dset['pk']]]
+        dsets[dset['pk']]['jobstate'] = [x[1] for x in dsjobs]
+        dsets[dset['pk']]['jobids'] = ','.join([x[0] for x in dsjobs])
+        if dset['prefractionationdataset__prefractionation__name']:
+            dsets[dset['pk']]['prefrac'] = dset['prefractionationdataset__prefractionation__name']
+            if dset['prefractionationdataset__hiriefdataset__hirief']:
+                dsets[dset['pk']]['hr'] = f'HiRIEF {dset["prefractionationdataset__hiriefdataset__hirief"]}'
     return dsets
 
 
@@ -657,7 +681,7 @@ def refresh_job(request, job_id):
 def refresh_analysis(request, anid):
     ana = anmodels.Analysis.objects.filter(pk=anid)
     ana_out, _order = populate_analysis(ana, request.user)
-    return JsonResponse(ana_out)
+    return JsonResponse(ana_out[anid])
 
 
 @login_required
@@ -885,7 +909,8 @@ def create_mzmls(request):
     res_share = filemodels.ServerShare.objects.get(name=settings.MZMLINSHARENAME)
     primary_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
     if dset.storageshare.server != primary_share.server:
-        if error := move_dset_project_servershare(dset, settings.PRIMARY_STORAGESHARENAME):
+        if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
+                settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
             return JsonResponse({'error': error}, status=403)
     # Remove other pwiz mzMLs
     other_pwiz_mz = mzmls_exist.exclude(mzmlfile__pwiz=pwiz)
@@ -951,7 +976,8 @@ def refine_mzmls(request):
     res_share = filemodels.ServerShare.objects.get(name=settings.MZMLINSHARENAME)
     primary_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
     if dset.storageshare.server != primary_share.server:
-        if error := move_dset_project_servershare(dset, settings.PRIMARY_STORAGESHARENAME):
+        if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
+                settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
             return JsonResponse({'error': error}, status=403)
     # FIXME get analysis if it does exist, in case someone reruns?
     analysis = anmodels.Analysis.objects.create(user=request.user, name=f'refine_dataset_{dset.pk}', editable=False)

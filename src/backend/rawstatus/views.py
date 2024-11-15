@@ -234,15 +234,15 @@ def instrument_check_in(request):
 
     response = {'newtoken': False}
     uploadtype = UploadToken.UploadFileType.RAWFILE
+    manual_producers = [settings.PRODUCER_ADMIN_NAME, settings.PRODUCER_ANALYSIS_NAME]
     if upload:
-
-        # producer is admin if there is no client id
         day_window = timedelta(settings.TOKEN_RENEWAL_WINDOW_DAYS)
-        if upload.producer.client_id != client_id and \
-                upload.producer.shortname != settings.PRODUCER_ADMIN_NAME:
-            # Keep the token bound to a client instrument
+        if (upload.producer.client_id != client_id and 
+                upload.producer.shortname not in manual_producers):
+            # producer is admin if there is no client id
             return JsonResponse({'error': 'Token/client ID invalid or non-existing'}, status=403)
         elif client_id and upload.expires - day_window < timezone.now() < upload.expires:
+            # Keep the token bound to a client instrument
             upload.expired = True
             upload.save()
             newtoken = create_upload_token(upload.filetype_id, upload.user_id, upload.producer, uploadtype)
@@ -290,6 +290,8 @@ def login_required_403_json(view_func):
 @login_required_403_json
 @require_POST
 def request_upload_token(request):
+    '''This view is ony for the instrument check-in, and the manual upload. It is not
+    used by the analysis upload, and will not work with that uploadtype if tested'''
     data = json.loads(request.body.decode('utf-8'))
     try:
         producer = Producer.objects.get(client_id=data['producer_id'])
@@ -313,7 +315,8 @@ def request_upload_token(request):
         return JsonResponse({'success': False, 'msg': 'Can only upload raw, library, user files '})
 
     ufu = create_upload_token(data['ftype_id'], request.user.id, producer, uploadtype, data['archive_only'])
-    return JsonResponse(ufu.parse_token_for_frontend())
+    host = settings.KANTELEHOST or request.build_absolute_uri('/')
+    return JsonResponse(ufu.parse_token_for_frontend(host))
 
 
 def create_upload_token(ftype_id, user_id, producer, uploadtype, archive_only=False):
@@ -450,7 +453,7 @@ def get_files_transferstate(request):
 def classified_rawfile_treatment(request):
     '''Task calls this after reading a raw file for classification'''
     data = json.loads(request.body.decode('utf-8'))
-    tasks = jm.Task.objects.filter(asyncid=data['task_id'])
+    tasks = jm.Task.objects.filter(asyncid=data['task_id'], state=taskstates.PENDING)
     # If task is force-retried, and there was another task running, that other task will
     # get 403 here
     if tasks.count() != 1:

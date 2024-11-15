@@ -186,7 +186,7 @@ class BaseTest(TestCase):
         self.uft = rm.StoredFileType.objects.create(name='ufileft', filetype='tst', is_rawdata=False)
 
         # Analysis files
-        self.anaprod = rm.Producer.objects.create(name='analysisprod', client_id=settings.ANALYSISCLIENT_APIKEY, shortname='pana')
+        self.anaprod = rm.Producer.objects.create(name='analysisprod', client_id=settings.ANALYSISCLIENT_APIKEY, shortname=settings.PRODUCER_ANALYSIS_NAME)
         self.ana_raw, _ = rm.RawFile.objects.get_or_create(name='ana_file', producer=self.anaprod, source_md5='kjlmnop1234',
                 size=100, defaults={'date': timezone.now(), 'claimed': True})
         self.anasfile, _ = rm.StoredFile.objects.get_or_create(rawfile=self.ana_raw,

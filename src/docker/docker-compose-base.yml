@@ -11,7 +11,6 @@ services:
                 USER_ID: "${USER_ID:-You must run export USER_ID}"
                 GROUP_ID: "${GROUP_ID:-You must run export GROUP_ID}"
         environment:
-            KANTELEHOST: "${HOST_FQDN}"
             DB_PASS: "${PG_KANTELE_PASSWORD}"
             DB_USER: "${PG_KANTELE_USER}"
             DB_NAME: "${KANTELE_DB_NAME}"

@@ -12,7 +12,7 @@ fi
 echo Inititalizing upload script ...
 python3 -m venv .kantele-upload-venv
 source .kantele-upload-venv/bin/activate
-pip install requests requests_toolbelt
+pip install requests requests_toolbelt psutil
 
 python upload.py --files "$@"
 

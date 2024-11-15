@@ -194,7 +194,7 @@ div.spinner {
         <td>
           {#if field.links}
           {#if row[field.links].length || row[field.links] > 0}
-          <a href={`${field.linkroute ? `${field.linkroute}?ids=` : ''}${row[field.links]}`}>
+          <a href={`${field.linkroute ? `${field.linkroute}?${field.qparam || 'ids'}=` : ''}${row[field.links]}`}>
             {#if field.multi}
             {#each row[field.id] as item}
             <TableItem value={item} rowid={rowid} inactive={inactive.some(x=>row[x])} help={field.help} icon={field.icon} field={field} on:rowAction />

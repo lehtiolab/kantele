@@ -235,7 +235,6 @@ class ConvertDatasetMzml(DatasetJob):
         dset = Dataset.objects.get(pk=kwargs['dset_id'])
         pwiz = Proteowizard.objects.get(pk=kwargs['pwiz_id'])
         res_share = ServerShare.objects.get(pk=kwargs['dstshare_id'])
-        # First create jobs to delete old files
         nf_raws = []
         runpath = f'{dset.id}_convert_mzml_{kwargs["timestamp"]}'
         for fn in self.getfiles_query(**kwargs):

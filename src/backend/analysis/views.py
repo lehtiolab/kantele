@@ -335,8 +335,9 @@ def get_analysis(request, anid):
             analysis['isoquants'] = get_isoquants(ana, sampletables)
 
     if hasattr(ana, 'externalanalysis'):
+        host = settings.KANTELEHOST or request.build_absolute_uri('/')
         analysis.update({'external_desc': ana.externalanalysis.description,
-            'upload_token': ana.externalanalysis.last_token.parse_token_for_frontend(), 
+            'upload_token': ana.externalanalysis.last_token.parse_token_for_frontend(host), 
             'external_results': True})
 
     context = {
@@ -820,7 +821,8 @@ def store_analysis(request):
     primary_share = rm.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
     for dset in dsets.values():
         if dset.storageshare.server != primary_share.server:
-            if error := move_dset_project_servershare(dset, settings.PRIMARY_STORAGESHARENAME):
+            if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
+                    settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
                 return JsonResponse({'error': error}, status=403)
 
     for dsid in req['dsids']:
@@ -946,7 +948,8 @@ def store_analysis(request):
             # Need to access its upload token so have to get it anyway
             exta.description = req['external_description']
             exta.save()
-        api_token = exta.last_token.parse_token_for_frontend()
+        host = settings.KANTELEHOST or request.build_absolute_uri('/')
+        api_token = exta.last_token.parse_token_for_frontend(host)
     else:
         # Delete any existing external analysis row, but also upload token!
         exta = am.ExternalAnalysis.objects.filter(analysis=analysis).select_related('last_token')
@@ -1191,7 +1194,8 @@ def renew_token(request):
             rm.UploadToken.UploadFileType.ANALYSIS)
     analysis.externalanalysis.last_token = new_token
     analysis.externalanalysis.save()
-    api_token = new_token.parse_token_for_frontend()
+    host = settings.KANTELEHOST or request.build_absolute_uri('/')
+    api_token = new_token.parse_token_for_frontend(host)
     return JsonResponse({'error': False, 'token': api_token})
 
 
@@ -1303,7 +1307,7 @@ def stop_analysis(request):
         return JsonResponse({'error': 'Must use POST'}, status=405)
     req = json.loads(request.body.decode('utf-8'))
     anaq = am.Analysis.objects.filter(pk=req['item_id'], user=request.user)
-    if not request.user.is_superuser() or not anaq.exists():
+    if not request.user.is_superuser and not anaq.exists():
         return JsonResponse({'error': 'Analysis does not exist or you dont have permission'}, status=403)
     anaq.update(editable=True)
     jobq = jm.Job.objects.filter(nextflowsearch__analysis_id=req['item_id'])

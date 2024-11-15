@@ -272,7 +272,7 @@ function showFiles() {
 	</ul>
 </div>
 
-<h4 class="title is-4">Dataset</h4> 
+<h4 class="title is-4">{!$dataset_id ? 'New dataset' : `Dataset ${$dataset_id}`}</h4> 
 <div style="display: {tabshow !== 'meta' ? 'none' : ''}">
     <div class="box" id="project">
     

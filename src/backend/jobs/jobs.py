@@ -58,8 +58,8 @@ JOBSTATES_TASKS_RUNNING = [Jobstates.PROCESSING, Jobstates.REVOKING]
 # - determining if file is being backed up
 JOBSTATES_WAIT = [Jobstates.WAITING, Jobstates.PENDING, Jobstates.QUEUED, Jobstates.PROCESSING, Jobstates.HOLD]
 
-# Jobs retryable
-JOBSTATES_RETRYABLE = [Jobstates.PROCESSING, Jobstates.ERROR, Jobstates.REVOKING]
+# Jobs retryable / startable
+JOBSTATES_RETRYABLE = [Jobstates.WAITING, Jobstates.HOLD, Jobstates.PROCESSING, Jobstates.ERROR, Jobstates.REVOKING]
 
 # FIXME Deprecate below line, is not used:
 JOBSTATES_PRE_OK_JOB = [Jobstates.WAITING, Jobstates.ERROR, Jobstates.REVOKING, Jobstates.CANCELED, Jobstates.HOLD]

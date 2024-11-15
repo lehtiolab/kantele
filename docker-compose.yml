@@ -90,12 +90,12 @@ services:
 
         command: celery -A kantele worker -Q file_download -n storage_downloads.%h --concurrency=1
         volumes:
-            - "./src/docker/test_rsync_sshkey:/kantele/.ssh/rsync_key"
+            - "./src/docker/test_rsync_sshkey:/kantelessh/rsync_key"
         environment:
             RSYNC_HOST: upload_bay_rsync
             RSYNC_SSHUSER: kantele
             RSYNC_SSHPORT: 22
-            RSYNC_SSHKEY: "/kantele/.ssh/rsync_key"
+            RSYNC_SSHKEY: "/kantelessh/rsync_key"
 
     tulos_ingester:
       depends_on:
