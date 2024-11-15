@@ -61,7 +61,7 @@ jobs:
                 #                docker compose --env-file  src/docker/.compose.testing.env -f src/docker/docker-compose-testing.yml \
                 #                  run --use-aliases web python manage.py test --tag slow --exclude-tag mstulos
                 docker compose --env-file  src/docker/.compose.testing.env -f src/docker/docker-compose-testing.yml \
-                  run --use-aliases web python manage.py test rawstatus.tests.TestUploadScript.test_transfer_same_name || docker compose --env-file  src/docker/.compose.testing.env -f src/docker/docker-compose-testing.yml \
+                  run --use-aliases web python manage.py test rawstatus.tests.TestUploadScript || docker compose --env-file  src/docker/.compose.testing.env -f src/docker/docker-compose-testing.yml \
                   logs storage_downloads storage_mvfiles tulos_ingester
 
                   #    unit-tests:
