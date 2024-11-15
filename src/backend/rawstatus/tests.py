@@ -257,6 +257,8 @@ class TestUploadScript(BaseIntegrationTest):
         # Properly kill children since upload.py uses multiprocessing
         os.killpg(os.getpgid(sp.pid), signal.SIGTERM)
         spout, sperr = sp.stdout.read(), sp.stderr.read()
+        print(sperr)
+        print(tmpdir, os.path.listdir(tmpdir))
         newraw = rm.RawFile.objects.last()
         newsf = rm.StoredFile.objects.last()
         self.assertEqual(newraw.pk, lastraw.pk + 1)
