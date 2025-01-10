@@ -158,10 +158,12 @@ def get_file_production(request, daysago, maxdays):
 def get_line_data(qcruns, seriesnames):
     long_qc = []
     for qcrun in qcruns:
-        datepoints = {lplot.shortname: lplot.value for lplot in qcrun.lineplotdata_set.filter(shortname__in=seriesnames)}
-        datepoints['day'] = datetime.strftime(qcrun.day, '%Y-%m-%d')
-        long_qc.append(datepoints)
-    return {'xkey': 'day', 'data': long_qc}
+        datepoints = [{'name': lplot.shortname, 'value': lplot.value,
+        'date': datetime.strftime(qcrun.day, '%Y-%m-%d')}
+        for lplot in qcrun.lineplotdata_set.filter(shortname__in=seriesnames)]
+        long_qc.extend(datepoints)
+    #return {'xkey': 'date', 'data': long_qc}
+    return {'data': long_qc}
     
 
 def get_boxplot_data(qcruns, name):
@@ -169,16 +171,17 @@ def get_boxplot_data(qcruns, name):
     for qcrun in qcruns.filter(boxplotdata__shortname=name):
         bplot = qcrun.boxplotdata_set.get(shortname=name)
         dayvals = {
-            'upper': bplot.upper,
-            'lower': bplot.lower,
-            'q1': bplot.q1,
-            'q2': bplot.q2,
-            'q3': bplot.q3,
+                'name': bplot.shortname,
+                'date': datetime.strftime(qcrun.day, '%Y-%m-%d'),
+                #'upper': bplot.upper,
+                #'lower': bplot.lower,
+                'q1': bplot.q1,
+                'q2': bplot.q2,
+                'q3': bplot.q3,
             }
-        dayvals['day'] = datetime.strftime(qcrun.day, '%Y-%m-%d')
-        if not isnan(dayvals['upper']):
+        if not isnan(dayvals['q1']):
             data.append(dayvals)
-    return {'xkey': 'day', 'data': data}
+    return {'data': data}
 
 
 def show_qc(request, instrument_id, daysago, maxdays):
