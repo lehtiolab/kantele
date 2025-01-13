@@ -1,18 +1,14 @@
 <script>
+import { onMount } from 'svelte';
 import { schemeSet1 } from 'd3-scale-chromatic';
 import { createEventDispatcher } from 'svelte';
 import * as Plot from '@observablehq/plot';
 
 
-import BoxPlot from './BoxPlot.svelte';
-import LinePlot from './LinePlot.svelte';
 import DateSlider from './DateSlider.svelte';
+import { getJSON } from '../../datasets/src/funcJSON.js'
 
 const dispatch = createEventDispatcher();
-
-export let qcdata;
-export let instrument_id;
-
 
 let identplot;
 let psmplot;
@@ -23,9 +19,38 @@ let scoreplot;
 let rtplot;
 let perrorplot;
 
-function reloadData(maxdays, firstday) {
-  dispatch('reloaddata', {instrument_id: instrument_id, showdays: maxdays, firstday: firstday});
+let qcdata = {
+  ident: {data: false, func: linePlot, div: identplot, title: 'Nr of IDs'},
+  psms: {data: false, func: linePlot, title: 'Scans and PSMs', div: psmplot},
+  fwhm: {data: false, func: linePlot, div: fwhmplot, title: 'Average FWHM'},
+  precursorarea: {data: false, func: linePlotWithQuantiles, div: pepms1plot, title: 'Peptide MS1 area'},
+  prec_error: {data: false, func: linePlotWithQuantiles, div: perrorplot, title: 'PSM precursor error (ppm)'},
+  rt: {data: false, func: linePlotWithQuantiles, div: rtplot, title: 'PSM retention time (min)'},
+  score: {data: false, func: linePlotWithQuantiles, div: scoreplot, title: 'PSM scores'},
+  ionmob: {data: false, func: linePlotWithQuantiles, div: ionmobplot, title: 'PSM ion mobility'},
 }
+let plotlist = ['ident', 'psms', 'fwhm', 'precursorarea', 'prec_error', 'rt', 'score', 'ionmob'];
+export let instrument_id;
+
+
+let firstday = 0;
+let maxdays = 30;
+
+
+export async function loadData(maxdays, firstday) {
+  const url = new URL(`/dash/longqc/${instrument_id}/${firstday}/${maxdays}`, document.location);
+  const result = await getJSON(url);
+  for (let key in result.data) {
+    qcdata[key].data = result.data[key];
+  }
+  for (let [name, p] of Object.entries(qcdata)) {
+    if (p.data && p.data.length) {
+      p.func(p.div, p.data, p.title)
+    }
+  }
+  plotlist = plotlist.filter(x => qcdata[x].data).concat(plotlist.filter(x => !qcdata[x].data))
+}
+
 
 function linePlot(plotdiv, data, title) {
   ////// test this
@@ -55,7 +80,6 @@ function linePlot(plotdiv, data, title) {
       ]
     });
     plotdiv?.append(theplot);
-    console.log('done');
 //  } catch (error) {
 //    console.log('error');
 //    //errors.push(`For MS1 plots: ${error}`);
@@ -107,7 +131,6 @@ function linePlotWithQuantiles(plotdiv, data, title) {
       ]
     });
     plotdiv?.append(theplot);
-    console.log('done');
 //  } catch (error) {
 //    console.log('error');
 //    //errors.push(`For MS1 plots: ${error}`);
@@ -116,65 +139,25 @@ function linePlotWithQuantiles(plotdiv, data, title) {
 
 
 
-export function parseData() {
-  qcdata.psms.data.map(d => Object.assign(d, d.day = new Date(d.day)));
-  qcdata.psms.series = new Set(qcdata.psms.data.map(d => Object.keys(d)).flat());
-  qcdata.ident.data.map(d => Object.assign(d, d.day = new Date(d.day)));
-  qcdata.ident.series = new Set(qcdata.ident.data.map(d => Object.keys(d)).flat());
-  qcdata.fwhm.data.map(d => Object.assign(d, d.day = new Date(d.day)));
-  qcdata.precursorarea.data.map(d => Object.assign(d, d.day = new Date(d.day)));
-  qcdata.ionmob.data.map(d => Object.assign(d, d.day = new Date(d.day)));
-  qcdata.msgfscore.data.map(d => Object.assign(d, d.day = new Date(d.day)));
-  qcdata.rt.data.map(d => Object.assign(d, d.day = new Date(d.day)));
-  qcdata.prec_error.data.map(d => Object.assign(d, d.day = new Date(d.day)));
-  setTimeout(() => {
-    linePlot(identplot, qcdata.ident.data, 'Nr of IDs');
-    linePlot(psmplot, qcdata.psms.data, 'Scans and PSMs');
-    // fwhmplot.plot();
-    linePlotWithQuantiles(pepms1plot, qcdata.precursorarea.data, 'Peptide MS1 area');
-    linePlotWithQuantiles(rtplot, qcdata.rt.data, 'PSM retention time');
-
-    linePlotWithQuantiles(scoreplot, qcdata.msgfscore.data, 'PSM scores');
-    linePlotWithQuantiles(perrorplot, qcdata.prec_error.data, 'Precursor error (ppm)');
-    //ionmobplot.plot();
-  }, 0);
-
-}
-        // <LinePlot bind:this={identplot} colorscheme={schemeSet1} data={qcdata.ident.data} series={qcdata.ident.series} xkey={qcdata.ident.xkey} xlab="Date" ylab="Amount PSMs/scans" />
-
-        //<h5 class="title is-5"># PSMs</h5>
-        //<LinePlot bind:this={psmplot} colorscheme={schemeSet1} data={qcdata.psms.data} series={qcdata.psms.series} xkey={qcdata.psms.xkey} xlab="Date" ylab="Amount" />
-        //<BoxPlot bind:this={pepms1plot} colorscheme={schemeSet1} data={qcdata.precursorarea.data} xkey={qcdata.precursorarea.xkey} xlab="Date" ylab="" />
+onMount(async() => {
+  loadData(maxdays, firstday);
+})
 </script>
 
 <div>
-  <DateSlider on:updatedates={e => reloadData(e.detail.showdays, e.detail.firstday)} />
+  <DateSlider on:updatedates={e => loadData(e.detail.showdays, e.detail.firstday)} />
   <hr>
   
+  {#each plotlist as pname, index}
+  {#if index % 2}
+  {:else if qcdata[pname].data}
   <div class="tile is-ancestor">
-    <div class="tile" bind:this={identplot}>
+    <div class="tile" bind:this={qcdata[pname].div}>
     </div>
-    <div class="tile" bind:this={psmplot}>
-    </div>
+    {#if qcdata[plotlist[index+1]].data}
+    <div class="tile" bind:this={qcdata[plotlist[index+1]].div}> </div>
+    {/if}
   </div>
-  <hr>
-  <div class="tile is-ancestor">
-    <div class="tile" bind:this={pepms1plot} >
-    </div>
-    <div class="tile" bind:this={perrorplot} >
-    </div>
-  </div>
-  <hr>
-  <div class="tile is-ancestor">
-    <div class="tile" bind:this={rtplot}>
-    </div>
-    <div class="tile" bind:this={scoreplot} >
-    </div>
-  </div>
-  <hr>
-  <div class="tile is-ancestor">
-    <div class="tile">
-        <h5 class="title is-5">Ion mobility</h5>
-    </div>
-  </div>
+  {/if}
+  {/each}
 </div>

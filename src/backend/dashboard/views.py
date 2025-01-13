@@ -163,7 +163,7 @@ def get_line_data(qcruns, seriesnames):
         for lplot in qcrun.lineplotdata_set.filter(shortname__in=seriesnames)]
         long_qc.extend(datepoints)
     #return {'xkey': 'date', 'data': long_qc}
-    return {'data': long_qc}
+    return long_qc
     
 
 def get_boxplot_data(qcruns, name):
@@ -181,20 +181,20 @@ def get_boxplot_data(qcruns, name):
             }
         if not isnan(dayvals['q1']):
             data.append(dayvals)
-    return {'data': data}
+    return data
 
 
 def show_qc(request, instrument_id, daysago, maxdays):
     todate = datetime.now() - timedelta(daysago - 1)
     fromdate = todate - timedelta(maxdays)
     qcruns = models.QCData.objects.filter(rawfile__producer=instrument_id, rawfile__date__gt=fromdate, rawfile__date__lt=todate).annotate(day=Trunc('rawfile__date', 'day')).order_by('day')
-    return JsonResponse({
+    return JsonResponse({'data': {
         'ident': get_line_data(qcruns, seriesnames=['peptides', 'proteins', 'unique_peptides']),
         'psms': get_line_data(qcruns, ['scans', 'psms', 'miscleav1', 'miscleav2']),
         'fwhm': get_boxplot_data(qcruns, 'fwhms'),
         'precursorarea': get_boxplot_data(qcruns, 'peparea'),
         'prec_error': get_boxplot_data(qcruns, 'perror'),
         'rt': get_boxplot_data(qcruns, 'rt'),
-        'msgfscore': get_boxplot_data(qcruns, 'msgfscore'),
+        'score': get_boxplot_data(qcruns, 'msgfscore'),
         'ionmob': get_boxplot_data(qcruns, 'ionmob'),
-        })
+        }})
