@@ -1,5 +1,4 @@
 <script>
-import { onMount } from 'svelte';
 import { schemeSet1 } from 'd3-scale-chromatic';
 import { createEventDispatcher } from 'svelte';
 import * as Plot from '@observablehq/plot';
@@ -10,6 +9,9 @@ import { getJSON } from '../../datasets/src/funcJSON.js'
 
 const dispatch = createEventDispatcher();
 
+let firstday = 0;
+let maxdays = 30;
+
 let identplot;
 let psmplot;
 let fwhmplot;
@@ -18,6 +20,7 @@ let ionmobplot;
 let scoreplot;
 let rtplot;
 let perrorplot;
+let acquisistionmode;
 
 let qcdata = {
   ident: {data: false, func: linePlot, div: identplot, title: 'Nr of IDs'},
@@ -32,18 +35,19 @@ let qcdata = {
 let plotlist = ['ident', 'psms', 'fwhm', 'precursorarea', 'prec_error', 'rt', 'score', 'ionmob'];
 export let instrument_id;
 
-
-let firstday = 0;
-let maxdays = 30;
-
+let acqmode = 'ALL';
 
 export async function loadData(maxdays, firstday) {
-  const url = new URL(`/dash/longqc/${instrument_id}/${firstday}/${maxdays}`, document.location);
+  const url = new URL(`/dash/longqc/${instrument_id}/${acqmode}/${firstday}/${maxdays}`, document.location);
   const result = await getJSON(url);
+  acqmode = result.runtype;
   for (let key in result.data) {
     qcdata[key].data = result.data[key];
   }
   for (let [name, p] of Object.entries(qcdata)) {
+    if (p.div) {
+      p.div.replaceChildren();
+    }
     if (p.data && p.data.length) {
       p.func(p.div, p.data, p.title)
     }
@@ -52,9 +56,14 @@ export async function loadData(maxdays, firstday) {
 }
 
 
+function toggleAcqMode() {
+  acqmode = acqmode === 'DIA' ? 'DDA': 'DIA';
+  firstday = 0;
+  maxdays = 30;
+  loadData(firstday, maxdays);
+}
+
 function linePlot(plotdiv, data, title) {
-  ////// test this
-  plotdiv.replaceChildren();
 //  try {
     let theplot;
     theplot = Plot.plot({
@@ -88,7 +97,6 @@ function linePlot(plotdiv, data, title) {
 
 
 function linePlotWithQuantiles(plotdiv, data, title) {
-  plotdiv.replaceChildren();
 //  try {
     let theplot;
     theplot = Plot.plot({
@@ -137,15 +145,28 @@ function linePlotWithQuantiles(plotdiv, data, title) {
 //  }
 }
 
-
-
-onMount(async() => {
-  loadData(maxdays, firstday);
-})
 </script>
 
 <div>
-  <DateSlider on:updatedates={e => loadData(e.detail.showdays, e.detail.firstday)} />
+  <DateSlider bind:daysago={firstday} bind:maxdays={maxdays} on:updatedates={e => loadData(e.detail.showdays, e.detail.firstday)} />
+  <div class="tabs is-toggle is-centered is-small">
+    <ul>
+      <li class={acqmode === 'DIA' ? 'is-active' : ''}>
+        {#if acqmode === 'DDA'}
+        <a on:click={toggleAcqMode}><span>DIA</span></a>
+        {:else}
+        <a><span>DIA</span></a>
+        {/if}
+      </li>
+      <li class={acqmode === 'DDA' ? 'is-active' : '' }>
+        {#if acqmode === 'DIA'}
+        <a on:click={toggleAcqMode}><span>DDA</span></a>
+        {:else}
+        <a><span>DDA</span></a>
+        {/if}
+      </li>
+    </ul>
+  </div>
   <hr>
   
   {#each plotlist as pname, index}

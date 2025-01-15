@@ -28,7 +28,7 @@ let proddata = {
 };
 
 async function showInst(iid) {
-  await instrumenttabs[iid].loadData(firstday, maxdays);
+  await instrumenttabs[iid].loadData(maxdays, firstday);
   tabshow = `instr_${iid}`;
 }
 
@@ -37,6 +37,8 @@ function showProd() {
 }
 
 async function fetchProductionData(maxdays, firstday) {
+  // maxdays and firstday are explicit arguments, because the binding
+  // to them in the dateslider does not update fast enough
   const resp = await fetch(`/dash/proddata/${firstday}/${maxdays}`);
   proddata = await resp.json();
   // setTimeout since after fetching, the plot components havent updated its props
@@ -86,7 +88,8 @@ onMount(async() => {
     </div>
     {/each}
     <div class={`instrplot ${tabshow === `prod` ? 'active' : 'inactive'}`} >
-      <DateSlider on:updatedates={e => fetchProductionData(e.detail.showdays, e.detail.firstday)} />
+      <DateSlider bind:firstday={firstday} maxdays={maxdays}
+          on:updatedates={e => fetchProductionData(e.detail.showdays, e.detail.firstday)} />
       <hr>
       <div class="tile is-ancestor">
         <div class="tile">

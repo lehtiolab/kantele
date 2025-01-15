@@ -2,14 +2,15 @@
 import { createEventDispatcher } from 'svelte';
 const dispatch = createEventDispatcher();
 
+export let daysago = 0;
+export let maxdays = 30;
+
 const now = new Date(Date.now());
-let daysago = 0;
 let todate = new Date(now);
 todate.setDate(todate.getDate() - daysago);
 let displaydate = todate.toISOString().slice(0, 10);
-let newdate;
+let newdate = new Date(now);
 $: {
-  newdate = new Date(now);
   newdate.setDate(newdate.getDate() - daysago);
   if (newdate.getTime() !== todate.getTime()) {
     todate = newdate;
@@ -19,7 +20,6 @@ $: {
 let firstday = 0;
 $: firstday = Math.round((now.getTime() - todate.getTime()) / (1000 * 60 * 60 * 24));
 
-let maxdays = 30;
 
 function changeDateRange() {
   dispatch('updatedates', {showdays: maxdays, firstday: firstday});

@@ -430,7 +430,8 @@ def run_nextflow_longitude_qc(self, run, params, stagefiles, profiles, nf_versio
     reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:storelongqc'))
     postdata = {'client_id': settings.APIKEY, 'rf_id': run['rf_id'], 'plots': {},
                 'analysis_id': run['analysis_id'], 'task': self.request.id,
-                'instrument': run['instrument'], 'filename': run['filename']}
+                'instrument': run['instrument'], 'filename': run['filename'],
+                'acqtype': run['acqtype']}
     rundir = create_runname_dir(run)
     params, gitwfdir, no_stagedir = prepare_nextflow_run(run, self.request.id, rundir, stagefiles, [], params)
     # QC has no stagedir, we put the raw in rundir to stage

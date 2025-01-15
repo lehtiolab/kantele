@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 from analysis.models import AnalysisError
 from rawstatus.models import Producer, RawFile
-from datasets.models import Project
+from datasets.models import Project, AcquisistionMode
 from dashboard import models
 from kantele import settings
 
@@ -25,7 +25,7 @@ def store_longitudinal_qc(data):
     '''Update or create new QC data'''
     qcrun, _ = models.QCData.objects.update_or_create(rawfile_id=data['rf_id'],
             defaults={'analysis_id': data['analysis_id'], 'is_ok': data['state'] == 'ok',
-                'message': data['msg']})
+                'runtype': AcquisistionMode[data['acqtype']], 'message': data['msg']})
     # TODO migrate shortnames so we are in sync with QC pipeline
     plotnames = {
             'nrpsms': 'psms',
@@ -184,11 +184,18 @@ def get_boxplot_data(qcruns, name):
     return data
 
 
-def show_qc(request, instrument_id, daysago, maxdays):
+def show_qc(request, acqmode, instrument_id, daysago, maxdays):
     todate = datetime.now() - timedelta(daysago - 1)
     fromdate = todate - timedelta(maxdays)
     qcruns = models.QCData.objects.filter(rawfile__producer=instrument_id, rawfile__date__gt=fromdate, rawfile__date__lt=todate).annotate(day=Trunc('rawfile__date', 'day')).order_by('day')
-    return JsonResponse({'data': {
+    if qcruns.count() and acqmode == 'ALL':
+        runtype_q = qcruns.last().runtype
+    elif acqmode != 'ALL':
+        runtype_q = AcquisistionMode[acqmode]
+    else:
+        runtype_q = 1
+    qcruns = qcruns.filter(runtype=runtype_q)
+    return JsonResponse({'runtype': AcquisistionMode(runtype_q).label, 'data': {
         'ident': get_line_data(qcruns, seriesnames=['peptides', 'proteins', 'unique_peptides']),
         'psms': get_line_data(qcruns, ['scans', 'psms', 'miscleav1', 'miscleav2']),
         'fwhm': get_boxplot_data(qcruns, 'fwhms'),

@@ -471,8 +471,10 @@ def classify_msrawfile(self, token, fnid, ftypename, servershare, path, fname):
 
     # Parse what was found
     # FIXME invalid dataset ID needs logging!
-    if val == 'QC':
-        is_qc, dset_id = True, False
+    if val == 'DIAQC':
+        is_qc, dset_id = 'DIA', False
+    elif val == 'DDAQC':
+        is_qc, dset_id = 'DDA', False
     elif val:
         is_qc = False
         try:

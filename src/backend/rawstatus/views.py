@@ -459,7 +459,7 @@ def classified_rawfile_treatment(request):
     if tasks.count() != 1:
         return HttpResponseForbidden()
     try:
-        token, fnid, is_qc, dsid = data['token'], data['fnid'], data['qc'], data['dset_id']
+        token, fnid, is_qc_acqtype, dsid = data['token'], data['fnid'], data['qc'], data['dset_id']
         mstime = data['mstime']
     except KeyError as error:
         return JsonResponse({'error': 'Bad request'}, status=400)
@@ -473,7 +473,7 @@ def classified_rawfile_treatment(request):
     if sfn.rawfile.claimed:
         # This file has already been classified or otherwise picked up by a fast user
         already_classified_or_error = True
-    elif is_qc:
+    elif is_qc_acqtype:
         sfn.rawfile.claimed = True
         sfn.rawfile.save()
         create_job('move_single_file', sf_id=sfn.pk,
@@ -484,7 +484,7 @@ def classified_rawfile_treatment(request):
             user_op = staff_ops.first()
         else:
             user_op = dsmodels.Operator.objects.first()
-        run_singlefile_qc(sfn.rawfile, sfn, user_op)
+        run_singlefile_qc(sfn.rawfile, sfn, user_op, is_qc_acqtype)
     elif dsid:
         # Make sure dataset exists
         dsq = dsmodels.Dataset.objects.filter(pk=dsid)
@@ -724,12 +724,14 @@ def query_all_qc_files():
             path__startswith=settings.QC_STORAGE_DIR)
 
 
-def run_singlefile_qc(rawfile, storedfile, user_op):
+def run_singlefile_qc(rawfile, storedfile, user_op, acqtype):
     """This method is only run for detecting new incoming QC files"""
-    params = ['--instrument', rawfile.producer.msinstrument.instrumenttype.name]
+    params = ['--instrument', rawfile.producer.msinstrument.instrumenttype.name,
+            f'--{acqtype.lower()}']
     analysis = Analysis.objects.create(user_id=user_op.user_id,
             name=f'{rawfile.producer.name}_{rawfile.name}_{rawfile.date}')
-    create_job('run_longit_qc_workflow', sf_id=storedfile.id, analysis_id=analysis.id, params=params)
+    create_job('run_longit_qc_workflow', sf_id=storedfile.id, analysis_id=analysis.id,
+            params=params, acqtype=acqtype.upper())
 
 
 def get_file_owners(sfile):
