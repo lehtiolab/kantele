@@ -22,7 +22,6 @@ class LineDataTypes(models.IntegerChoices):
     MISCLEAV1 = 6, 'Nr of PSMs with 1 missed cleavage'
     MISCLEAV2 = 7, 'Nr of PSMs with 2 missed cleavage'
     PEAKS_FWHM = 8, 'Amount scans FWHM'
-    MATCHED_PEAKS = 9, 'Amount MS2 peaks matched'
 
 
 class QuartileDataTypes(models.IntegerChoices):
@@ -33,6 +32,7 @@ class QuartileDataTypes(models.IntegerChoices):
     SCORE = 5, 'Score'
     IONMOB = 6, 'Ion mobility'
     IONINJ = 7, 'Ion injection time(ms)'
+    MATCHED_PEAKS = 8, 'Amount MS2 peaks matched'
 
 
 class LineplotData(models.Model):
@@ -44,8 +44,6 @@ class LineplotData(models.Model):
 class BoxplotData(models.Model):
     datatype = models.IntegerField(choices=QuartileDataTypes.choices)
     qcrun = models.ForeignKey(QCData, on_delete=models.CASCADE)
-    upper = models.FloatField()
-    lower = models.FloatField()
     q1 = models.FloatField()
     q2 = models.FloatField()
     q3 = models.FloatField()

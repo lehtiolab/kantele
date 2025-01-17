@@ -110,8 +110,6 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
                'nxf_wf_fn': nfwf.filename,
                'repo': nfwf.nfworkflow.repo,
                'runname': f'{analysis.id}_longqc_{raw.rawfile.producer.name}_rawfile{raw.rawfile_id}_{timestamp}',
-               'filename': raw.filename,
-               'instrument': raw.rawfile.producer.name,
                'acqtype': kwargs['acqtype'],
                }
         self.run_tasks.append(((run, params, stagefiles, ','.join(nfwf.profiles), nfwf.nfversion), {}))

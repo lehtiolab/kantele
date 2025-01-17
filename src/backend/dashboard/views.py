@@ -2,6 +2,7 @@ from django.shortcuts import render
 from django.http import JsonResponse
 from django.db.models import Sum, Max, F
 from django.db.models.functions import Trunc, Greatest
+from django.views.decorators.http import require_GET
 
 from math import isnan
 
@@ -16,6 +17,7 @@ from dashboard.models import QuartileDataTypes as QDT
 from kantele import settings
 
 
+@require_GET
 def dashboard(request):
     instruments = Producer.objects.filter(msinstrument__active=True)
     return render(request, 'dashboard/dashboard.html',
@@ -25,45 +27,52 @@ def dashboard(request):
 
 def store_longitudinal_qc(data):
     '''Update or create new QC data'''
+    try:
+        data['rf_id'], data['analysis_id'], data['state'], data['msg'], data['plots']
+        acqtype = data['acqtype']
+    except KeyError:
+        return {'error': True, 'msg': 'Missing parameter in request when storing QC data'}
+    try:
+        acqtype = AcquisistionMode[acqtype]
+    except KeyError:
+        return {'error': True, 'msg': 'Incorrect acquisition type in request storing QC data'}
+
     qcrun, _ = dm.QCData.objects.update_or_create(rawfile_id=data['rf_id'],
             defaults={'analysis_id': data['analysis_id'], 'is_ok': data['state'] == 'ok',
-                'runtype': AcquisistionMode[data['acqtype']], 'message': data['msg']})
-    # TODO migrate shortnames so we are in sync with QC pipeline
-    plotnames = {
-            'nrpsms': 'psms',
-            'nrscans': 'scans',
-            'nrpeptides': 'peptides',
-            'nr_unique_peptides': 'unique_peptides',
-            'nrproteins': 'proteins',
-            'precursor_errors': 'perror',
-            'sagescores': 'msgfscore',
-            'retention_times': 'rt',
-            'peptide_areas': 'peparea',
-            'ionmobilities': 'ionmob',
-            'fwhms': 'fwhm',
-            'ioninj': 'ioninj',
-            'peaks_fwhm': 'peaks_fwhm',
-            'matched_peaks': 'matched_peaks',
+                'runtype': acqtype, 'message': data['msg']})
+    dtypes = {
+            'nrpsms': LDT.NRPSMS,
+            'nrscans': LDT.NRSCANS,
+            'nrpeptides': LDT.NRPEPTIDES,
+            'nr_unique_peptides': LDT.NRPEPTIDES_UNI,
+            'nrproteins': LDT.NRPROTEINS,
+            'precursor_errors': QDT.MASSERROR,
+            'scores': QDT.SCORE,
+            'retention_times': QDT.RT,
+            'peptide_areas': QDT.PEPMS1AREA,
+            'ionmobilities': QDT.IONMOB,
+            'fwhms': QDT.FWHM,
+            'ioninj': QDT.IONINJ,
+            'peaks_fwhm': LDT.PEAKS_FWHM,
+            'matchedpeaks': QDT.MATCHED_PEAKS,
+            'miscleav1': LDT.MISCLEAV1,
+            'miscleav2': LDT.MISCLEAV2,
             }
     for qcname, qcdata in data['plots'].items():
-        try:
-            name = plotnames[qcname]
-        except KeyError:
-            name = qcname
-        if type(qcdata) == dict and 'q1' in qcdata:
-            qcrun.boxplotdata_set.update_or_create(shortname=name, defaults={
-                'upper': qcdata['upper'],
-                'lower': qcdata['lower'],
+        if qcname == 'missed_cleavages':
+            for num_mc, num_psm in qcdata.items():
+                if int(num_mc) > 0:
+                    qcrun.lineplotdata_set.update_or_create(datatype=dtypes[f'miscleav{num_mc}'],
+                            defaults={'value': num_psm})
+        elif type(qcdata) == dict:
+            qcrun.boxplotdata_set.update_or_create(datatype=dtypes[qcname], defaults={
                 'q1': qcdata['q1'],
                 'q2': qcdata['q2'],
                 'q3': qcdata['q3'],
                 })
-        elif name == 'missed_cleavages':
-            for num_mc, num_psm in qcdata.items():
-                qcrun.lineplotdata_set.update_or_create(shortname=f'miscleav{num_mc}', defaults={
-                    'value': num_psm})
         else:
-            qcrun.lineplotdata_set.update_or_create(shortname=name, defaults={'value': qcdata})
+            qcrun.lineplotdata_set.update_or_create(datatype=dtypes[qcname], defaults={'value': qcdata})
+    return {'error': False}
 
 
 def get_file_production(request, daysago, maxdays):
@@ -187,6 +196,7 @@ def get_boxplot_data(qcruns, dtype):
     return data
 
 
+@require_GET
 def show_qc(request, acqmode, instrument_id, daysago, maxdays):
     todate = datetime.now() - timedelta(daysago - 1)
     fromdate = todate - timedelta(maxdays)
@@ -210,9 +220,8 @@ def show_qc(request, acqmode, instrument_id, daysago, maxdays):
         'ident': get_line_data(qcruns, dtypes=[LDT.NRPEPTIDES,
             LDT.NRPROTEINS, LDT.NRPEPTIDES_UNI]),
         'psms': psmdata, 'miscleav': miscleavdata, 'mcratio': mcratio,
+        'PEAKS_FWHM': get_line_data(qcruns, dtypes=[LDT.PEAKS_FWHM]),
         }}
     for key, name in zip(QDT.values, QDT.names):
         outjson['data'][name] = get_boxplot_data(qcruns, key)
-    for name in ['PEAKS_FWHM', 'MATCHED_PEAKS']:
-        outjson['data'][name] = get_line_data(qcruns, dtypes=[LDT[name]])
     return JsonResponse(outjson)
