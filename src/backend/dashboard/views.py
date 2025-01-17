@@ -1,6 +1,6 @@
 from django.shortcuts import render
 from django.http import JsonResponse
-from django.db.models import Sum, Max
+from django.db.models import Sum, Max, F
 from django.db.models.functions import Trunc, Greatest
 
 from math import isnan
@@ -10,7 +10,9 @@ from datetime import datetime, timedelta
 from analysis.models import AnalysisError
 from rawstatus.models import Producer, RawFile
 from datasets.models import Project, AcquisistionMode
-from dashboard import models
+from dashboard import models as dm
+from dashboard.models import LineDataTypes as LDT
+from dashboard.models import QuartileDataTypes as QDT
 from kantele import settings
 
 
@@ -23,7 +25,7 @@ def dashboard(request):
 
 def store_longitudinal_qc(data):
     '''Update or create new QC data'''
-    qcrun, _ = models.QCData.objects.update_or_create(rawfile_id=data['rf_id'],
+    qcrun, _ = dm.QCData.objects.update_or_create(rawfile_id=data['rf_id'],
             defaults={'analysis_id': data['analysis_id'], 'is_ok': data['state'] == 'ok',
                 'runtype': AcquisistionMode[data['acqtype']], 'message': data['msg']})
     # TODO migrate shortnames so we are in sync with QC pipeline
@@ -38,6 +40,10 @@ def store_longitudinal_qc(data):
             'retention_times': 'rt',
             'peptide_areas': 'peparea',
             'ionmobilities': 'ionmob',
+            'fwhms': 'fwhm',
+            'ioninj': 'ioninj',
+            'peaks_fwhm': 'peaks_fwhm',
+            'matched_peaks': 'matched_peaks',
             }
     for qcname, qcdata in data['plots'].items():
         try:
@@ -155,26 +161,23 @@ def get_file_production(request, daysago, maxdays):
         })
 
 
-def get_line_data(qcruns, seriesnames):
+def get_line_data(qcruns, dtypes):
     long_qc = []
     for qcrun in qcruns:
-        datepoints = [{'name': lplot.shortname, 'value': lplot.value,
-        'date': datetime.strftime(qcrun.day, '%Y-%m-%d')}
-        for lplot in qcrun.lineplotdata_set.filter(shortname__in=seriesnames)]
+        datepoints = [{'key': lplot.datatype, 'value': lplot.value,
+            'date': datetime.strftime(qcrun.date, '%Y-%m-%d %H:%M')}
+        for lplot in qcrun.lineplotdata_set.filter(datatype__in=dtypes)]
         long_qc.extend(datepoints)
-    #return {'xkey': 'date', 'data': long_qc}
     return long_qc
     
 
-def get_boxplot_data(qcruns, name):
+def get_boxplot_data(qcruns, dtype):
     data = []
-    for qcrun in qcruns.filter(boxplotdata__shortname=name):
-        bplot = qcrun.boxplotdata_set.get(shortname=name)
+    for qcrun in qcruns.filter(boxplotdata__datatype=dtype):
+        bplot = qcrun.boxplotdata_set.get(datatype=dtype)
         dayvals = {
-                'name': bplot.shortname,
-                'date': datetime.strftime(qcrun.day, '%Y-%m-%d'),
-                #'upper': bplot.upper,
-                #'lower': bplot.lower,
+                'key': dtype,
+                'date': datetime.strftime(qcrun.date, '%Y-%m-%d %H:%M'),
                 'q1': bplot.q1,
                 'q2': bplot.q2,
                 'q3': bplot.q3,
@@ -187,7 +190,7 @@ def get_boxplot_data(qcruns, name):
 def show_qc(request, acqmode, instrument_id, daysago, maxdays):
     todate = datetime.now() - timedelta(daysago - 1)
     fromdate = todate - timedelta(maxdays)
-    qcruns = models.QCData.objects.filter(rawfile__producer=instrument_id, rawfile__date__gt=fromdate, rawfile__date__lt=todate).annotate(day=Trunc('rawfile__date', 'day')).order_by('day')
+    qcruns = dm.QCData.objects.filter(rawfile__producer=instrument_id, rawfile__date__gt=fromdate, rawfile__date__lt=todate).annotate(date=F('rawfile__date')).order_by('date')
     if qcruns.count() and acqmode == 'ALL':
         runtype_q = qcruns.last().runtype
     elif acqmode != 'ALL':
@@ -195,13 +198,21 @@ def show_qc(request, acqmode, instrument_id, daysago, maxdays):
     else:
         runtype_q = 1
     qcruns = qcruns.filter(runtype=runtype_q)
-    return JsonResponse({'runtype': AcquisistionMode(runtype_q).label, 'data': {
-        'ident': get_line_data(qcruns, seriesnames=['peptides', 'proteins', 'unique_peptides']),
-        'psms': get_line_data(qcruns, ['scans', 'psms', 'miscleav1', 'miscleav2']),
-        'fwhm': get_boxplot_data(qcruns, 'fwhms'),
-        'precursorarea': get_boxplot_data(qcruns, 'peparea'),
-        'prec_error': get_boxplot_data(qcruns, 'perror'),
-        'rt': get_boxplot_data(qcruns, 'rt'),
-        'score': get_boxplot_data(qcruns, 'msgfscore'),
-        'ionmob': get_boxplot_data(qcruns, 'ionmob'),
-        }})
+    psmdata = get_line_data(qcruns, dtypes=[LDT.NRSCANS, LDT.NRPSMS])
+    miscleavdata = get_line_data(qcruns, dtypes=[LDT.MISCLEAV1, LDT.MISCLEAV2])
+
+    totalpsms_date = {x['date']: x['value'] for x in psmdata if x['key'] == LDT.NRPSMS}
+    mcratio = [{**x, 'value': x['value'] / totalpsms_date[x['date']]} for x in miscleavdata if x['key'] == LDT.MISCLEAV1]
+    outjson = {'runtype': AcquisistionMode(runtype_q).label, 'seriesmap': {
+        'line': {k: label for k, label in LDT.choices},
+        'box': {k: label for k, label in QDT.choices},
+        }, 'data': {
+        'ident': get_line_data(qcruns, dtypes=[LDT.NRPEPTIDES,
+            LDT.NRPROTEINS, LDT.NRPEPTIDES_UNI]),
+        'psms': psmdata, 'miscleav': miscleavdata, 'mcratio': mcratio,
+        }}
+    for key, name in zip(QDT.values, QDT.names):
+        outjson['data'][name] = get_boxplot_data(qcruns, key)
+    for name in ['PEAKS_FWHM', 'MATCHED_PEAKS']:
+        outjson['data'][name] = get_line_data(qcruns, dtypes=[LDT[name]])
+    return JsonResponse(outjson)

@@ -20,19 +20,33 @@ let ionmobplot;
 let scoreplot;
 let rtplot;
 let perrorplot;
+let ioninfplot;
+let peaksfwhmplot;
+let matchedpeaksplot;
+let miscleavplot;
+let mcratioplot;
+
 let acquisistionmode;
 
+let seriesmap = {line: {}, box: {}};
+
 let qcdata = {
-  ident: {data: false, func: linePlot, div: identplot, title: 'Nr of IDs'},
-  psms: {data: false, func: linePlot, title: 'Scans and PSMs', div: psmplot},
-  fwhm: {data: false, func: linePlot, div: fwhmplot, title: 'Average FWHM'},
-  precursorarea: {data: false, func: linePlotWithQuantiles, div: pepms1plot, title: 'Peptide MS1 area'},
-  prec_error: {data: false, func: linePlotWithQuantiles, div: perrorplot, title: 'PSM precursor error (ppm)'},
-  rt: {data: false, func: linePlotWithQuantiles, div: rtplot, title: 'PSM retention time (min)'},
-  score: {data: false, func: linePlotWithQuantiles, div: scoreplot, title: 'PSM scores'},
-  ionmob: {data: false, func: linePlotWithQuantiles, div: ionmobplot, title: 'PSM ion mobility'},
+  ident: {data: false, func: linePlot, div: identplot, title: 'Nr of IDs', ylab: ''},
+  psms: {data: false, func: linePlot, title: 'Scans and PSMs', div: psmplot, ylab: ''},
+  miscleav: {data: false, func: linePlot, title: 'Missed cleavages', div: miscleavplot, ylab: '#PSMs', denom: 'psms'},
+  mcratio: {data: false, func: linePlot, title: 'Missed cleavages ratio', div: mcratioplot, ylab: '#PSMs w mc / total PSMs'},
+  PEAKS_FWHM: {data: false, func: linePlot, title: 'peaks/FWHM', div: peaksfwhmplot, ylab: 'Avg # peaks'},
+  MATCHED_PEAKS: {data: false, func: linePlot, title: 'MS2 peaks matched', div: matchedpeaksplot, ylab: '#peaks / MS2'},
+  FWHM: {data: false, func: linePlotWithQuantiles, div: fwhmplot, title: 'FWHM', ylab: 'min'},
+  PEPMS1AREA: {data: false, func: linePlotWithQuantiles, div: pepms1plot, title: 'Peptide MS1 area', ylab: ''},
+  MASSERROR: {data: false, func: linePlotWithQuantiles, div: perrorplot, title: 'PSM precursor error', ylab: 'ppm'},
+  RT: {data: false, func: linePlotWithQuantiles, div: rtplot, title: 'PSM retention time', ylab: 'min'},
+  SCORE: {data: false, func: linePlotWithQuantiles, div: scoreplot, title: 'PSM scores', ylab: 'Sage score'},
+  IONMOB: {data: false, func: linePlotWithQuantiles, div: ionmobplot, title: 'PSM ion mobility', ylab: 'eV'},
+  IONINJ: {data: false, func: linePlotWithQuantiles, div: ioninfplot, title: 'Ion injection time', ylab: 'min'},
 }
-let plotlist = ['ident', 'psms', 'fwhm', 'precursorarea', 'prec_error', 'rt', 'score', 'ionmob'];
+let plotlist = ['ident', 'psms', 'miscleav', 'mcratio', 'MASSERROR', 'RT', 'SCORE', 'FWHM', 'PEPMS1AREA', 
+  'PEAKS_FWHM', 'MATCHED_PEAKS', 'IONMOB', 'IONINJ'];
 export let instrument_id;
 
 let acqmode = 'ALL';
@@ -41,15 +55,18 @@ export async function loadData(maxdays, firstday) {
   const url = new URL(`/dash/longqc/${instrument_id}/${acqmode}/${firstday}/${maxdays}`, document.location);
   const result = await getJSON(url);
   acqmode = result.runtype;
+  seriesmap = result.seriesmap;
   for (let key in result.data) {
+    console.log(key);
     qcdata[key].data = result.data[key];
+    qcdata[key].data.map(d => Object.assign(d, d.date = new Date(d.date)));
   }
   for (let [name, p] of Object.entries(qcdata)) {
     if (p.div) {
       p.div.replaceChildren();
     }
     if (p.data && p.data.length) {
-      p.func(p.div, p.data, p.title)
+      p.func(p.div, p.data, p.title, p.ylab)
     }
   }
   plotlist = plotlist.filter(x => qcdata[x].data).concat(plotlist.filter(x => !qcdata[x].data))
@@ -63,79 +80,75 @@ function toggleAcqMode() {
   loadData(firstday, maxdays);
 }
 
-function linePlot(plotdiv, data, title) {
+function linePlot(plotdiv, data, title, ylabel, denom) {
 //  try {
     let theplot;
     theplot = Plot.plot({
+      color: {legend: true},
       title: title,
       width: plotdiv.offsetWidth - 20,
-      //x: {axis: null},
-      y: {tickFormat: 's', type: 'log', grid: true, }, // scientific ticks
-      marks: [Plot.line(data, {
-        x: d => new Date(d.date),
+      //y: {tickFormat: 's', type: 'log', grid: true, }, // scientific ticks
+      marks: [
+        Plot.axisY({label: ylabel}),
+        Plot.line(data, {
+        x: 'date',
         y: 'value',
-        stroke: 'name',
-        //y: (d) => `${d.mod}_${d.cname}`,
-        //fx: (d) => fetched.experiments[d.exp],
-        //fill: 'seq',
+        stroke: (d) => seriesmap.line[d.key],
       }),
-     //   Plot.tip(fetched.samples, Plot.pointer({
-     //     x: (d) => `${d.mod}_${d.cname}`,
-     //     fx: (d) => fetched.experiments[d.exp],
-     //     maxRadius: 200,
-     //     title: (d) => [d.seq, '', formatModseq(d, fetched.modifications),
-     //       fetched.experiments[d.exp],
-     //       `${fetched.conditions[d.ctype]}: ${d.cname}`, `MS1: ${d.ms1}`, ].join('\n')}))
-      ]
+        Plot.tip(data, Plot.pointerX({
+          x: 'date',
+          y: 'value',
+          title: (d) => `${d.date}\n${seriesmap.line[d.key]}: ${d.value}`,
+        })),
+      ],
     });
     plotdiv?.append(theplot);
 //  } catch (error) {
-//    console.log('error');
 //    //errors.push(`For MS1 plots: ${error}`);
 //  }
 }
 
 
-function linePlotWithQuantiles(plotdiv, data, title) {
+function linePlotWithQuantiles(plotdiv, data, title, ylabel) {
 //  try {
     let theplot;
     theplot = Plot.plot({
       title: title,
+      subtitle: '0.25/0.75 quantile range',
       width: plotdiv.offsetWidth - 20,
       //x: {axis: null},
-      y: {tickFormat: 's', type: 'log', grid: true, }, // scientific ticks
+      //y: {tickFormat: 's', type: 'log', grid: true, }, // scientific ticks
       marks: [
+        Plot.axisY({label: ylabel, tickFormat: (d) => (d > 1e6 ? `${d/1e6}M` : d)}),
         Plot.line(data, {
-          x: d => new Date(d.date),
+          x: 'date',
           y: 'q2',
-          stroke: 'name',
+          stroke: 'key',
         }),
         Plot.line(data, {
-          x: d => new Date(d.date),
+          x: 'date',
           y: 'q1',
-          stroke: 'name',
+          stroke: 'key',
           strokeOpacity: 0.5,
         }),
         Plot.line(data, {
-          x: d => new Date(d.date),
+          x: 'date',
           y: 'q3',
-          stroke: 'name',
+          stroke: 'key',
           strokeOpacity: 0.5,
         }),
         Plot.areaY(data, {
-          x: d => new Date(d.date),
+          x: 'date',
           y1: 'q1',
           y2: 'q3',
-          fill: 'name',
+          fill: 'key',
           opacity: 0.2,
-        })
-     //   Plot.tip(fetched.samples, Plot.pointer({
-     //     x: (d) => `${d.mod}_${d.cname}`,
-     //     fx: (d) => fetched.experiments[d.exp],
-     //     maxRadius: 200,
-     //     title: (d) => [d.seq, '', formatModseq(d, fetched.modifications),
-     //       fetched.experiments[d.exp],
-     //       `${fetched.conditions[d.ctype]}: ${d.cname}`, `MS1: ${d.ms1}`, ].join('\n')}))
+        }),
+        Plot.tip(data, Plot.pointerX({
+          x: 'date',
+          y: 'q2',
+          title: (d) => `${d.date}\n${seriesmap.box[d.key]}: ${d.q2}`,
+        })),
       ]
     });
     plotdiv?.append(theplot);
@@ -175,10 +188,11 @@ function linePlotWithQuantiles(plotdiv, data, title) {
   <div class="tile is-ancestor">
     <div class="tile" bind:this={qcdata[pname].div}>
     </div>
-    {#if qcdata[plotlist[index+1]].data}
-    <div class="tile" bind:this={qcdata[plotlist[index+1]].div}> </div>
+    {#if plotlist.length - 1 > index && qcdata[plotlist[index+1]].data}
+    <div class="tile"  bind:this={qcdata[plotlist[index+1]].div}> </div>
     {/if}
   </div>
+  <hr>
   {/if}
   {/each}
 </div>
