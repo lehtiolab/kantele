@@ -6,8 +6,8 @@ from datasets import models as dm
 
 
 class QCData(models.Model):
-    rawfile = models.ForeignKey(rm.RawFile, on_delete=models.CASCADE)
-    analysis = models.ForeignKey(am.Analysis, on_delete=models.CASCADE)
+    rawfile = models.OneToOneField(rm.RawFile, on_delete=models.CASCADE)
+    analysis = models.OneToOneField(am.Analysis, on_delete=models.CASCADE)
     is_ok = models.BooleanField(default=True)
     message = models.TextField()
     runtype = models.IntegerField(choices=dm.AcquisistionMode.choices)

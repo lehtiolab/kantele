@@ -37,7 +37,7 @@ def rerun_singleqc(request):
         sfid = int(data['sfid'])
     except (KeyError, ValueError):
         return JsonResponse({'state': 'error', 'msg': 'Something went wrong, contact admin'}, status=400)
-    sfs = query_all_qc_files().filter(pk=sfid).select_related(
+    sfs = query_all_qc_files().filter(pk=sfid).select_related('rawfile__qcdata',
             'rawfile__producer__msinstrument__instrumenttype')
     if sfs.count() == 1:
         # Get user for analysis (first Operator which is staff)
@@ -47,11 +47,17 @@ def rerun_singleqc(request):
         else:
             user_op = dm.Operator.objects.first()
         sf = sfs.get()
-        # retrieve if needed
-        if sf.deleted:
+        if not hasattr(sf.rawfile, 'qcdata'):
+            msg = (f'File {sf.filename} is annotated as QC but has not been run previously and has '
+            'no acquisition mode stored. Please queue manually')
+            state = 'error'
+
+        elif sf.deleted:
+            # retrieve if needed
             if hasattr(sf, 'pdcbackedupfile') and sf.pdcbackedupfile.success and not sf.pdcbackedupfile.deleted:
                 create_job('restore_from_pdc_archive', sf_id=sf.pk)
-                run_singlefile_qc(sf.rawfile, sf, user_op)
+                run_singlefile_qc(sf.rawfile, sf, user_op,
+                        dm.AcquisistionMode(sf.rawfile.qcdata.runtype).name)
                 msg = f'Queued {sf.filename} QC raw for retrieval from archive and rerun'
                 state = 'ok'
             else:
@@ -59,7 +65,8 @@ def rerun_singleqc(request):
                         'contact admin')
                 state = 'error'
         else:
-            run_singlefile_qc(sf.rawfile, sf, user_op)
+            run_singlefile_qc(sf.rawfile, sf, user_op,
+                    dm.AcquisistionMode(sf.rawfile.qcdata.runtype).name)
             msg = f'Queued {sf.filename} QC raw for rerun'
             state = 'ok'
     else:
@@ -89,8 +96,9 @@ def rerun_qcs(request):
         return JsonResponse({'state': 'error', 'msg': 'Something went wrong, contact admin'}, status=400)
     lastdate = (timezone.now() - timezone.timedelta(days_back)).date()
     # Filter QC files (in path, no dataset, claimed, date)
-    sfs = query_all_qc_files().filter(rawfile__producer__pk__in=instruments, rawfile__date__gte=lastdate
-            ).select_related('rawfile__producer__msinstrument__instrumenttype')
+    sfs = query_all_qc_files().filter(rawfile__producer__pk__in=instruments,
+            rawfile__date__gte=lastdate).select_related('rawfile__qcdata',
+                'rawfile__producer__msinstrument__instrumenttype')
     latest_qcwf = am.NextflowWfVersionParamset.objects.filter(
             userworkflow__wftype=am.UserWorkflow.WFTypeChoices.QC).last()
     qcjobs = [x.kwargs['sf_id'] for x in jm.Job.objects.filter(funcname='run_longit_qc_workflow',
@@ -107,6 +115,10 @@ def rerun_qcs(request):
             user_op = dm.Operator.objects.first()
         if not ignore_dups:
             sfs = sfs.exclude(pk__in=qcjobs).exclude(duprun_q)
+        if nodata_nr := sfs.filter(rawfile__qcdata__isnull=True).count():
+            msg = (f'Ignored {nodata_nr} files which were labeled as QC but had no run data, '
+            'and thus no acquisition mode stored - please find these manually')
+        sfs = sfs.filter(rawfile__qcdata__isnull=False)
         deleted_files = sfs.filter(deleted=True)
         sfs = sfs.filter(deleted=False)
         retr_msg = ''
@@ -116,9 +128,10 @@ def rerun_qcs(request):
                 create_job('restore_from_pdc_archive', sf_id=sf.pk)
             sfs = sfs.union(retrieve_files)
             retr_msg = f' - Queued {retrieve_files.count()} QC raw files for retrieval from archive'
-        msg = f'Queued {sfs.count()} QC raw files for running{retr_msg}'
+        msg = f'Queued {sfs.count()} QC raw files for running{retr_msg}. {msg}'
         for sf in sfs:
-            run_singlefile_qc(sf.rawfile, sf, user_op)
+            run_singlefile_qc(sf.rawfile, sf, user_op,
+                    dm.AcquisistionMode(sf.rawfile.qcdata.runtype).name)
         state = 'ok'
     else:
         without_duplicates = sfs.exclude(pk__in=qcjobs).exclude(duprun_q)
@@ -132,6 +145,9 @@ def rerun_qcs(request):
         if nr_deleted := sfs.count() - not_deleted_files.count():
             msg = (f'{msg} {nr_deleted} seem to be deleted, of which {archived.count()} are '
             ' in backup. (Tick the retrieve box to include these in the analysis.')
+        if nodata_nr := sfs.filter(rawfile__qcdata__isnull=True).count():
+            msg = (f'{msg}. Ignored {nodata_nr} files which were labeled as QC but had no run data, '
+            'and thus no acquisition mode stored - please find these manually')
         msg = f'{msg} Press confirm to start the run(s)'  
         state = 'confirm'
     return JsonResponse({'msg': msg, 'state': state})
@@ -152,7 +168,3 @@ def get_qc_files(request):
     else:
         fns = {x.pk: {'id': x.pk, 'name': x.filename} for x in filtered}
     return JsonResponse(fns)
-
-
-def rerun_single_qc(request):
-    return JsonResponse({'msg': msg, 'state': state})
