@@ -717,13 +717,6 @@ def transfer_file(request):
     return JsonResponse({'fn_id': fn_id, 'state': 'ok'})
 
 
-def query_all_qc_files():
-    '''QC files are defined as not having a dataset, being claimed, and stored on the
-    QC storage dir'''
-    return StoredFile.objects.filter(rawfile__datasetrawfile__isnull=True, rawfile__claimed=True,
-            path__startswith=settings.QC_STORAGE_DIR)
-
-
 def run_singlefile_qc(rawfile, storedfile, user_op, acqtype):
     """This method is only run for detecting new incoming QC files"""
     params = ['--instrument', rawfile.producer.msinstrument.instrumenttype.name,

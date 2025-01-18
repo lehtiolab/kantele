@@ -47,7 +47,6 @@ export function inputdone() {
   /* This only does something if mouseSelect is false, but 
   then it is called when the input is received (e.g. esc, enter, mouse selectvalue).
   The intext is then set if there is a slected value, 
-  
   */
   if (selectval && selectval in fixedoptions) {
     intext = niceName(fixedoptions[selectval]);

@@ -60,16 +60,6 @@ class RerunSingleQCTest(BaseTest):
         self.assertEqual(self.bup_jobs.count(), 1)
         self.assertEqual(self.qc_jobs.count(), 1)
 
-    def test_no_qcdata(self):
-        self.qcdata.delete()
-        # Run single file
-        resp = self.cl.post(self.url, content_type='application/json', data={'sfid': self.oldsf.pk})
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()['msg'], f'File {self.oldsf.filename} is annotated as QC but has'
-                ' not been run previously and has no acquisition mode stored. Please queue manually')
-        self.assertEqual(self.bup_jobs.count(), 0)
-        self.assertEqual(self.qc_jobs.count(), 0)
-
     def test_not_find_archive(self):
         self.oldsf.deleted, self.oldsf.purged = True, True
         self.oldsf.save()
@@ -144,18 +134,16 @@ class RerunManyQCsTest(BaseTest):
 
         nr_files = 2
         nr_duplicates = 2
-        nr_deleted = 2
+        nr_deleted = 1
         nr_ignored = 1
         nr_archived = 1
         cur_nr_queued = 0
-        confirm_msg = f'You have selected {nr_files} QC raw files.'
+        confirm_msg = f'You have selected {nr_files - nr_ignored} QC raw files.'
         dup_msg = (f'{nr_duplicates - nr_ignored} seem to be obsolete reruns ran with the same workflow'
                 ' version as the current latest (Tick the ignore box '
                 'to include these in the analysis.')
         del_msg = (f'{nr_deleted} seem to be deleted, of which {nr_archived} are '
             ' in backup. (Tick the retrieve box to include these in the analysis.')
-        ignore_msg = (f'Ignored {nr_ignored} files which were labeled as QC but had no run data, '
-            'and thus no acquisition mode stored - please find these manually')
         queue_msg = f'Queued {nr_files - nr_ignored} QC raw files for running'
 
         # Get confirm dialog
@@ -165,7 +153,6 @@ class RerunManyQCsTest(BaseTest):
         self.assertEqual(resp.status_code, 200)
         msg = resp.json()['msg']
         self.assertIn(confirm_msg, msg)
-        self.assertIn(ignore_msg, msg)
         self.assertNotIn(dup_msg, msg)
         self.assertNotIn(del_msg, msg)
         self.assertEqual(self.qc_jobs.count(), 0)
@@ -179,7 +166,6 @@ class RerunManyQCsTest(BaseTest):
         self.assertEqual(self.qc_jobs.count(), nr_files - nr_ignored)
         self.assertEqual(self.qc_jobs.filter(kwargs__sf_id=self.tmpsf.pk).count(), 1)
         self.assertEqual(self.qc_jobs.filter(kwargs__sf_id=self.f3sf.pk).count(), 0)
-        self.assertIn(ignore_msg, msg)
         self.assertIn(queue_msg, msg)
         cur_nr_queued += nr_files - nr_ignored
 
@@ -193,7 +179,6 @@ class RerunManyQCsTest(BaseTest):
         self.assertIn(dup_msg, msg)
         self.assertNotIn(queue_msg, msg)
         self.assertNotIn(del_msg, msg)
-        self.assertIn(ignore_msg, msg)
         self.assertEqual(self.qc_jobs.count(), cur_nr_queued)
 
         # Identical rerun confirm to do it
@@ -203,7 +188,6 @@ class RerunManyQCsTest(BaseTest):
         self.assertEqual(resp.status_code, 200)
         msg = resp.json()['msg']
         self.assertIn(queue_msg, msg)
-        self.assertIn(ignore_msg, msg)
         cur_nr_queued += nr_files - nr_ignored
         self.assertEqual(self.qc_jobs.count(), cur_nr_queued)
 
@@ -239,9 +223,9 @@ class RerunManyQCsTest(BaseTest):
             'ignore_obsolete': True, 'retrieve_archive': True})
         self.assertEqual(resp.status_code, 200)
         msg = resp.json()['msg']
-        self.assertIn(f'Queued {nr_files - nr_deleted + nr_archived} QC raw files for running', msg)
+        self.assertIn(f'Queued {nr_files - nr_ignored - nr_deleted + nr_archived} QC raw files for running', msg)
         self.assertIn(f'Queued {nr_archived} QC raw files for retrieval from archive', msg)
-        cur_nr_queued += nr_files - nr_deleted + nr_archived
+        cur_nr_queued += nr_files - nr_ignored - nr_deleted + nr_archived
 
         self.assertEqual(self.qc_jobs.count(), cur_nr_queued)
         bup_jobs = jm.Job.objects.filter(funcname='restore_from_pdc_archive',
