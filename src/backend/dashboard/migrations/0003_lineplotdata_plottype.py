@@ -56,14 +56,14 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='boxplotdata',
             name='datatype',
-            field=models.IntegerField(choices=[(1, 'FWHM'), (2, 'Peptide MS1 area'), (3, 'Mass error'), (4, 'Retention time'), (5, 'Score'), (6, 'Ion mobility'), (7, 'Ion injection time(ms)'), (8, 'Amount MS2 peaks matched')]),
+            field=models.IntegerField(choices=[(1, 'FWHM'), (2, 'Peptide MS1 area'), (3, 'Mass error'), (4, 'Retention time'), (5, 'Score'), (6, 'Ion mobility'), (7, 'Ion injection time(ms)'), (8, 'Amount MS2 peaks matched')], default=1),
             preserve_default=False,
         ),
 
         migrations.AddField(
             model_name='lineplotdata',
             name='datatype',
-            field=models.IntegerField(choices=[(1, 'Nr of proteins'), (2, 'Nr of peptides'), (3, 'Nr of peptides mapping uniquely'), (4, 'Nr of PSMs'), (5, 'Nr of scans'), (6, 'Nr of PSMs with 1 missed cleavage'), (7, 'Nr of PSMs with 2 missed cleavage'), (8, 'Amount scans FWHM')]),
+            field=models.IntegerField(choices=[(1, 'Nr of proteins'), (2, 'Nr of peptides'), (3, 'Nr of peptides mapping uniquely'), (4, 'Nr of PSMs'), (5, 'Nr of scans'), (6, 'Nr of PSMs with 1 missed cleavage'), (7, 'Nr of PSMs with 2 missed cleavage'), (8, 'Amount scans FWHM')], default=1),
             preserve_default=False,
         ),
 
