@@ -260,11 +260,7 @@ def instrument_check_in(request):
         except StoredFileType.DoesNotExist:
             return JsonResponse({'error': 'File type does not exist'}, status=403)
         print('New token issued for a valid task ID without a token')
-        staff_ops = dsmodels.Operator.objects.filter(user__is_staff=True)
-        if staff_ops.exists():
-            user_op = staff_ops.first()
-        else:
-            user_op = dsmodels.Operator.objects.first()
+        user_op = get_operator_user()
         newtoken = create_upload_token(ftype.pk, user_op.user_id, producer, uploadtype)
         response.update({'newtoken': newtoken.token, 'expires': datetime.strftime(newtoken.expires, '%Y-%m-%d, %H:%M')})
 
@@ -479,12 +475,8 @@ def classified_rawfile_treatment(request):
         create_job('move_single_file', sf_id=sfn.pk,
                 dstsharename=settings.PRIMARY_STORAGESHARENAME,
                 dst_path=os.path.join(settings.QC_STORAGE_DIR, sfn.rawfile.producer.name))
-        staff_ops = dsmodels.Operator.objects.filter(user__is_staff=True)
-        if staff_ops.exists():
-            user_op = staff_ops.first()
-        else:
-            user_op = dsmodels.Operator.objects.first()
-        run_singlefile_qc(sfn.rawfile, sfn, user_op, is_qc_acqtype)
+        user_op = get_operator_user()
+        run_singlefile_qc(sfn.rawfile, sfn, user_op, dsmodels.AcquisistionMode[is_qc_acqtype])
     elif dsid:
         # Make sure dataset exists
         dsq = dsmodels.Dataset.objects.filter(pk=dsid)
@@ -720,11 +712,14 @@ def transfer_file(request):
 def run_singlefile_qc(rawfile, storedfile, user_op, acqtype):
     """This method is only run for detecting new incoming QC files"""
     params = ['--instrument', rawfile.producer.msinstrument.instrumenttype.name,
-            f'--{acqtype.lower()}']
-    analysis = Analysis.objects.create(user_id=user_op.user_id,
-            name=f'{rawfile.producer.name}_{rawfile.name}_{rawfile.date}')
+            f'--{acqtype.name.lower()}']
+    analysis, _ = Analysis.objects.update_or_create(user_id=user_op.user_id,
+            name=f'{rawfile.producer.name}_{rawfile.name}_{rawfile.date}', defaults={
+                'log': [], 'deleted': False, 'purged': False, 'storage_dir': '', 'editable': False})
+    qcrun, _ = dashmodels.QCRun.objects.update_or_create(rawfile=rawfile, defaults={'is_ok': False,
+        'message': '', 'runtype': acqtype, 'analysis': analysis})
     create_job('run_longit_qc_workflow', sf_id=storedfile.id, analysis_id=analysis.id,
-            params=params, acqtype=acqtype.upper())
+            qcrun_id=qcrun.pk, params=params)
 
 
 def get_file_owners(sfile):
@@ -1007,3 +1002,13 @@ def archive_file(request):
     # File is set to deleted,purged=True,True in the post-job-view for purge
     create_job('purge_files', sf_ids=[sfile.pk], need_archive=True)
     return JsonResponse({'state': 'ok'})
+
+
+def get_operator_user():
+    '''Return Operator who is a staff user'''
+    staff_ops = dsmodels.Operator.objects.filter(user__is_staff=True)
+    if staff_ops.exists():
+        user_op = staff_ops.first()
+    else:
+        user_op = dsmodels.Operator.objects.first()
+    return user_op

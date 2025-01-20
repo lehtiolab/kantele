@@ -5,7 +5,7 @@ from analysis import models as am
 from datasets import models as dm
 
 
-class QCData(models.Model):
+class QCRun(models.Model):
     rawfile = models.OneToOneField(rm.RawFile, on_delete=models.CASCADE)
     analysis = models.OneToOneField(am.Analysis, on_delete=models.CASCADE)
     is_ok = models.BooleanField(default=True)
@@ -36,14 +36,14 @@ class QuartileDataTypes(models.IntegerChoices):
 
 
 class LineplotData(models.Model):
-    qcrun = models.ForeignKey(QCData, on_delete=models.CASCADE)
+    qcrun = models.ForeignKey(QCRun, on_delete=models.CASCADE)
     value = models.FloatField()
     datatype = models.IntegerField(choices=LineDataTypes.choices)
 
 
 class BoxplotData(models.Model):
     datatype = models.IntegerField(choices=QuartileDataTypes.choices)
-    qcrun = models.ForeignKey(QCData, on_delete=models.CASCADE)
+    qcrun = models.ForeignKey(QCRun, on_delete=models.CASCADE)
     q1 = models.FloatField()
     q2 = models.FloatField()
     q3 = models.FloatField()

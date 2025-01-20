@@ -96,6 +96,12 @@ class QCBase(BaseTest):
             }
         }
 
+    def setUp(self):
+        super().setUp()
+        self.diaana = am.Analysis.objects.create(user=self.user, name='dia ana qc', storage_dir='testdirqc')
+        self.diaqc = dm.QCRun.objects.create(rawfile=self.tmpraw, analysis=self.diaana, is_ok=False,
+                message='', runtype=dam.AcquisistionMode.DIA)
+
 
 class QCSave(QCBase):
     url = '/jobs/set/longqc/'
@@ -103,63 +109,46 @@ class QCSave(QCBase):
     def test_bad_requests(self):
         resp = self.cl.post(self.url, content_type='application/json', data={'client_id': 'wrong'})
         self.assertEqual(resp.status_code, 403)
-        post = {'client_id': settings.ANALYSISCLIENT_APIKEY, 'rf_id': self.tmpraw.pk}
+        post = {'client_id': settings.ANALYSISCLIENT_APIKEY, 'qcrun_id': self.diaqc.pk}
         resp = self.cl.post(self.url, content_type='application/json', data=post)
         self.assertEqual(resp.status_code, 400)
         self.assertIn('Missing parameter', resp.json()['msg'])
-        post = {'client_id': settings.ANALYSISCLIENT_APIKEY, 'rf_id': self.tmpraw.pk, 'plots': {},
-                'analysis_id': 1, 'acqtype': 'ADD', 'state': 'not ok', 'msg': 'test fail'} 
-        resp = self.cl.post(self.url, content_type='application/json', data=post)
-        self.assertEqual(resp.status_code, 400)
-        self.assertIn('Incorrect acquisition type', resp.json()['msg'])
 
     def test_save_qcrun_dia(self):
-        # Create analysis
-        ana = am.Analysis.objects.create(user=self.user, name='testana_qc', storage_dir='testdirqc')
-        ##
-        post = {'client_id': settings.ANALYSISCLIENT_APIKEY, 'rf_id': self.tmpraw.pk,
-                'analysis_id': ana.pk, 'acqtype': 'DIA', 'state': 'ok', 'msg': 'test ok',
+        self.diaana = am.Analysis.objects.create(user=self.user, name='testana_qc', storage_dir='testdirqc')
+        post = {'client_id': settings.ANALYSISCLIENT_APIKEY, 'qcrun_id': self.diaqc.pk,
+                'analysis_id': self.diaana.pk, 'state': 'ok', 'msg': 'test ok',
                 'plots': self.diaplots}
         resp = self.cl.post(self.url, content_type='application/json', data=post)
         self.assertEqual(resp.status_code, 200)
-        qcd_q = dm.QCData.objects.filter(analysis=ana, rawfile=self.tmpraw,
-                runtype=dam.AcquisistionMode.DIA)
-        self.assertTrue(qcd_q.exists())
-        qcd = qcd_q.get()
-        bp = qcd.boxplotdata_set.get(datatype=dm.QuartileDataTypes.SCORE)
+        bp = self.diaqc.boxplotdata_set.get(datatype=dm.QuartileDataTypes.SCORE)
         self.assertEqual(bp.q2, post['plots']['scores']['q2'])
-        lp = qcd.lineplotdata_set.get(datatype=dm.LineDataTypes.NRPSMS)
+        lp = self.diaqc.lineplotdata_set.get(datatype=dm.LineDataTypes.NRPSMS)
         self.assertEqual(lp.value, post['plots']['nrpsms'])
-        self.assertFalse(qcd.boxplotdata_set.filter(datatype=dm.QuartileDataTypes.MASSERROR).exists())
+        self.assertFalse(self.diaqc.boxplotdata_set.filter(datatype=dm.QuartileDataTypes.MASSERROR).exists())
 
     def test_save_dda_qc(self):
-        # Create analysis
-        ana = am.Analysis.objects.create(user=self.user, name='testana_qc', storage_dir='testdirqc')
-        ##
-        post = {'client_id': settings.ANALYSISCLIENT_APIKEY, 'rf_id': self.tmpraw.pk,
-                'analysis_id': ana.pk, 'acqtype': 'DDA', 'state': 'ok', 'msg': 'test ok',
+        self.diaqc.runtype = dam.AcquisistionMode.DDA
+        self.diaqc.save()
+        post = {'client_id': settings.ANALYSISCLIENT_APIKEY, 'qcrun_id': self.diaqc.pk,
+                'analysis_id': self.diaana.pk, 'state': 'ok', 'msg': 'test ok',
                 'plots': self.ddaplots}
         resp = self.cl.post(self.url, content_type='application/json', data=post)
         self.assertEqual(resp.status_code, 200)
-        qcd_q = dm.QCData.objects.filter(analysis=ana, rawfile=self.tmpraw,
-                runtype=dam.AcquisistionMode.DDA)
-        self.assertTrue(qcd_q.exists())
-        qcd = qcd_q.get()
-        bp = qcd.boxplotdata_set.get(datatype=dm.QuartileDataTypes.SCORE)
+        bp = self.diaqc.boxplotdata_set.get(datatype=dm.QuartileDataTypes.SCORE)
         self.assertEqual(bp.q2, post['plots']['scores']['q2'])
-        lp = qcd.lineplotdata_set.get(datatype=dm.LineDataTypes.NRPSMS)
+        lp = self.diaqc.lineplotdata_set.get(datatype=dm.LineDataTypes.NRPSMS)
         self.assertEqual(lp.value, post['plots']['nrpsms'])
-        self.assertFalse(qcd.lineplotdata_set.filter(datatype=dm.LineDataTypes.PEAKS_FWHM).exists())
+        self.assertFalse(self.diaqc.lineplotdata_set.filter(datatype=dm.LineDataTypes.PEAKS_FWHM).exists())
 
 
 class QCShow(QCBase):
     url = '/dash/longqc/'
 
     def test_show(self):
-        ana = am.Analysis.objects.create(user=self.user, name='testana_qc', storage_dir='testdirqc')
-        post = {'client_id': settings.ANALYSISCLIENT_APIKEY, 'rf_id': self.tmpraw.pk,
-                'analysis_id': ana.pk, 'acqtype': 'DIA', 'state': 'ok', 'msg': 'test ok',
-                'plots': self.diaplots}
+        # First upload data
+        post = {'client_id': settings.ANALYSISCLIENT_APIKEY, 'qcrun_id': self.diaqc.pk,
+                'analysis_id': self.diaana.pk, 'state': 'ok', 'msg': 'test ok', 'plots': self.diaplots}
         resp = self.cl.post('/jobs/set/longqc/', content_type='application/json', data=post)
         self.assertEqual(resp.status_code, 200)
 
@@ -182,6 +171,7 @@ class QCShow(QCBase):
             if not len(points):
                 continue
             elif 'value' in points[0]:
+                keys = []
                 if pn == 'ident':
                     # one point for each line (pep, prot, unipep)
                     keys = [dm.LineDataTypes.NRPEPTIDES, dm.LineDataTypes.NRPEPTIDES,
@@ -205,7 +195,8 @@ class QCShow(QCBase):
                         nr = {dm.LineDataTypes.MISCLEAV1: '1', dm.LineDataTypes.MISCLEAV2: '2'}[p['key']]
                         self.assertEqual(p['value'], self.diaplots['missed_cleavages'][nr])
                 elif pn == 'mcratio':
-                    pass 
+                    # TODO test for missed cleavage plot
+                    continue
                 else:
                     self.assertEqual(len(points), 1)
                     keys = [dm.LineDataTypes[pn]]

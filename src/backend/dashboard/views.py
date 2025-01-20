@@ -9,7 +9,7 @@ from math import isnan
 from datetime import datetime, timedelta
 
 from analysis.models import AnalysisError
-from rawstatus.models import Producer, RawFile
+from rawstatus.models import Producer, RawFile, MSInstrumentType
 from datasets.models import Project, AcquisistionMode
 from dashboard import models as dm
 from dashboard.models import LineDataTypes as LDT
@@ -28,18 +28,14 @@ def dashboard(request):
 def store_longitudinal_qc(data):
     '''Update or create new QC data'''
     try:
-        data['rf_id'], data['analysis_id'], data['state'], data['msg'], data['plots']
-        acqtype = data['acqtype']
+        data['qcrun_id'], data['state'], data['msg'], data['plots']
     except KeyError:
         return {'error': True, 'msg': 'Missing parameter in request when storing QC data'}
-    try:
-        acqtype = AcquisistionMode[acqtype]
-    except KeyError:
-        return {'error': True, 'msg': 'Incorrect acquisition type in request storing QC data'}
-
-    qcrun, _ = dm.QCData.objects.update_or_create(rawfile_id=data['rf_id'],
-            defaults={'analysis_id': data['analysis_id'], 'is_ok': data['state'] == 'ok',
-                'runtype': acqtype, 'message': data['msg']})
+    qcrun = dm.QCRun.objects.filter(pk=data['qcrun_id'])
+    if qcrun.count() != 1:
+        return {'error': True, 'msg': 'Could not find QC data annotation'}
+    qcrun.update(is_ok=data['state'] == 'ok', message=data['msg'])
+    qcrun = qcrun.get()
     dtypes = {
             'nrpsms': LDT.NRPSMS,
             'nrscans': LDT.NRSCANS,
@@ -200,13 +196,21 @@ def get_boxplot_data(qcruns, dtype):
 def show_qc(request, acqmode, instrument_id, daysago, maxdays):
     todate = datetime.now() - timedelta(daysago - 1)
     fromdate = todate - timedelta(maxdays)
-    qcruns = dm.QCData.objects.filter(rawfile__producer=instrument_id, rawfile__date__gt=fromdate, rawfile__date__lt=todate).annotate(date=F('rawfile__date')).order_by('date')
+    qcruns = dm.QCRun.objects.filter(rawfile__producer=instrument_id, rawfile__date__gt=fromdate,
+            rawfile__date__lt=todate, is_ok=True).annotate(date=F('rawfile__date')).order_by('date')
     if qcruns.count() and acqmode == 'ALL':
         runtype_q = qcruns.last().runtype
     elif acqmode != 'ALL':
         runtype_q = AcquisistionMode[acqmode]
     else:
-        runtype_q = 1
+        # Guess a default (dia for TIMS, dda for thermo)
+        try:
+            instrumenttype = MSInstrumentType.objects.get(msinstrument__producer_id=instrument_id)
+        except MSInstrumentType.DoesNotExist
+            runtype_name = 'DDA'
+        else:
+            runtype_name = 'DIA' if instrumenttype.name == 'timstof' else 'DDA'
+        runtype_q = AcquisistionMode[runtype_name]
     qcruns = qcruns.filter(runtype=runtype_q)
     psmdata = get_line_data(qcruns, dtypes=[LDT.NRSCANS, LDT.NRPSMS])
     miscleavdata = get_line_data(qcruns, dtypes=[LDT.MISCLEAV1, LDT.MISCLEAV2])

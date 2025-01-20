@@ -189,7 +189,6 @@ function activateRunButton(openthis) {
       {#if runButtons.new}
       <button on:click={runNewSingleFile} class="button">Run</button>
       {:else}
-{selectedNewfile}
       <button class="button" disabled>Run</button>
       {/if}
     </div>

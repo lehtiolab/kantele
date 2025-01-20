@@ -6,24 +6,74 @@ from kantele import settings
 from rawstatus import models as rm
 from datasets import models as dm
 from jobs import models as jm
+from jobs import jobs as jj
 from analysis import models as am
 from dashboard import models as dashm
 
 
-class RerunSingleQCTest(BaseTest):
-    url = '/manage/qc/rerunsingle/'
+class BaseQCFileTest(BaseTest):
 
     def setUp(self):
         super().setUp()
         self.user.is_staff = True
         self.user.save()
         dm.Operator.objects.create(user=self.user)
+
+class QueueNewFile(BaseQCFileTest):
+    url = '/manage/qc/newfile/'
+
+    def test_bad(self):
+        getresp = self.cl.get(self.url)
+        self.assertEqual(getresp.status_code, 405)
+        noid_resp = self.cl.post(self.url, content_type='application/json', data={})
+        self.assertEqual(noid_resp.status_code, 400)
+        noid_resp = self.cl.post(self.url, content_type='application/json', data={
+            'sfid': self.tmpsf.pk, 'acqtype': ['DIA']})
+        self.assertEqual(noid_resp.status_code, 400)
+        noid_resp = self.cl.post(self.url, content_type='application/json', data={
+            'sfid': self.tmpsf.pk, 'acqtype': 'DIAA'})
+        self.assertEqual(noid_resp.status_code, 400)
+
+    def test_run_new_qc(self):
+        mv_jobs = jm.Job.objects.filter(funcname='move_single_file', state=jj.Jobstates.PENDING,
+                kwargs__sf_id=self.tmpsf.pk)
+        qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow',
+                state=jj.Jobstates.PENDING, kwargs__sf_id=self.tmpsf.pk)
+        self.assertEqual(mv_jobs.count(), 0)
+        self.assertEqual(mv_jobs.count(), 0)
+        resp = self.cl.post(self.url, content_type='application/json', data={
+            'sfid': self.tmpsf.pk, 'acqtype': 'DIA'})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(mv_jobs.count(), 1)
+        self.assertEqual(mv_jobs.count(), 1)
+
+    def test_run_qc_file_already_moved(self):
+        jm.Job.objects.create(funcname='run_longit_qc_workflow', state=jj.Jobstates.ERROR,
+                kwargs={'sf_id': self.tmpsf.pk}, timestamp=timezone.now())
+        mv_jobs = jm.Job.objects.filter(funcname='move_single_file', state=jj.Jobstates.PENDING,
+                kwargs__sf_id=self.tmpsf.pk)
+        qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow',
+                state=jj.Jobstates.PENDING, kwargs__sf_id=self.tmpsf.pk)
+        self.assertEqual(mv_jobs.count(), 0)
+        self.assertEqual(mv_jobs.count(), 0)
+        resp = self.cl.post(self.url, content_type='application/json', data={
+            'sfid': self.tmpsf.pk, 'acqtype': 'DIA'})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(mv_jobs.count(), 1)
+        self.assertEqual(mv_jobs.count(), 1)
+
+
+class RerunSingleQCTest(BaseQCFileTest):
+    url = '/manage/qc/rerunsingle/'
+
+    def setUp(self):
+        super().setUp()
         self.bup_jobs = jm.Job.objects.filter(funcname='restore_from_pdc_archive',
                 kwargs__sf_id=self.oldsf.pk)
         self.qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow',
                 kwargs__sf_id=self.oldsf.pk)
         ana = am.Analysis.objects.create(name='previousrun', user=self.user, storage_dir='blbala')
-        self.qcdata = dashm.QCData.objects.create(rawfile=self.oldraw, analysis=ana,
+        self.qcdata = dashm.QCRun.objects.create(rawfile=self.oldraw, analysis=ana,
                 runtype=dm.AcquisistionMode.DDA)
         self.oldsf.path = os.path.join(settings.QC_STORAGE_DIR, 'test')
         self.olddsr.delete()
@@ -83,21 +133,18 @@ class RerunSingleQCTest(BaseTest):
 
 
 
-class RerunManyQCsTest(BaseTest):
+class RerunManyQCsTest(BaseQCFileTest):
     url = '/manage/qc/rerunmany/'
 
     def setUp(self):
         super().setUp()
-        self.user.is_staff = True
-        self.user.save()
-        dm.Operator.objects.create(user=self.user)
         self.qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow')
         nfrepo = am.NextflowWorkflowRepo.objects.create()
         pset = am.ParameterSet.objects.create()
         uwf = am.UserWorkflow.objects.create(wftype=am.UserWorkflow.WFTypeChoices.QC, public=False)
         uwf.nfwfversionparamsets.create(nfworkflow=nfrepo, paramset=pset)
         ana = am.Analysis.objects.create(name='previousrun', user=self.user, storage_dir='blbala')
-        dashm.QCData.objects.create(rawfile=self.tmpraw, analysis=ana, runtype=dm.AcquisistionMode.DDA)
+        dashm.QCRun.objects.create(rawfile=self.tmpraw, analysis=ana, runtype=dm.AcquisistionMode.DDA)
 
     def test_fail(self):
         getresp = self.cl.get(self.url)
