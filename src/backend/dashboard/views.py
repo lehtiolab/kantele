@@ -206,7 +206,7 @@ def show_qc(request, acqmode, instrument_id, daysago, maxdays):
         # Guess a default (dia for TIMS, dda for thermo)
         try:
             instrumenttype = MSInstrumentType.objects.get(msinstrument__producer_id=instrument_id)
-        except MSInstrumentType.DoesNotExist
+        except MSInstrumentType.DoesNotExist:
             runtype_name = 'DDA'
         else:
             runtype_name = 'DIA' if instrumenttype.name == 'timstof' else 'DDA'
