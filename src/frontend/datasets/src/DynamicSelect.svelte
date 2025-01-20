@@ -50,8 +50,6 @@ export function inputdone() {
   */
   if (selectval && selectval in fixedoptions) {
     intext = niceName(fixedoptions[selectval]);
-  } else {
-    selectval = false;
   }
   if (!mouseSelect) {
     typing = false;

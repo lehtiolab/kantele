@@ -51,16 +51,21 @@ def new_qcfile(request):
     we can use this to queue new QC files'''
     data = json.loads(request.body.decode('utf-8'))
     try:
-        sfnq = rm.StoredFile.objects.filter(pk=data['sfid'])
+        presfnq = rm.StoredFile.objects.filter(pk=data['sfid'])
         acqtype = dm.AcquisistionMode[data['acqtype']]
     except (KeyError, AttributeError, TypeError):
         # TypeError is for actype =list
         # AttributeError is for acqtype is not in the AcquisistionMode
         return JsonResponse({'state': 'error', 'msg': 'Something went wrong, contact admin'},
                 status=400)
-    # Below also is in rawstatus/views:
-    availableq = Q(rawfile__claimed=False) | Q(filejob__job__funcname='run_longit_qc_workflow')
-    sfnq = sfnq.filter(checked=True, rawfile__qcrun__isnull=True).filter(availableq)
+    # I tried with Q(claimed) | Q(filejob__job__funcname) 
+    # But that got as many records as there are filejobs due to the JOIN
+    # And somehow not filtering the way I wanted it (claimed OR filejob=run_longit) was used
+    # so all three filejobs had claim filtering pass, even if only one had jobname filter pass.
+    presfnq = presfnq.filter(checked=True, rawfile__qcrun__isnull=True)
+    sfnqa = presfnq.filter(rawfile__claimed=False)
+    sfnqb = presfnq.filter(filejob__job__funcname= 'run_longit_qc_workflow')
+    sfnq = sfnqa.union(sfnqb)
     if sfnq.count() == 1:
         tmpshare = rm.ServerShare.objects.get(name=settings.TMPSHARENAME)
         sfn = sfnq.get()
