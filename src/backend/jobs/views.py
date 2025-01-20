@@ -341,7 +341,9 @@ def store_longitudinal_qc(request):
             data['client_id'] not in settings.CLIENT_APIKEYS):
         return HttpResponseForbidden()
     else:
-        dashviews.store_longitudinal_qc(data)
+        storeresult = dashviews.store_longitudinal_qc(data)
+        if storeresult['error']:
+            return JsonResponse(storeresult, status=400)
     if 'task' in data:
         set_task_done(data['task'])
     return HttpResponse()

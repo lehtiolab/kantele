@@ -1,3 +1,4 @@
+import os
 import json
 
 from django.utils import timezone
@@ -10,12 +11,19 @@ from django.db.models import Q
 
 from kantele import settings
 from rawstatus import models as rm
-from rawstatus.views import run_singlefile_qc, query_all_qc_files
+from rawstatus.views import run_singlefile_qc, get_operator_user
 from datasets import models as dm
 from jobs.jobutil import create_job
 from analysis import models as am
 from jobs import models as jm
 from jobs import jobs as jj
+
+
+def query_all_qc_files():
+    '''QC files are defined as not having a dataset, being claimed, and stored on the
+    QC storage dir'''
+    return rm.StoredFile.objects.filter(rawfile__datasetrawfile__isnull=True, rawfile__claimed=True,
+            path__startswith=settings.QC_STORAGE_DIR, rawfile__qcrun__isnull=False)
 
 
 @staff_member_required
@@ -29,6 +37,54 @@ def show_staffpage(request):
 
 @staff_member_required
 @require_POST
+def remove_qcfile(request):
+    '''To remove a file from the longitudinal QC as it is there by mistake and should be
+    in a dataset instead: claimed=F, analysis.delete, mv_to_tmp, more?
+    '''
+    pass
+
+
+@staff_member_required
+@require_POST
+def new_qcfile(request):
+    '''For files without QC data, where it is not known of what type they are,
+    we can use this to queue new QC files'''
+    data = json.loads(request.body.decode('utf-8'))
+    try:
+        sfnq = rm.StoredFile.objects.filter(pk=data['sfid'])
+        acqtype = dm.AcquisistionMode[data['acqtype']]
+    except (KeyError, AttributeError, TypeError):
+        # TypeError is for actype =list
+        # AttributeError is for acqtype is not in the AcquisistionMode
+        return JsonResponse({'state': 'error', 'msg': 'Something went wrong, contact admin'},
+                status=400)
+    # Below also is in rawstatus/views:
+    availableq = Q(rawfile__claimed=False) | Q(filejob__job__funcname='run_longit_qc_workflow')
+    sfnq = sfnq.filter(checked=True, rawfile__qcrun__isnull=True).filter(availableq)
+    if sfnq.count() == 1:
+        tmpshare = rm.ServerShare.objects.get(name=settings.TMPSHARENAME)
+        sfn = sfnq.get()
+        rm.RawFile.objects.filter(storedfile__pk=data['sfid']).update(claimed=True)
+        if sfn.servershare == tmpshare:
+            create_job('move_single_file', sf_id=data['sfid'],
+                    dstsharename=settings.PRIMARY_STORAGESHARENAME,
+                    dst_path=os.path.join(settings.QC_STORAGE_DIR, sfn.rawfile.producer.name))
+        user_op = get_operator_user()
+        run_singlefile_qc(sfn.rawfile, sfn, user_op, acqtype)
+        msg = f'Queued file {sfn.filename} for QC run'
+        state = 'ok'
+    else:
+        msg = 'Something went wrong, could not get file to run QC on, contact admin'
+        state = 'error'
+    if state != 'ok':
+        status = 400
+    else:
+        status = 200
+    return JsonResponse({'msg': msg, 'state': state}, status=status)
+
+
+@staff_member_required
+@require_POST
 def rerun_singleqc(request):
     '''Reruns a single QC file. This doesnt care if there is already an analysis,
     and it will get retrieve the backed up file if needed'''
@@ -37,21 +93,18 @@ def rerun_singleqc(request):
         sfid = int(data['sfid'])
     except (KeyError, ValueError):
         return JsonResponse({'state': 'error', 'msg': 'Something went wrong, contact admin'}, status=400)
-    sfs = query_all_qc_files().filter(pk=sfid).select_related(
+    sfs = query_all_qc_files().filter(pk=sfid).select_related('rawfile__qcrun',
             'rawfile__producer__msinstrument__instrumenttype')
     if sfs.count() == 1:
-        # Get user for analysis (first Operator which is staff)
-        staff_ops = dm.Operator.objects.filter(user__is_staff=True)
-        if staff_ops.exists():
-            user_op = staff_ops.first()
-        else:
-            user_op = dm.Operator.objects.first()
+        user_op = get_operator_user()
         sf = sfs.get()
-        # retrieve if needed
+
         if sf.deleted:
+            # retrieve if needed
             if hasattr(sf, 'pdcbackedupfile') and sf.pdcbackedupfile.success and not sf.pdcbackedupfile.deleted:
                 create_job('restore_from_pdc_archive', sf_id=sf.pk)
-                run_singlefile_qc(sf.rawfile, sf, user_op)
+                run_singlefile_qc(sf.rawfile, sf, user_op,
+                        dm.AcquisistionMode(sf.rawfile.qcrun.runtype))
                 msg = f'Queued {sf.filename} QC raw for retrieval from archive and rerun'
                 state = 'ok'
             else:
@@ -59,7 +112,8 @@ def rerun_singleqc(request):
                         'contact admin')
                 state = 'error'
         else:
-            run_singlefile_qc(sf.rawfile, sf, user_op)
+            run_singlefile_qc(sf.rawfile, sf, user_op,
+                    dm.AcquisistionMode(sf.rawfile.qcrun.runtype))
             msg = f'Queued {sf.filename} QC raw for rerun'
             state = 'ok'
     else:
@@ -88,23 +142,19 @@ def rerun_qcs(request):
     except (KeyError, TypeError, ValueError, AssertionError):
         return JsonResponse({'state': 'error', 'msg': 'Something went wrong, contact admin'}, status=400)
     lastdate = (timezone.now() - timezone.timedelta(days_back)).date()
-    # Filter QC files (in path, no dataset, claimed, date)
-    sfs = query_all_qc_files().filter(rawfile__producer__pk__in=instruments, rawfile__date__gte=lastdate
-            ).select_related('rawfile__producer__msinstrument__instrumenttype')
+    # Filter QC files (in path, no dataset, with QCdata, claimed, date)
+    sfs = query_all_qc_files().filter(rawfile__producer__pk__in=instruments,
+            rawfile__date__gte=lastdate).select_related('rawfile__qcrun',
+                'rawfile__producer__msinstrument__instrumenttype')
     latest_qcwf = am.NextflowWfVersionParamset.objects.filter(
             userworkflow__wftype=am.UserWorkflow.WFTypeChoices.QC).last()
     qcjobs = [x.kwargs['sf_id'] for x in jm.Job.objects.filter(funcname='run_longit_qc_workflow',
         state__in=jj.JOBSTATES_WAIT, kwargs__sf_id__in=[x.pk for x in sfs])]
-    duprun_q = Q(rawfile__qcdata__analysis__nextflowsearch__nfwfversionparamset=latest_qcwf)
+    duprun_q = Q(rawfile__qcrun__analysis__nextflowsearch__nfwfversionparamset=latest_qcwf)
     retrieve_q = Q(deleted=True, pdcbackedupfile__success=True, pdcbackedupfile__deleted=False)
 
     if confirm_ok:
-        # Get user for analysis (first Operator which is staff)
-        staff_ops = dm.Operator.objects.filter(user__is_staff=True)
-        if staff_ops.exists():
-            user_op = staff_ops.first()
-        else:
-            user_op = dm.Operator.objects.first()
+        user_op = get_operator_user()
         if not ignore_dups:
             sfs = sfs.exclude(pk__in=qcjobs).exclude(duprun_q)
         deleted_files = sfs.filter(deleted=True)
@@ -118,7 +168,8 @@ def rerun_qcs(request):
             retr_msg = f' - Queued {retrieve_files.count()} QC raw files for retrieval from archive'
         msg = f'Queued {sfs.count()} QC raw files for running{retr_msg}'
         for sf in sfs:
-            run_singlefile_qc(sf.rawfile, sf, user_op)
+            run_singlefile_qc(sf.rawfile, sf, user_op,
+                    dm.AcquisistionMode(sf.rawfile.qcrun.runtype))
         state = 'ok'
     else:
         without_duplicates = sfs.exclude(pk__in=qcjobs).exclude(duprun_q)
@@ -139,6 +190,26 @@ def rerun_qcs(request):
 
 @login_required
 @require_GET
+def find_unclaimed_files(request):
+    query = Q()
+    for searchterm in [x for x in request.GET.get('q', '').split(' ') if x != '']:
+        subq = Q()
+        subq |= Q(filename__icontains=searchterm)
+        subq |= Q(rawfile__producer__name__icontains=searchterm)
+        query &= subq
+    # Find checked+non-qcrun files, that are either not claimed, or have a QC job
+    availableq = Q(rawfile__claimed=False) | Q(filejob__job__funcname='run_longit_qc_workflow')
+    filtered = rm.StoredFile.objects.filter(checked=True, rawfile__qcrun__isnull=True).filter(
+            availableq).filter(query)
+    if filtered.count() > 50:
+        fns = {}
+    else:
+        fns = {x.pk: {'id': x.pk, 'name': x.filename} for x in filtered}
+    return JsonResponse(fns)
+
+
+@login_required
+@require_GET
 def get_qc_files(request):
     query = Q()
     for searchterm in [x for x in request.GET.get('q', '').split(' ') if x != '']:
@@ -152,7 +223,3 @@ def get_qc_files(request):
     else:
         fns = {x.pk: {'id': x.pk, 'name': x.filename} for x in filtered}
     return JsonResponse(fns)
-
-
-def rerun_single_qc(request):
-    return JsonResponse({'msg': msg, 'state': state})

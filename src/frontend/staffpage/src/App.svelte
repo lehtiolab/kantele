@@ -16,7 +16,14 @@ import DynamicSelect from '../../datasets/src/DynamicSelect.svelte';
   let errorMsg = '';
   let serverMsg = '';
 
-  let selectedSingle = false;
+  let selectedSingle = '';
+  let selectedNewfile = '';
+  let acqtype = [];
+
+  const runButtons = {
+    single: false,
+    new: false,
+  }
 
   let ignoreObsolete = false;
   let retrieveBackups = false;
@@ -49,6 +56,17 @@ import DynamicSelect from '../../datasets/src/DynamicSelect.svelte';
 
   function confirmRerun() {
     postRerun(true);
+  }
+
+  async function runNewSingleFile() {
+    errorMsg = '';
+    serverMsg = '';
+    const resp = await postJSON('/manage/qc/newfile/', {sfid: selectedNewfile, acqtype: acqtype});
+    if (resp.state === 'ok') {
+      serverMsg = resp.msg;
+    } else if (resp.state === 'error') {
+      errorMsg = resp.msg;
+    }
   }
 
   async function runSingleFile() {
@@ -85,12 +103,19 @@ import DynamicSelect from '../../datasets/src/DynamicSelect.svelte';
       }
     }
 
+
+function activateRunButton(openthis) {
+  // Somehow selectedSingle will not update in the UI even if it is updated in the code?
+  // V. strange
+  runButtons[openthis] = true;
+} 
+
 </script>
 
 <div class="columns">
   <div class="column">
     <div class="box has-background-link-light">
-      <h4 class="title is-4">QC reruns</h4>
+      <h4 class="title is-4">QC (re)runs</h4>
       <h5 class="title is-5">Run a batch of files with latest QC workflow</h5>
       <h5 class="subtitle is-5">Excludes deleted </h5>
       <div class="columns">
@@ -137,9 +162,9 @@ import DynamicSelect from '../../datasets/src/DynamicSelect.svelte';
 
         </div>
       </div>
-      <h5 class="title is-5">Or select a single run</h5>
-      <DynamicSelect bind:selectval={selectedSingle} on:selectedvalue={e => console.log('hsaj')} niceName={x => x.name} fetchUrl="/manage/qc/searchfiles/" placeholder="instrument name, date" />
-      {#if selectedSingle}
+      <h5 class="title is-5">... or select a single rerun</h5>
+      <DynamicSelect bind:selectval={selectedSingle} on:selectedvalue={e => activateRunButton('single')} niceName={x => x.name} fetchUrl="/manage/qc/searchfiles/" placeholder="instrument name, date" />
+      {#if runButtons.single}
       <button on:click={runSingleFile} class="button">Run</button>
       {:else}
       <button class="button" disabled>Run</button>
@@ -147,6 +172,25 @@ import DynamicSelect from '../../datasets/src/DynamicSelect.svelte';
 
       <p class="has-text-link">{serverMsg}</p>
       <p class="has-text-danger">{errorMsg}</p>
+      <hr>
+
+      <h5 class="title is-5">... or designate a new file to QC</h5>
+      <DynamicSelect bind:selectval={selectedNewfile} on:selectedvalue={e => activateRunButton('new')} niceName={x => x.name} fetchUrl="/manage/qc/searchnewfiles/" placeholder="instrument name, date" />
+      <div class="control">
+        <label class="radio">
+          <input bind:group={acqtype} value="DDA" name="acqtype" type="radio" />
+          DDA
+        </label>
+        <label class="radio">
+          <input bind:group={acqtype} value="DIA" name="acqtype" type="radio" />
+          DIA
+        </label>
+        </div>
+      {#if runButtons.new}
+      <button on:click={runNewSingleFile} class="button">Run</button>
+      {:else}
+      <button class="button" disabled>Run</button>
+      {/if}
     </div>
   </div>
   <div class="column">

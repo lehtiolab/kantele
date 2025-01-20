@@ -21,6 +21,7 @@ from kantele.tests import BaseTest, ProcessJobTest, BaseIntegrationTest
 from rawstatus import models as rm
 from rawstatus import jobs as rjobs
 from datasets import models as dm
+from dashboard import models as dashm
 from analysis import models as am
 from analysis import models as am
 from jobs import models as jm
@@ -379,7 +380,7 @@ class TestUploadScript(BaseIntegrationTest):
         fpath = os.path.join(settings.SHAREMAP[self.f3sf.servershare.name], self.f3sf.path)
         fullp = os.path.join(fpath, self.f3sf.filename)
         con = sqlite3.Connection(os.path.join(fullp, 'analysis.tdf'))
-        con.execute(f'UPDATE GlobalMetadata SET Value="QC" WHERE Key="{settings.BRUKERKEY}"')
+        con.execute(f'UPDATE GlobalMetadata SET Value="DIAQC" WHERE Key="{settings.BRUKERKEY}"')
         con.commit()
         old_raw = rm.RawFile.objects.last()
         tmpdir = mkdtemp()
@@ -411,7 +412,7 @@ class TestUploadScript(BaseIntegrationTest):
             'sf_id': newsf.pk, 'dstsharename': settings.PRIMARY_STORAGESHARENAME,
             'dst_path': os.path.join(settings.QC_STORAGE_DIR, self.prod.name)})
         qcjobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow', kwargs__sf_id=newsf.pk,
-                kwargs__params=['--instrument', self.msit.name])
+                kwargs__params=['--instrument', self.msit.name, '--dia'])
         self.assertEqual(classifyjob.count(), 1)
         self.assertEqual(classifytask.count(), 0)
         self.assertEqual(mvjobs.count(), 0)
@@ -422,6 +423,7 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertTrue(newraw.claimed)
         self.assertEqual(newraw.msfiledata.mstime, 123.456)
         self.assertEqual(classifytask.filter(state=states.SUCCESS).count(), 1)
+        self.assertEqual(dashm.QCRun.objects.filter(rawfile=newraw).count(), 1)
         self.assertEqual(mvjobs.count(), 1)
         self.assertEqual(qcjobs.count(), 1)
         # Must kill this script, it will keep scanning outbox

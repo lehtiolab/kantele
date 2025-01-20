@@ -19,12 +19,7 @@ let firstday = 0;
 let maxdays = 30;
 let tabshow = 'prod';
 
-let qcdata = Object.fromEntries(instruments.map(x => [x[1], {loaded: false}]));
-['ident', 'psms', 'precursorarea', 'prec_error', 'rt', 'msgfscore', 'fwhm', 'ionmob'].forEach(x => {
-  instruments.forEach(inst => {
-    qcdata[inst[1]][x] = {data: [], series: [], xkey: false};
-  })
-});
+
 let proddata = {
   fileproduction: {},
   projecttypeproduction: {},
@@ -33,34 +28,17 @@ let proddata = {
 };
 
 async function showInst(iid) {
-  if (!qcdata[iid].loaded) {
-    await getInstrumentQC(iid, 0, 30);
-    instrumenttabs[iid].parseData();
-  }
+  await instrumenttabs[iid].loadData(maxdays, firstday);
   tabshow = `instr_${iid}`;
-}
-
-async function getInstrumentQC(instrument_id, daysago, maxdays) {
-  const response = await fetch(`/dash/longqc/${instrument_id}/${daysago}/${maxdays}`);
-  const result = await response.json();
-  qcdata[instrument_id] = {};
-  for (let key in result) {
-    qcdata[instrument_id][key] = result[key];
-  }
-  qcdata[instrument_id].loaded = true;
 }
 
 function showProd() {
   tabshow = 'prod';
 }
 
-async function reloadInstrument(e) {
-  qcdata[e.detail.instrument_id].loaded = false;
-  await getInstrumentQC(e.detail.instrument_id, e.detail.firstday, e.detail.showdays);
-  instrumenttabs[e.detail.instrument_id].parseData();
-}
-
 async function fetchProductionData(maxdays, firstday) {
+  // maxdays and firstday are explicit arguments, because the binding
+  // to them in the dateslider does not update fast enough
   const resp = await fetch(`/dash/proddata/${firstday}/${maxdays}`);
   proddata = await resp.json();
   // setTimeout since after fetching, the plot components havent updated its props
@@ -106,11 +84,12 @@ onMount(async() => {
   <section>
     {#each instruments as instr}
     <div class={`instrplot ${tabshow === `instr_${instr[1]}` ? 'active' : 'inactive'}`} >
-      <Instrument on:reloaddata={e => reloadInstrument(e)} bind:this={instrumenttabs[instr[1]]} bind:instrument_id={instr[1]} bind:qcdata={qcdata[instr[1]]} />
+      <Instrument bind:this={instrumenttabs[instr[1]]} bind:instrument_id={instr[1]} />
     </div>
     {/each}
     <div class={`instrplot ${tabshow === `prod` ? 'active' : 'inactive'}`} >
-      <DateSlider on:updatedates={e => fetchProductionData(e.detail.showdays, e.detail.firstday)} />
+      <DateSlider bind:firstday={firstday} maxdays={maxdays}
+          on:updatedates={e => fetchProductionData(e.detail.showdays, e.detail.firstday)} />
       <hr>
       <div class="tile is-ancestor">
         <div class="tile">

@@ -104,14 +104,12 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
             analysis=analysis)
         run = {'timestamp': timestamp,
                'analysis_id': analysis.id,
+               'qcrun_id': kwargs['qcrun_id'],
                'token': analysis.nextflowsearch.token,
-               'rf_id': raw.rawfile_id,
                'wf_commit': nfwf.commit,
                'nxf_wf_fn': nfwf.filename,
                'repo': nfwf.nfworkflow.repo,
                'runname': f'{analysis.id}_longqc_{raw.rawfile.producer.name}_rawfile{raw.rawfile_id}_{timestamp}',
-               'filename': raw.filename,
-               'instrument': raw.rawfile.producer.name,
                }
         self.run_tasks.append(((run, params, stagefiles, ','.join(nfwf.profiles), nfwf.nfversion), {}))
         analysis.log.append('[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S')))
