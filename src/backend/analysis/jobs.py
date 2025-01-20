@@ -89,6 +89,7 @@ class RefineMzmls(DatasetJob):
 class RunLongitudinalQCWorkflow(SingleFileJob):
     refname = 'run_longit_qc_workflow'
     task = tasks.run_nextflow_longitude_qc
+    revokable = True
 
     def process(self, **kwargs):
         """Assumes one file, one analysis"""
