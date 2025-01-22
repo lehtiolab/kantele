@@ -28,8 +28,8 @@ let proddata = {
 };
 
 async function showInst(iid) {
-  await instrumenttabs[iid].loadData(maxdays, firstday);
   tabshow = `instr_${iid}`;
+  instrumenttabs[iid].renderPlots();
 }
 
 function showProd() {
