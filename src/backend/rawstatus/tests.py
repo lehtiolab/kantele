@@ -122,7 +122,7 @@ class TestUploadScript(BaseIntegrationTest):
     def test_new_file(self):
         # Use same file as f3sf but actually take its md5 and therefore it is new
         # Testing all the way from register to upload
-        # This file is of filetype self.ft which is NOT is_folder -> so it will be zipped up
+        # This file is of filetype self.ft which is is_folder
         self.get_token()
         fpath = os.path.join(settings.SHAREMAP[self.f3sf.servershare.name], self.f3sf.path)
         fullp = os.path.join(fpath, self.f3sf.filename)
@@ -185,7 +185,6 @@ class TestUploadScript(BaseIntegrationTest):
         # Actual raw3 fn md5:
         self.get_token()
         fpath = os.path.join(settings.SHAREMAP[self.f3sf.servershare.name], self.f3sf.path)
-        fullp = os.path.join(fpath, self.f3sf.filename)
         self.f3raw.source_md5 = self.actual_md5
         self.f3raw.claimed = False
         self.f3raw.producer = self.adminprod
@@ -198,6 +197,7 @@ class TestUploadScript(BaseIntegrationTest):
         jm.Job.objects.create(funcname='rsync_transfer', kwargs={'sf_id': self.f3sf.pk,
             'src_path': os.path.join(settings.TMP_UPLOADPATH, f'{self.f3raw.pk}.{self.f3sf.filetype.filetype}')},
             timestamp=timezone.now(), state=jj.Jobstates.DONE)
+        fullp = os.path.join(fpath, self.f3sf.filename)
         sp = self.run_script(fullp)
         sleep(1)
         self.f3sf.refresh_from_db()

@@ -135,10 +135,10 @@ def run_ready_jobs(job_fn_map, job_ds_map, active_jobs):
                         jwrapper.run(**job.kwargs)
                     except RuntimeError as e:
                         print('Error occurred, trying again automatically in next round')
-                        jwrapper.set_error(job, errmsg=e)
+                        jwrapper.set_error(job, errmsg=str(e))
                     except Exception as e:
                         print(f'Error occurred: {e} --- not executing this job')
-                        jwrapper.set_error(job, errmsg=e)
+                        jwrapper.set_error(job, errmsg=str(e))
                     else:
                         # PROCESSING state update saved here:
                         job.save()

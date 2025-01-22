@@ -12,7 +12,7 @@ from jobs.models import Job
 
 class StoredFileType(models.Model):
     name = models.TextField(unique=True) 
-    filetype = models.TextField() # fasta, tabular, raw, analysisoutput
+    filetype = models.TextField() # fasta, tabular, raw, analysisoutput, d, etc
     is_folder = models.BooleanField(default=False)
     user_uploadable = models.BooleanField(default=False)
     is_rawdata = models.BooleanField(default=False)
