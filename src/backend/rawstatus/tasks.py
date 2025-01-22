@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import zipfile
 import sqlite3
+import xml
+from xml.etree import ElementTree as ET
 from ftplib import FTP
 from urllib.parse import urljoin, urlsplit
 from time import sleep
@@ -428,6 +430,32 @@ def classify_msrawfile(self, token, fnid, ftypename, servershare, path, fname):
                 raise
         
     elif ftypename == settings.BRUKERRAW:
+        # Get classification (dataset, QC) from XML metadata
+        metafile = os.path.join(fpath, 'HyStarMetadata.xml')
+        try:
+            root = ET.parse(metafile).getroot()
+        except FileNotFoundError:
+            msg = 'Could not find HyStarMetadata.xml file to determine MS classification'
+            taskfail_update_db(self.request.id, msg=msg)
+            raise
+        except xml.etree.ElementTree.ParseError:
+            msg = 'File HyStarMetadata.xml does not contain valid XML'
+            taskfail_update_db(self.request.id, msg=msg)
+            raise
+
+        ns = 'https://www.bruker.com/compass/metadata'
+        try:
+            sample_el = root.find('./{%s}Sample/{%s}SampleTable/{%s}Sample' % (ns, ns, ns))
+            val = sample_el.attrib['Description']
+        except (AttributeError, KeyError):
+            msg = ('Could not find Sample element with a Description attribute for MS '
+                    'file classification')
+            taskfail_update_db(self.request.id, msg=msg)
+            raise
+        if not val:
+            val = False
+
+        # Get MS time
         try:
             con = sqlite3.Connection(os.path.join(fpath, 'analysis.tdf'))
         except sqlite3.OperationalError:
@@ -435,31 +463,15 @@ def classify_msrawfile(self, token, fnid, ftypename, servershare, path, fname):
                     f'categorization as {settings.BRUKERRAW} of the file correct?')
             raise
         try:
-            cur = con.execute('SELECT Value FROM GlobalMetadata WHERE Key=?', (settings.BRUKERKEY,))
-        except sqlite3.DatabaseError as e:
-            if e == 'file is not a database':
-                msg = 'This raw file is not an database, possibly it is corrupted'
-            elif e == 'no such table: GlobalMetadata':
-                msg = 'Could not find correct DB table GlobalMetadata in raw file, contact admin'
-            else:
-                msg = e
-            taskfail_update_db(self.request.id, msg=msg)
-            raise
-        try:
-            val = cur.fetchone()[0]
-        except TypeError:
-            print(f'File {fname} of type {ftypename} parsed, could not find key: {settings.BRUKERKEY}')
-
-        try:
             # Find last frame time (gradient length)
             cur = con.execute('SELECT Time FROM Frames ORDER BY ROWID DESC LIMIT 1')
         except sqlite3.DatabaseError as e:
-            if e == 'file is not a database':
-                msg = 'This raw file is not an database, possibly it is corrupted'
-            elif e == 'no such table: Frames':
+            if str(e) == 'file is not a database':
+                msg = 'This raw file is not a database, possibly it is corrupted'
+            elif str(e) == 'no such table: Frames':
                 msg = 'Could not find correct DB table Frames in raw file, contact admin'
             else:
-                msg = e
+                msg = str(e)
             taskfail_update_db(self.request.id, msg=msg)
             raise
         try:
@@ -486,7 +498,8 @@ def classify_msrawfile(self, token, fnid, ftypename, servershare, path, fname):
         is_qc, dset_id = False, False
 
     url = urljoin(settings.KANTELEHOST, reverse('files:classifiedraw'))
-    print(f'File {fname} of type {ftypename} parsed, result: dset_id={dset_id}, is_qc={is_qc}')
+    print(f'File {fname} of type {ftypename} parsed, result: dset_id={dset_id}, is_qc={is_qc}, '
+            f'mstime={mstime_min}')
     postdata = {'token': token, 'fnid': fnid, 'qc': is_qc, 'dset_id': dset_id, 'mstime': mstime_min,
             'task_id': self.request.id}
     try:

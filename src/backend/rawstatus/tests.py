@@ -5,6 +5,7 @@ import shutil
 import sqlite3
 import zipfile
 import signal
+from string import Template
 from time import sleep, time
 from io import BytesIO
 from base64 import b64encode
@@ -379,9 +380,11 @@ class TestUploadScript(BaseIntegrationTest):
         dm.Operator.objects.create(user=self.user) # need operator for QC jobs
         fpath = os.path.join(settings.SHAREMAP[self.f3sf.servershare.name], self.f3sf.path)
         fullp = os.path.join(fpath, self.f3sf.filename)
-        con = sqlite3.Connection(os.path.join(fullp, 'analysis.tdf'))
-        con.execute(f'UPDATE GlobalMetadata SET Value="DIAQC" WHERE Key="{settings.BRUKERKEY}"')
-        con.commit()
+        with open(os.path.join(fullp, 'HyStarMetadata_template.xml')) as fp:
+            template = Template(fp.read())
+            meta_xml = template.substitute({'BRUKEY': settings.BRUKERKEY, 'DESC': 'DIAQC'})
+        with open(os.path.join(fullp, 'HyStarMetadata.xml'), 'w') as fp: 
+            fp.write(meta_xml)
         old_raw = rm.RawFile.objects.last()
         tmpdir = mkdtemp()
         outbox = os.path.join(tmpdir, 'testoutbox')
@@ -612,9 +615,12 @@ class TestUploadScript(BaseIntegrationTest):
         dm.Operator.objects.create(user=self.user) # need operator for QC jobs
         fpath = os.path.join(settings.SHAREMAP[self.f3sf.servershare.name], self.f3sf.path)
         fullp = os.path.join(fpath, self.f3sf.filename)
-        con = sqlite3.Connection(os.path.join(fullp, 'analysis.tdf'))
-        con.execute(f'UPDATE GlobalMetadata SET Value="{self.oldds.pk}" WHERE Key="{settings.BRUKERKEY}"')
-        con.commit()
+        # Using BRUKERKEY=Description with current metadata:
+        with open(os.path.join(fullp, 'HyStarMetadata_template.xml')) as fp:
+            template = Template(fp.read())
+            meta_xml = template.substitute({'BRUKEY': settings.BRUKERKEY, 'DESC': self.oldds.pk})
+        with open(os.path.join(fullp, 'HyStarMetadata.xml'), 'w') as fp: 
+            fp.write(meta_xml)
         old_raw = rm.RawFile.objects.last()
         tmpdir = mkdtemp()
         outbox = os.path.join(tmpdir, 'testoutbox')

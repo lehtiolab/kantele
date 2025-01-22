@@ -1,0 +1,8 @@
+<Metadata xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" schemaVersion="1.0.0.0" xmlns="https://www.bruker.com/compass/metadata">
+	<Sample>
+		<SampleTable>
+			<Sample analysisID="some-uuid" Line="7" CheckToRun="0" Status="1" Injections="1" Volume="1" Amount="0" Dilution="0" Weight="0" Position="S1-A2" InternalStandard="1" PreRunTime="0" SampleID="Your-sample-name" DataPath="D:\path\to\file.d" Operator="" SampleType="Sample" ReferenceSampleNum="" NumOnGel="" ResultDatafile="" NumberInSequence="" CalibAction="-" CalibLevel="" AcquisitionID="" SaltConc="" LastLineInGroup="" InstrumentCalibration="" RunDAScript="" MBToolsStateDoIt="" MBToolsStateRef="" MBToolsStateDone="" MBToolsLineID="" MBToolsRefLineID="" MBToolsRefInjectionNo="" MBToolsPredicted="" MBToolsIonization="" MBToolsRefLineID2="" MBToolsDiffNo="" MBToolsDiffPath="" $BRUKEY="$DESC" StationName="Computername?" Submitter_Language="" Submitter_Login="demo" Submitter_Name="Demo User" Submitter_Supervisor="" Method="D:\Methods\LC.m?something" MS_Method="D:\Methods\TIMS.m?something" MSProcessingMethod="" AutosamplerMethod="Standard" MS_Method_Defined="1">
+			</Sample>
+		</SampleTable>
+	</Sample>
+</Metadata>
