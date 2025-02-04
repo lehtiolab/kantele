@@ -170,6 +170,7 @@ def get_line_data(qcruns, dtypes):
     long_qc = []
     for qcrun in qcruns:
         datepoints = [{'key': lplot.datatype, 'value': lplot.value,
+            'run': qcrun.pk,
             'date': datetime.strftime(qcrun.date, '%Y-%m-%d %H:%M')}
         for lplot in qcrun.lineplotdata_set.filter(datatype__in=dtypes)]
         long_qc.extend(datepoints)
@@ -182,6 +183,7 @@ def get_boxplot_data(qcruns, dtype):
         bplot = qcrun.boxplotdata_set.get(datatype=dtype)
         dayvals = {
                 'key': dtype,
+                'run': qcrun.pk,
                 'date': datetime.strftime(qcrun.date, '%Y-%m-%d %H:%M'),
                 'q1': bplot.q1,
                 'q2': bplot.q2,
@@ -214,12 +216,13 @@ def show_qc(request, acqmode, instrument_id, daysago, maxdays):
     qcruns = qcruns.filter(runtype=runtype_q)
     psmdata = get_line_data(qcruns, dtypes=[LDT.NRSCANS, LDT.NRPSMS])
     miscleavdata = get_line_data(qcruns, dtypes=[LDT.MISCLEAV1, LDT.MISCLEAV2])
-
+    
     totalpsms_date = {x['date']: x['value'] for x in psmdata if x['key'] == LDT.NRPSMS}
     mcratio = [{**x, 'value': x['value'] / totalpsms_date[x['date']]} for x in miscleavdata if x['key'] == LDT.MISCLEAV1]
     outjson = {'runtype': AcquisistionMode(runtype_q).label, 'seriesmap': {
         'line': {k: label for k, label in LDT.choices},
         'box': {k: label for k, label in QDT.choices},
+        'fns': {qcrun.pk: qcrun.rawfile.name for qcrun in qcruns},
         }, 'data': {
         'ident': get_line_data(qcruns, dtypes=[LDT.NRPEPTIDES,
             LDT.NRPROTEINS, LDT.NRPEPTIDES_UNI]),

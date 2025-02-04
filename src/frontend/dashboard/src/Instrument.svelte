@@ -112,7 +112,9 @@ function linePlot(plotdiv, data, title, ylabel, denom) {
         Plot.tip(data, Plot.pointerX({
           x: 'date',
           y: 'value',
-          title: (d) => `${d.date}\n${seriesmap.line[d.key]}: ${d.value}`,
+          title: (d) => `${d.date}\n
+${seriesmap.line[d.key]}: ${d.value}\n
+${seriesmap.fns[d.run]}`,
         })),
       ],
     });
@@ -161,7 +163,9 @@ function linePlotWithQuantiles(plotdiv, data, title, ylabel) {
         Plot.tip(data, Plot.pointerX({
           x: 'date',
           y: 'q2',
-          title: (d) => `${d.date}\n${seriesmap.box[d.key]}: ${d.q2}`,
+          title: (d) => `${d.date}\n
+            ${seriesmap.box[d.key]}: ${d.q2}\n
+            ${seriesmap.fns[d.run]}`,
         })),
       ]
     });
