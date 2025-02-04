@@ -116,7 +116,7 @@ class AnalysisTest(BaseTest):
                 dataset=self.ds, setname=self.anaset, field='__regex', value='hej')
         self.adsif = am.AnalysisDSInputFile.objects.create(sfile=self.f3sfmz, analysisset=self.anaset,
                 dsanalysis=self.dsa)
-        self.isoqvals = {'denoms': {self.qch.pk: True}, 'sweep': False, 'report_intensity': False}
+        self.isoqvals = {'denoms': {self.qch.pk: True}, 'sweep': False, 'report_intensity': False, 'remove': {}}
         am.AnalysisIsoquant.objects.create(analysis=self.ana, setname=self.anaset,
                 value=self.isoqvals)
         self.samples = am.AnalysisSampletable.objects.create(analysis=self.ana,
@@ -314,9 +314,9 @@ class TestGetAnalysis(AnalysisTest):
         </script>
         '''
         self.assertInHTML(html_dsids, resphtml)
-        self.isoqvals = {'denoms': [self.qch.pk], 'sweep': False, 'report_intensity': False}
+        self.isoqvals = {'denoms': {self.qch.pk: True}, 'sweep': False, 'report_intensity': False, 'remove': {}}
         html_ana = f'''<script id="analysis_data" type="application/json">
-        {{"analysis_id": {self.ana.pk}, "analysisname": "{self.ana.name}", "flags": [{self.param1.pk}], "multicheck": ["{self.param2.pk}___{self.anamcparam.value[0]}"], "inputparams": {{"{self.param3.pk}": {self.ananormparam.value}, "{self.param4.pk}": "{self.anaselectparam.value}"}}, "multifileparams": {{"{self.pfn1.pk}": {{"0": {self.tmpsf.pk}}}}}, "fileparams": {{"{self.pfn2.pk}": {self.txtsf.pk}}}, "isoquants": {{"{self.anaset.setname}": {{"chemistry": "{self.ds.quantdataset.quanttype.shortname}", "channels": {{"{self.qch.name}": ["{self.projsam1.sample}", {self.qch.pk}]}}, "samplegroups": {{"{self.samples.samples[0][0]}": "{self.samples.samples[0][3]}"}}, "denoms": {{"{self.qch.pk}": true}}, "report_intensity": false, "sweep": false}}}}, "added_results": {{}}, "editable": true, "jobstate": "{self.anajob.state}", "external_desc": "", "wfversion_id": {self.nfwf.pk}, "wfid": {self.wf.pk}, "external_results": false, "base_analysis": {{}}}}
+        {{"analysis_id": {self.ana.pk}, "analysisname": "{self.ana.name}", "flags": [{self.param1.pk}], "multicheck": ["{self.param2.pk}___{self.anamcparam.value[0]}"], "inputparams": {{"{self.param3.pk}": {self.ananormparam.value}, "{self.param4.pk}": "{self.anaselectparam.value}"}}, "multifileparams": {{"{self.pfn1.pk}": {{"0": {self.tmpsf.pk}}}}}, "fileparams": {{"{self.pfn2.pk}": {self.txtsf.pk}}}, "isoquants": {{"{self.anaset.setname}": {{"chemistry": "{self.ds.quantdataset.quanttype.shortname}", "channels": {{"{self.qch.name}": ["{self.projsam1.sample}", {self.qch.pk}]}}, "samplegroups": {{"{self.samples.samples[0][0]}": "{self.samples.samples[0][3]}"}}, "denoms": {{"{self.qch.pk}": true}}, "remove": {{}}, "report_intensity": false, "sweep": false}}}}, "added_results": {{}}, "editable": true, "jobstate": "{self.anajob.state}", "external_desc": "", "wfversion_id": {self.nfwf.pk}, "wfid": {self.wf.pk}, "external_results": false, "base_analysis": {{}}}}
         </script>
         '''
         self.assertInHTML(html_ana, resphtml)
@@ -625,9 +625,13 @@ class TestStoreAnalysis(AnalysisTest):
             'components': {'ISOQUANT_SAMPLETABLE': {'hello': 'yes'},
                 'INPUTDEF': 'a',
                 'ISOQUANT': {'setA': {'chemistry': quant.shortname,
-                    'denoms': {x.channel.name: [f'{x}_sample', x.channel.id] for x in quant.quanttypechannel_set.all()},
+                    'denoms': {quant.quanttypechannel_set.first().channel.name: True,
+                        quant.quanttypechannel_set.last().channel.name: False},
+                    'channels': {x.channel.name: [f'{x}_sample', x.channel.id] for x in quant.quanttypechannel_set.all()},
                     'report_intensity': False,
                     'sweep': False,
+                    'remove': {quant.quanttypechannel_set.first().channel.name: True,
+                        quant.quanttypechannel_set.last().channel.name: False},
                     }},
                 },
             'analysisname': 'Test new analysis',

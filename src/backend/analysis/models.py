@@ -219,6 +219,7 @@ class PsetComponent(models.Model):
         COMPLEMENT_ANALYSIS = 5, 'MS search complementing earlier run or rerun from PSMs'
         PREFRAC = 6, 'Prefractionated MS data'
         HIRIEF_STRIP_TOLERANCE = 7, 'HiRIEF strip tolerance'
+        REMOVE_CHANNEL = 8, 'Remove channel from experiment set'
         # DSET_NAMES ?
 
     pset = models.ForeignKey(ParameterSet, on_delete=models.CASCADE)
@@ -430,7 +431,7 @@ class AnalysisIsoquant(models.Model):
     # FIXME can we not split the JSON field into denoms -JSON, 2x boolean, default=False?
     analysis = models.ForeignKey(Analysis, on_delete=models.CASCADE)
     setname = models.ForeignKey(AnalysisSetname, on_delete=models.CASCADE)
-    #{denoms: [ch_id, ch_id], sweep: false, report_intensity: false}
+    #{denoms: [ch_id, ch_id], sweep: false, report_intensity: false, remove: [ch_id, ch_id]}
     value = models.JSONField() 
 
     class Meta:
