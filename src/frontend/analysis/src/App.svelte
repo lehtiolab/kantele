@@ -130,8 +130,10 @@ function validate() {
 		}
 	});
   Object.entries(config.isoquants).forEach(([sname, isoq]) => {
-    if (('ISOQUANT' in wf.components) && !isoq.report_intensity && !isoq.sweep && !Object.values(isoq.denoms).some(x=>x)) {
-      notif.errors[`No denominator, sweep or intensity values are filled in for set ${sname}`] = 1;
+    if (('ISOQUANT' in wf.components) && !isoq.report_intensity && !isoq.sweep &&
+      !Object.entries(isoq.denoms).filter(([ch, val]) => !isoq.remove[ch]).map(x => x[1]).some(x=>x)) {
+      notif.errors[`No denominator, sweep or intensity values are filled in for set ${sname}, or denominator
+        is a removed channel`] = 1;
     }
     Object.entries(isoq.samplegroups).forEach(([ch, sgroup]) => {
       if (sgroup && !charRe.test(sgroup)) {
@@ -548,6 +550,15 @@ function sortChannels(channels) {
 }
 
 
+function toggleRmCh(setn, ch) {
+  if (ch in config.isoquants[setn].remove && config.isoquants[setn].remove[ch]) {
+    config.isoquants[setn].remove[ch] = false;
+  } else {
+    config.isoquants[setn].remove[ch] = true;
+  }
+}
+
+
 async function renewToken() {
   const post = {
     analysis_id: analysis_id,
@@ -581,6 +592,7 @@ function updateIsoquant(dsid_changed) {
           channels: ds.channels,
           samplegroups: Object.fromEntries(Object.keys(ds.channels).map(x => [x, ''])),
           denoms: Object.fromEntries(Object.keys(ds.channels).map(x => [x, false])),
+          remove: Object.fromEntries(Object.keys(ds.channels).map(x => [x, false])),
           report_intensity: false,
           sweep: false,
         };
@@ -997,7 +1009,7 @@ onMount(async() => {
   {#if wf}
   {#if 'ISOQUANT' in wf.components}
   <div class="box">
-		<div class="title is-5">Isobaric quantification</div>
+    <div class="title is-5">Isobaric quantification</div>
     {#if 'LABELCHECK_ISO' in wf.components}
     <span>Labelcheck pipeline does not require individual channel information</span>
     {:else if !(Object.entries(config.isoquants).length)}
@@ -1051,7 +1063,10 @@ onMount(async() => {
                     LEAVE EMPTY FOR INTERNAL STANDARDS!
                   </th>
                 {/if}
-        		  </tr>
+                {#if ('REMOVE_CHANNEL' in wf.components)}
+                <th></th>
+                {/if}
+              </tr>
             </thead>
             <tbody>
               {#each sortChannels(isoq[1].channels) as {ch, sample}}
@@ -1065,10 +1080,21 @@ onMount(async() => {
                 <td>{sample}</td>
                 {#if 'ISOQUANT_SAMPLETABLE' in wf.components}
                 <td>
+                  {#if isoq[1].remove[ch]}
+                  Empty channel
+                  {:else}
                   <input type="text" class="input" bind:value={isoq[1].samplegroups[ch]} placeholder="Sample group or empty (e.g. CTRL, TREAT)">
+                  {/if}
                 </td>
                 {/if}
-        		  </tr>
+                <td>
+                  {#if ('REMOVE_CHANNEL' in wf.components && !isoq[1].remove[ch])}
+                    <button class="button is-small is-rounded is-danger is-outlined" on:click={e => toggleRmCh(isoq[0], ch)}><span>Remove</span><span class="icon is-small"><i class="fas fa-times"></i></span></button>
+                  {:else if ('REMOVE_CHANNEL' in wf.components && isoq[1].remove[ch])}
+                    <button class="button is-small is-rounded is-success is-outlined" on:click={e => toggleRmCh(isoq[0], ch)}><span>Add</span><span class="icon is-small"><i class="fas fa-times"></i></span></button>
+                  {/if}
+                </td>
+              </tr>
               {/each}
             </tbody>
           </table>

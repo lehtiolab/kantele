@@ -733,6 +733,7 @@ def store_analysis(request):
     # Init
     jobparams = defaultdict(list)
     isoq_cli = []
+    rm_ch_cli = []
     db_isoquant = {}
 
     # First do checks so we dont save stuff on errors:
@@ -867,7 +868,12 @@ def store_analysis(request):
 
     def parse_isoquant(quants):
         '''Parse passed isoquant for job and DB'''
-        vals = {'sweep': False, 'report_intensity': False, 'denoms': {}}
+        vals = {'sweep': False, 'report_intensity': False, 'denoms': {}, 'remove': {}}
+        if quants.get('remove', False):
+            vals['remove'] = quants['remove']
+            rm_ch = ':'.join([ch for ch, do_rm in vals['remove'].items() if do_rm])
+        else:
+            rm_ch = False
         if quants['sweep']:
             vals['sweep'] = True
             calc_psm = 'sweep'
@@ -878,8 +884,8 @@ def store_analysis(request):
             vals['denoms'] = quants['denoms']
             calc_psm = ':'.join([ch for ch, is_denom in vals['denoms'].items() if is_denom])
         else:
-            return False, False
-        return vals, calc_psm
+            vals, calc_psm = False, False
+        return vals, calc_psm, rm_ch
 
     # isobaric quant, need passed: setname, any denom, or sweep or intensity
     if 'ISOQUANT' in wf_components:
@@ -887,14 +893,18 @@ def store_analysis(request):
             if setname not in set(req['dssetnames'].values()):
                 response_errors.append(f'Isobaric setname {setname} '
                 'could not be matched to dataset setnames, something went wrong')
-            vals, calc_psm = parse_isoquant(quants)
+            vals, calc_psm, ch_rm = parse_isoquant(quants)
             if not vals:
                 response_errors.append('Need to select one of '
                     f'sweep/intensity/denominator for set {setname}')
             db_isoquant[setname] = vals
-            isoq_cli.append('{}:{}:{}'.format(setname, quants['chemistry'], calc_psm))
+            isoq_cli.append(f'{setname}:{quants["chemistry"]}:{calc_psm}')
+            if rm_ch_cli:
+                rm_ch_cli.append(f'{setname}:{ch_rm}')
         if isoq_cli:
             jobparams['--isobaric'] = [' '.join(isoq_cli)]
+        if 'REMOVE_CHANNEL' in wf_components and rm_ch_cli:
+            jobparams['--remove_channels'] = [' '.join(rm_ch_cli)]
 
     if not req['wfid'] and not req['upload_external']:
         response_errors.append('No workflow passed, also not uploading external data, '
@@ -1102,8 +1112,10 @@ def store_analysis(request):
         # Add base analysis isoquant to the job params if it is complement analysis
         if is_complement:
             for setname, quants in shadow_isoquants.items():
-                vals, calc_psm = parse_isoquant(quants)
-                isoq_cli.append('{}:{}:{}'.format(setname, quants['chemistry'], calc_psm))
+                vals, calc_psm, rm_ch = parse_isoquant(quants)
+                isoq_cli.append(f'{setname}:{quants["chemistry"]}:{calc_psm}')
+                if 'REMOVE_CHANNEL' in wf_components and rm_ch_cli:
+                    rm_ch_cli.append(f'{setname}:{ch_rm}')
         # FIXME if fractionated, add the old mzmls for the plate QC count - yes that is necessary 
         # because plate names are not stored in the SQLite - maybe it should?
         # Options:
@@ -1167,6 +1179,7 @@ def get_isoquants(analysis, sampletables):
                 'channels': {name: (qcsamples[chid], chid) for name, chid in channels.items()},
                 'samplegroups': {samch[0]: samch[3] for samch in sampletables if samch[1] == aiq.setname.setname},
                 'denoms': aiq.value['denoms'],
+                'remove': aiq.value.get('remove', {}),
                 'report_intensity': aiq.value['report_intensity'],
                 'sweep': aiq.value['sweep'],
                 }
