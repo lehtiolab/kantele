@@ -899,7 +899,7 @@ def store_analysis(request):
                     f'sweep/intensity/denominator for set {setname}')
             db_isoquant[setname] = vals
             isoq_cli.append(f'{setname}:{quants["chemistry"]}:{calc_psm}')
-            if rm_ch_cli:
+            if ch_rm:
                 rm_ch_cli.append(f'{setname}:{ch_rm}')
         if isoq_cli:
             jobparams['--isobaric'] = [' '.join(isoq_cli)]
