@@ -445,13 +445,15 @@ def classify_msrawfile(self, token, fnid, ftypename, servershare, path, fname):
 
         ns = 'https://www.bruker.com/compass/metadata'
         try:
-            sample_el = root.find('./{%s}Sample/{%s}SampleTable/{%s}Sample' % (ns, ns, ns))
+            sample_el = root.find(f'./{{{ns}}}Sample/SampleTable/Sample')
             val = sample_el.attrib['Description']
-        except (AttributeError, KeyError):
-            msg = ('Could not find Sample element with a Description attribute for MS '
-                    'file classification')
+        except AttributeError:
+            msg = 'Could not find Sample element in HyStarMetadata, check if file is OK'
             taskfail_update_db(self.request.id, msg=msg)
             raise
+        except KeyError:
+            # In case Hystarmetadata has been changed to no longer include Description
+            val = False
         if not val:
             val = False
 
