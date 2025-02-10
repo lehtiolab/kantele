@@ -5,6 +5,7 @@ services:
             - mq
             - storage_mvfiles
             - storage_downloads
+            - storage_web_rsync
             - tulos_ingester
             - upload_bay_rsync
         extends:
@@ -95,6 +96,27 @@ services:
           TMPSHARE: '/storage/tmp'
           ANALYSISSHARE: '/storage/analysis'
           STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
+
+    storage_web_rsync:
+        extends:
+            file: ./docker-compose-dev.yml
+            service: storage
+        env_file:
+            - testing.env
+        command: celery -A kantele worker -Q web_rsync -n web_rsync.%h --concurrency=1
+        volumes:
+          # Overwrite dev storage here
+            - type: bind
+              source: ../../data/teststorage
+              target: /storage
+        environment:
+            KANTELEHOST: web
+            TMPSHARE: '/storage/tmp'
+            WEBSHARE: '/storage/web'
+            ANALYSISSHARE: '/storage/analysis'
+            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
+            RSYNC_SSHPORT: "${RSYNC_SSHPORT}"
+            HOST_UPLOADDIR: /storage/uploads
 
     storage_downloads:
         extends:
