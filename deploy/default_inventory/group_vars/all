@@ -22,6 +22,7 @@ celeryenv_file: "{{ kanteledir }}/celery.env"
 kantelelogdir: "{{ kanteledir }}/log"
 
 queue_local: mv_md5_storage
+queue_web_rsync: web_rsync
 queue_dl: file_download
 queue_backup: backup_archive
 queue_scan: scaninbox

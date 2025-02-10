@@ -121,7 +121,7 @@ def download_px_file_raw(self, ftpurl, ftpnetloc, sf_id, raw_id, shasum, size, s
     print('MD5 of {} is {}, registered in DB'.format(dstfile, postdata['md5']))
 
 
-@shared_task(queue=settings.QUEUE_FILE_DOWNLOAD, bind=True)
+@shared_task(queue=settings.QUEUE_WEB_RSYNC, bind=True)
 def rsync_transfer_file(self, sfid, srcpath, dstpath, dstsharename, do_unzip, stablefiles):
     '''Uses rsync to transfer uploaded file from KANTELEHOST/other RSYNC_HOST to storage server.
     In case of a zipped folder transfer, the file is unzipped and an MD5 check is done 
