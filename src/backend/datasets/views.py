@@ -1570,7 +1570,7 @@ def update_labelcheck(data, qtype):
         try:
             exis_q = oldqfcs.pop(fn['associd'])
         except KeyError:
-            models.QuantFileChannel.objects.create(dsrawfile_id=fn, channel=sam['channel'])
+            models.QuantFileChannel.objects.create(dsrawfile_id=fn['associd'], channel_id=sam['channel'])
         else:
             if sam['channel'] != exis_q.channel_id:
                 exis_q.channel_id = sam['channel']
