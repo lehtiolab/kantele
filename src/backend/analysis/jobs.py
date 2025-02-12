@@ -324,7 +324,9 @@ class RunNextflowWorkflow(MultiFileJob):
             profiles = nfwf.profiles
         params = [str(x) for x in kwargs['inputs']['params']]
         # Runname defined when run executed (FIXME can be removed, no reason to not do that here)
-        params.extend(['--name', 'RUNNAME__PLACEHOLDER'])
+        # RunID is probably only used in a couple of pipelines but it's nice to use "our" analysis ID here
+        # and needs to be coupled here, cannot have user make it
+        params.extend(['--name', 'RUNNAME__PLACEHOLDER', '--runid', f'run_{analysis.pk}'])
         self.run_tasks.append(((run, params, stagefiles, ','.join(profiles), nfwf.nfversion), {}))
         analysis.log.append('[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S')))
         analysis.save()
