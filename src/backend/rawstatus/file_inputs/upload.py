@@ -29,7 +29,6 @@ import argparse
 import getpass
 import json
 import hashlib
-import subprocess
 import shutil
 from glob import glob
 from base64 import b64decode
@@ -50,6 +49,7 @@ def zipfolder(folder, arcname):
 
 
 def get_new_file_entry(fn, raw_is_folder):
+    # This function is try/excepted FileNotFound higher in a function
     if raw_is_folder or os.path.isdir(fn):
         size = sum(os.path.getsize(os.path.join(wpath, subfile))
                 for wpath, subdirs, files in os.walk(fn) for subfile in files if subfile)
@@ -69,6 +69,7 @@ def get_csrf(cookies, referer_host):
 
 
 def check_in_instrument(config, configfn, logger):
+    # TODO add getting cookies, more config (disk name, etc)
     '''Check in instrument with backend to get/renew/validate token, and provide
     a client heartbeat to backend.
     This function has side-effects in that it mutates config dict, which is why
@@ -101,17 +102,22 @@ def check_in_instrument(config, configfn, logger):
                     passwordfail = True
             username = input('Kantele username: ')
             password = getpass.getpass('Kantele password: ')
-            init_resp = session.get(loginurl, verify=certifi.where())
-            loginresp = session.post(loginurl,
-                    data={'username': username, 'password': password},
-                    headers=get_csrf(session.cookies, kantelehost),
-                    verify=certifi.where())
-            tokenresp = session.post(urljoin(kantelehost, 'files/token/'),
-                    headers=get_csrf(session.cookies, kantelehost),
-                    json={'producer_id': clid, 'ftype_id': config['filetype_id'],
-                        'archive_only': False},
-                    verify=certifi.where()
-                    )
+            try:
+                init_resp = session.get(loginurl, verify=certifi.where())
+                loginresp = session.post(loginurl,
+                        data={'username': username, 'password': password},
+                        headers=get_csrf(session.cookies, kantelehost),
+                        verify=certifi.where())
+                tokenresp = session.post(urljoin(kantelehost, 'files/token/'),
+                        headers=get_csrf(session.cookies, kantelehost),
+                        json={'producer_id': clid, 'ftype_id': config['filetype_id'],
+                            'archive_only': False},
+                        verify=certifi.where()
+                        )
+            except requests.exceptions.ConnectionError:
+                print('Something went wrong connecting to Kantele to log you in, '
+                        'try again or contact admin')
+                sys.exit(1)
             if tokenresp.status_code != 403:
                 break
             if passwordfail:
@@ -123,37 +129,43 @@ def check_in_instrument(config, configfn, logger):
         token_state = 'new'
         token, _h, _d = b64decode(result['user_token']).decode('utf-8').split('|')
         config['token'] = token
-    else:
-        # Validate/renew existing token
-        loginresp = session.get(loginurl, verify=certifi.where())
-        valresp = session.post(urljoin(kantelehost, 'files/instruments/check/'),
-                headers=get_csrf(loginresp.cookies, kantelehost),
-                json={'token': config['token'], 'client_id': clid},
-                verify=certifi.where()
-                )
-        if clid and valresp.status_code == 403:
-            # Only fetch new tokens if this is instrumewnt with client id
-            logger.error('Token expired or invalid, will try to fetch new token')
-            del(config['token'])
-            # Call itself to get new fresh token
-            token_state = check_in_instrument(config, configfn, logger)
-            token_state = 'ok' # already new/saved in nested function call
-        elif valresp.status_code == 500:
-            return 'Could not check in with Kantele due to server error, talk to admin'
-        elif valresp.status_code != 200:
-            return f'Could not check in with Kantele, server replied {valresp.json()["error"]}'
-        else:
-            validated = valresp.json()
-            if validated['newtoken']:
-                logger.info('Got a new token from server, which will expire on '
-                        f'{validated["expires"]}')
-                token_state = 'new'
-                config['token'] = validated['newtoken']
-            logger.info(f'Token OK, expires on {validated["expires"]}')
-            config['md5_stable_fns'] = validated['stablefiles']
-    if token_state == 'new':
         with open(configfn, 'w') as fp:
             json.dump(config, fp)
+    else:
+        # Validate/renew existing token
+        try:
+            loginresp = session.get(loginurl, verify=certifi.where())
+            valresp = session.post(urljoin(kantelehost, 'files/instruments/check/'),
+                    headers=get_csrf(loginresp.cookies, kantelehost),
+                    json={'token': config['token'], 'client_id': clid},
+                    verify=certifi.where()
+                    )
+        except requests.exceptions.ConnectionError:
+            logger.error('Could not contact Kantele to update token, will try again later')
+        else:
+            if clid and valresp.status_code == 403:
+                # Only fetch new tokens if this is instrumewnt with client id
+                logger.error('Token expired or invalid, will try to fetch new token')
+                del(config['token'])
+                # Call itself to get new fresh token
+                token_state = check_in_instrument(config, configfn, logger)
+                token_state = 'ok' # already new/saved in nested function call
+            elif valresp.status_code == 500:
+                return 'Could not check in with Kantele due to server error, talk to admin'
+            elif valresp.status_code != 200:
+                return f'Could not check in with Kantele, server replied {valresp.json()["error"]}'
+            else:
+                validated = valresp.json()
+                if validated['newtoken']:
+                    logger.info('Got a new token from server, which will expire on '
+                            f'{validated["expires"]}')
+                    token_state = 'new'
+                    config['token'] = validated['newtoken']
+                logger.info(f'Token OK, expires on {validated["expires"]}')
+                config['md5_stable_fns'] = validated['stablefiles']
+            if token_state == 'new':
+                with open(configfn, 'w') as fp:
+                    json.dump(config, fp)
     return False
 
 
@@ -364,14 +376,19 @@ def register_and_transfer(regq, regdoneq, logqueue, ledger, config, configfn, do
     logger = logging.getLogger(f'{clientname}.producer.worker')
     heartbeat_t = time()
     while True:
-        loginresp = requests.get(urljoin(kantelehost, 'login/'), verify=certifi.where())
+        # TODO put cookies call in transfer config, update when you do instrument_checkin
+        try:
+            loginresp = requests.get(urljoin(kantelehost, 'login/'), verify=certifi.where())
+        except requests.exceptions.ConnectionError:
+            print('Connecting error trying to contact Kantele. Try again or contact admin')
+            sys.exit(1)
         cookies = loginresp.cookies
         newfns = []
         while not regq.empty():
             newfns.append(regq.get())
         if newfns:
             logger.info(f'Registering {len(newfns)} new file(s)')
-        trffns, ledgerchanged = [], False
+        ledgerchanged = False
         for fndata in newfns:
             # DO NOT USE: while regq.qsize() here,
             # that leads to potential eternal loop when flooded every five seconds
@@ -397,7 +414,10 @@ def register_and_transfer(regq, regdoneq, logqueue, ledger, config, configfn, do
                 if fndata['is_dir']:
                     # Zipped intermediate files are removed here
                     if os.path.exists(fndata['fpath']):
-                        os.remove(fndata['fpath'])
+                        try:
+                            os.remove(fndata['fpath'])
+                        except FileNotFoundError:
+                            logger.warning(f'Error while removing done file: zipped file {fndata["fpath"]} already removed')
                     file_done = fndata['nonzipped_path']
                 else:
                     file_done = fndata['fpath']
@@ -416,66 +436,56 @@ def register_and_transfer(regq, regdoneq, logqueue, ledger, config, configfn, do
                 ledgerchanged = True
 
             elif query['state'] == 'transfer':
-                trffns.append((cts_id, fndata))
+                try:
+                    resp = transfer_file(trf_url, fndata['fpath'], fndata['fnid'], config['token'],
+                            cookies, kantelehost)
+                except requests.exceptions.ConnectionError:
+                    # FIXME wrong exception!
+                    logger.warning(f'Could not transfer {fndata["fpath"]}')
+                else:
+                    if resp.status_code == 500:
+                        result = {'error': 'Kantele server error when transferring file, '
+                            'please contact administrator'}
+                    elif resp.status_code == 413:
+                        result = {'error': 'File to transfer too large for Kantele server! '
+                                'Please contact administrator'}
+                    else:
+                        result = resp.json()
+                    if resp.status_code != 200:
+                        if 'problem' in result:
+                            if result['problem'] == 'NOT_REGISTERED':
+                                # Re-register in next round
+                                fndata['md5'] = False
+                                # Remove file from collect ledger so it can be
+                                # rediscovered
+                                regdoneq.put(cts_id)
+                            elif result['problem'] == 'ALREADY_EXISTS':
+                                put_in_skipbox(skipbox, fndata, regdoneq, ledger, logger)
+                            elif result['problem'] == 'NO_RSYNC':
+                                put_in_skipbox(skipbox, fndata, regdoneq, ledger, logger)
+                            elif result['problem'] == 'RSYNC_PENDING':
+                                # Do nothing, but print to user
+                                pass
+                            elif result['problem'] == 'MULTIPLE_ENTRIES':
+                                put_in_skipbox(skipbox, fndata, regdoneq, ledger, logger)
+                            elif result['problem'] == 'DUPLICATE_EXISTS':
+                                put_in_skipbox(skipbox, fndata, regdoneq, ledger, logger)
+                            logger.warning(result['error'])
+                        else:
+                            logger.error(f'{result.get("error")} - Error trying to upload file, contact admin')
+                            sys.exit(1)
+                    else:
+                        logger.info(f'Succesful transfer of file {fndata["fpath"]}')
+                    ledgerchanged = True
+                    # After one transferred file, go back to the main while loop
+                    # Otherwise one can wait a long time before all files are transferred,
+                    # in case there are many in outbox, without seeing them being moved.
+                    break
 
         if config['is_manual'] and not ledger.keys():
             # Quit loop for manual file
             break
-        if ledgerchanged:
-            save_ledger(ledger, LEDGERFN)
 
-        # Now transfer registered files
-        for cts_id, fndata in trffns:
-            if time() - heartbeat_t > HEARTBEAT_SECONDS:
-                checkerr = check_in_instrument(config, configfn, logger)
-                if checkerr:
-                    logger.error(checkerr)
-                    sys.exit(1)
-                heartbeat_t = time()
-            if cts_id not in ledger:
-                logger.warning(f'Could not find file with ID {fndata["fn_id"]} locally')
-                continue
-            try:
-                resp = transfer_file(trf_url, fndata['fpath'], fndata['fnid'], config['token'],
-                        cookies, kantelehost)
-            except subprocess.CalledProcessError:
-                # FIXME wrong exception!
-                logger.warning(f'Could not transfer {fndata["fpath"]}')
-            else:
-                if resp.status_code == 500:
-                    result = {'error': 'Kantele server error when transferring file, '
-                        'please contact administrator'}
-                elif resp.status_code == 413:
-                    result = {'error': 'File to transfer too large for Kantele server! '
-                            'Please contact administrator'}
-                else:
-                    result = resp.json()
-                if resp.status_code != 200:
-                    if 'problem' in result:
-                        if result['problem'] == 'NOT_REGISTERED':
-                            # Re-register in next round
-                            fndata['md5'] = False
-                            # Remove file from collect ledger so it can be
-                            # rediscovered
-                            regdoneq.put(cts_id)
-                        elif result['problem'] == 'ALREADY_EXISTS':
-                            put_in_skipbox(skipbox, fndata, regdoneq, ledger, logger)
-                        elif result['problem'] == 'NO_RSYNC':
-                            put_in_skipbox(skipbox, fndata, regdoneq, ledger, logger)
-                        elif result['problem'] == 'RSYNC_PENDING':
-                            # Do nothing, but print to user
-                            pass
-                        elif result['problem'] == 'MULTIPLE_ENTRIES':
-                            put_in_skipbox(skipbox, fndata, regdoneq, ledger, logger)
-                        elif result['problem'] == 'DUPLICATE_EXISTS':
-                            put_in_skipbox(skipbox, fndata, regdoneq, ledger, logger)
-                        logger.warning(result['error'])
-                    else:
-                        logger.error(f'{result.get("error")} - Error trying to upload file, contact admin')
-                        sys.exit(1)
-                else:
-                    logger.info(f'Succesful transfer of file {fndata["fpath"]}')
-                ledgerchanged = True
         if ledgerchanged:
             save_ledger(ledger, LEDGERFN)
         if time() - heartbeat_t > HEARTBEAT_SECONDS:
@@ -491,7 +501,10 @@ def put_in_skipbox(skipbox, fndata, regdoneq, ledger, logger):
     if fndata['is_dir']:
         # Zipped intermediate files are removed here
         if os.path.exists(fndata['fpath']):
-            os.remove(fndata['fpath'])
+            try:
+                os.remove(fndata['fpath'])
+            except FileNotFoundError:
+                logger.warning(f'Error while skipping file: zipped file {fndata["fpath"]} already removed')
         file_done = fndata['nonzipped_path']
     else:
         file_done = fndata['fpath']
