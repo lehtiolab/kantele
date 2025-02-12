@@ -257,7 +257,7 @@ def refine_mzmls(self, run, params, mzmls, stagefiles, profiles, nf_version):
         token = check_in_transfer_client(self.request.id, token, settings.ANALYSIS_FT_NAME)
         sf_id, newname = os.path.basename(fn).split('___')
         fdata = {'file_id': sf_id, 'newname': newname, 'md5': calc_md5(fn)}
-        transfer_resultfile(outfullpath, run['runname'], fn, run['dstsharename'], fdata, fileurl, token,
+        transfer_resultfile(outfullpath, run['runname'], fn, run['dstsharename'], fileurl, token,
                 self.request.id, fdata['file_id'], fdata['md5'], fdata['newname'])
     reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:analysisdone'))
     postdata = {'client_id': settings.APIKEY, 'analysis_id': run['analysis_id'],
