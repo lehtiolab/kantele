@@ -13,6 +13,24 @@ class QCRun(models.Model):
     runtype = models.IntegerField(choices=dm.AcquisistionMode.choices)
 
 
+class TrackedPeptide(models.Model):
+    sequence = models.TextField(unique=True)
+    charge = models.IntegerField()
+
+
+class TrackedPeptideSet(models.Model):
+    date = models.DateTimeField(auto_now=True)
+    name = models.TextField(unique=True) # e.g. v1-synthetic-peptides
+    acqmode = models.IntegerField(choices=dm.AcquisistionMode.choices)
+    active = models.BooleanField(default=False)
+    frozen = models.BooleanField(default=False)
+    
+
+class PeptideInSet(models.Model):
+    peptideset = models.ForeignKey(TrackedPeptideSet, on_delete=models.CASCADE)
+    peptide = models.ForeignKey(TrackedPeptide, on_delete=models.CASCADE)
+
+
 class LineDataTypes(models.IntegerChoices):
     NRPROTEINS = 1, 'Nr of proteins'
     NRPEPTIDES = 2, 'Nr of peptides'
@@ -47,3 +65,11 @@ class BoxplotData(models.Model):
     q1 = models.FloatField()
     q2 = models.FloatField()
     q3 = models.FloatField()
+
+
+class PeptideTrackData(models.Model):
+    datatype = models.IntegerField(choices=QuartileDataTypes.choices)
+    qcrun = models.ForeignKey(QCRun, on_delete=models.CASCADE)
+    value = models.FloatField()
+    # Peptide deletion is not allowed if there are data points!
+    peptide = models.ForeignKey(TrackedPeptide, on_delete=models.PROTECT)

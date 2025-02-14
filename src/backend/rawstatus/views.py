@@ -720,8 +720,12 @@ def run_singlefile_qc(rawfile, storedfile, user_op, acqtype):
                 'log': [], 'deleted': False, 'purged': False, 'storage_dir': '', 'editable': False})
     qcrun, _ = dashmodels.QCRun.objects.update_or_create(rawfile=rawfile, defaults={'is_ok': False,
         'message': '', 'runtype': acqtype, 'analysis': analysis})
+    tps = dashmodels.TrackedPeptideSet.objects.filter(active=True, acqmode=acqtype).order_by('-date').first()
+    trackpeps = [[x['pk'], x['peptide__.sequence'], x['peptide__charge']] for x in
+            dashmodels.PeptideInSet.objects.filter(peptideset=tps).values('pk',
+            'peptide__sequence', 'peptide__charge')]
     create_job('run_longit_qc_workflow', sf_id=storedfile.id, analysis_id=analysis.id,
-            qcrun_id=qcrun.pk, params=params)
+            qcrun_id=qcrun.pk, params=params, trackpeptides=trackpeps)
 
 
 def get_file_owners(sfile):

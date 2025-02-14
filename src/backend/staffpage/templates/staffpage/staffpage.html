@@ -7,8 +7,12 @@
   <script defer src='{% static "staffpage/bundle.js" %}'></script>
 
   {{ qc_instruments | json_script:'instruments_el'}}
+  {{ peptide_sets | json_script:'peptide_sets' }}
+  {{ selected_pepset | json_script:'selected_pepset' }}
   <script>
     let instruments = JSON.parse(document.getElementById('instruments_el').textContent);
+    let trackedPeptideSetsInit = JSON.parse(document.getElementById('peptide_sets').textContent);
+    let selectedTrackedPeptidesInit = JSON.parse(document.getElementById('selected_pepset').textContent);
   </script>
 {% endblock head %}
 
