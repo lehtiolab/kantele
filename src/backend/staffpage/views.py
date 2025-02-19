@@ -1,5 +1,7 @@
 import os
 import json
+from collections import defaultdict
+from datetime import datetime
 
 from django.utils import timezone
 from django.http import JsonResponse
@@ -8,11 +10,13 @@ from django.views.decorators.http import require_GET, require_POST
 from django.contrib.auth.decorators import login_required
 from django.contrib.admin.views.decorators import staff_member_required
 from django.db.models import Q
+from django.db import IntegrityError
 
 from kantele import settings
 from rawstatus import models as rm
 from rawstatus.views import run_singlefile_qc, get_operator_user
 from datasets import models as dm
+from dashboard import models as dam
 from jobs.jobutil import create_job
 from analysis import models as am
 from jobs import models as jm
@@ -29,9 +33,28 @@ def query_all_qc_files():
 @staff_member_required
 @require_GET
 def show_staffpage(request):
+    set_peps = defaultdict(list)
+    for pins in dam.PeptideInSet.objects.values('peptide__sequence', 'peptide__charge', 'peptideset_id'):
+        set_peps[pins['peptideset_id']].append({'seq': pins['peptide__sequence'],
+            'charge': str(pins['peptide__charge'])})
+    else:
+        last_peptide_set = {}
+    for pset_id, peps in set_peps.items():
+        set_peps[pset_id] = {ix: {'ix': ix, **pep} for ix, pep in enumerate(peps)}
+    if last_tps := dam.TrackedPeptideSet.objects.filter(active=True).values('pk'):
+        last_tps = last_tps.get()['pk']
+    else:
+        last_tps = False
+
     context = {'qc_instruments': {x['producer__pk']: x['producer__name'] for x in 
         rm.MSInstrument.objects.filter(producer__internal=True, active=True).values(
-            'producer__pk', 'producer__name')}}
+            'producer__pk', 'producer__name')},
+        'peptide_sets': {tps['pk']: {'id': tps['pk'], 'frozen': tps['frozen'],
+            'date': datetime.strftime(tps['date'], '%a %b %d %Y'), 'name': tps['name'],
+            'active': tps['active'], 'peptides': set_peps[tps['pk']]} for tps in
+            dam.TrackedPeptideSet.objects.values('pk', 'date', 'name', 'frozen', 'active')},
+        'selected_pepset': last_tps,
+        }
     return render(request, 'staffpage/staffpage.html', context)
 
 
@@ -228,3 +251,51 @@ def get_qc_files(request):
     else:
         fns = {x.pk: {'id': x.pk, 'name': x.filename} for x in filtered}
     return JsonResponse(fns)
+
+
+@staff_member_required
+@require_POST
+def save_tracked_peptides(request):
+    data = json.loads(request.body.decode('utf-8'))
+    acqmode = dm.AcquisistionMode.DIA
+    if not data.get('tpsname'):
+        return JsonResponse({'state': 'error', 'msg': 'Name is mandatory for peptide set'}, status=400)
+    for pep in data['peptides']:
+        if not pep.get('seq') or not pep.get('charge'):
+            return JsonResponse({'state': 'error', 'msg': 'Sequence and charge are mandatory for '
+                'peptides'}, status=400)
+    # Will freeze current TPS in case that is asked and the data has peptides
+    freeze_tps = data.get('publish', False) and len(data.get('peptides', [])) > 0
+    if tpsid := data.get('tpsid', False):
+        tpsq = dam.TrackedPeptideSet.objects.filter(pk=tpsid)
+        if tpsq.filter(frozen=False).exists():
+            if freeze_tps:
+                # Deactivate any other active peptide set on publishing this one
+                dam.TrackedPeptideSet.objects.filter(active=True).update(active=False)
+            # Publishing sets frozen and active, old sets are frozen but not active
+            try:
+                tpsq.update(name=data['tpsname'], frozen=freeze_tps, active=freeze_tps)
+            except IntegrityError:
+                return JsonResponse({'state': 'error', 'msg': 'Name for peptide set already exist, '
+                    'choose another'}, status=400)
+            tps = tpsq.get()
+        else:
+            return JsonResponse({'state': 'error', 'msg': 'Cannot update that tracked peptide set '
+                'it has likely been published already. Create a new or select a non-published set'},
+                status=400)
+    else:
+        if freeze_tps:
+            # Deactivate any other active peptide set on publishing this one
+            dam.TrackedPeptideSet.objects.filter(active=True).update(active=False)
+        try:
+            tps = dam.TrackedPeptideSet.objects.create(name=data['tpsname'], acqmode=acqmode,
+                    frozen=freeze_tps, active=freeze_tps)
+        except IntegrityError:
+            return JsonResponse({'state': 'error', 'msg': 'Name for peptide set already exist, '
+                'choose another'}, status=400)
+    dam.PeptideInSet.objects.filter(peptideset=tps).delete()
+    for pep in data['peptides']:
+        tpep, _ = dam.TrackedPeptide.objects.get_or_create(sequence=pep['seq'], charge=pep['charge'])
+        dam.PeptideInSet.objects.create(peptideset=tps, peptide=tpep)
+    return JsonResponse({'state': 'ok', 'data': {'id': tps.pk, 'date': tps.date,
+        'frozen': tps.frozen, 'name': tps.name, 'active': tps.active}})

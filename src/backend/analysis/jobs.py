@@ -112,6 +112,10 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
                'repo': nfwf.nfworkflow.repo,
                'runname': f'{analysis.id}_longqc_{raw.rawfile.producer.name}_rawfile{raw.rawfile_id}_{timestamp}',
                }
+        if kwargs['trackpeptides']:
+            params.extend(['--trackedpeptides', ';'.join([f'{pep}_{ch}'
+                for _, pep, ch in kwargs['trackpeptides']])])
+
         self.run_tasks.append(((run, params, stagefiles, ','.join(nfwf.profiles), nfwf.nfversion), {}))
         analysis.log.append('[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S')))
         analysis.save()

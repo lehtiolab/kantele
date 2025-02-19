@@ -5,7 +5,7 @@ from django.db.models.functions import Trunc, Greatest
 from django.views.decorators.http import require_GET
 
 from math import isnan
-
+from collections import defaultdict
 from datetime import datetime, timedelta
 
 from analysis.models import AnalysisError
@@ -35,6 +35,7 @@ def store_longitudinal_qc(data):
     if qcrun.count() != 1:
         return {'error': True, 'msg': 'Could not find QC data annotation'}
     qcrun.update(is_ok=data['state'] == 'ok', message=data['msg'])
+    qcrun = qcrun.values('pk', 'analysis__nextflowsearch__job__kwargs')
     qcrun = qcrun.get()
     dtypes = {
             'nrpsms': LDT.NRPSMS,
@@ -42,32 +43,42 @@ def store_longitudinal_qc(data):
             'nrpeptides': LDT.NRPEPTIDES,
             'nr_unique_peptides': LDT.NRPEPTIDES_UNI,
             'nrproteins': LDT.NRPROTEINS,
-            'precursor_errors': QDT.MASSERROR,
-            'scores': QDT.SCORE,
-            'retention_times': QDT.RT,
-            'peptide_areas': QDT.PEPMS1AREA,
-            'ionmobilities': QDT.IONMOB,
-            'fwhms': QDT.FWHM,
-            'ioninj': QDT.IONINJ,
+            'p_error': QDT.MASSERROR,
+            'score': QDT.SCORE,
+            'rt': QDT.RT,
+            'ms1': QDT.PEPMS1AREA,
+            'ionmob': QDT.IONMOB,
+            'fwhm': QDT.FWHM,
+            'injtime': QDT.IONINJ,
             'peaks_fwhm': LDT.PEAKS_FWHM,
             'matchedpeaks': QDT.MATCHED_PEAKS,
             'miscleav1': LDT.MISCLEAV1,
             'miscleav2': LDT.MISCLEAV2,
             }
+    tpsmap = {f'{pep}_{ch}': pk for pk, pep, ch in
+            qcrun['analysis__nextflowsearch__job__kwargs']['trackpeptides']}
     for qcname, qcdata in data['plots'].items():
         if qcname == 'missed_cleavages':
             for num_mc, num_psm in qcdata.items():
                 if int(num_mc) > 0:
-                    qcrun.lineplotdata_set.update_or_create(datatype=dtypes[f'miscleav{num_mc}'],
-                            defaults={'value': num_psm})
+                    dm.LineplotData.objects.update_or_create(datatype=dtypes[f'miscleav{num_mc}'],
+                            qcrun_id=qcrun['pk'], defaults={'value': num_psm})
+
+        elif qcname == 'trackedpeptides':
+            #{trackedpeptides: {IAMAPEPTIDE_2: {rt: 23.21, ...}, ...}}
+            for pepch, trackvalues in qcdata.items():
+                for trackname, value in trackvalues.items():
+                    dm.PeptideTrackData.objects.update_or_create(datatype=dtypes[trackname],
+                            qcrun_id=qcrun['pk'], peptide_id=tpsmap[pepch], defaults={'value': value})
         elif type(qcdata) == dict:
-            qcrun.boxplotdata_set.update_or_create(datatype=dtypes[qcname], defaults={
+            dm.BoxplotData.objects.update_or_create(datatype=dtypes[qcname], qcrun_id=qcrun['pk'], defaults={
                 'q1': qcdata['q1'],
                 'q2': qcdata['q2'],
                 'q3': qcdata['q3'],
                 })
         else:
-            qcrun.lineplotdata_set.update_or_create(datatype=dtypes[qcname], defaults={'value': qcdata})
+            dm.LineplotData.objects.update_or_create(datatype=dtypes[qcname], qcrun_id=qcrun['pk'],
+                defaults={'value': qcdata})
     return {'error': False}
 
 
@@ -170,6 +181,7 @@ def get_line_data(qcruns, dtypes):
     long_qc = []
     for qcrun in qcruns:
         datepoints = [{'key': lplot.datatype, 'value': lplot.value,
+            'run': qcrun.pk,
             'date': datetime.strftime(qcrun.date, '%Y-%m-%d %H:%M')}
         for lplot in qcrun.lineplotdata_set.filter(datatype__in=dtypes)]
         long_qc.extend(datepoints)
@@ -182,6 +194,7 @@ def get_boxplot_data(qcruns, dtype):
         bplot = qcrun.boxplotdata_set.get(datatype=dtype)
         dayvals = {
                 'key': dtype,
+                'run': qcrun.pk,
                 'date': datetime.strftime(qcrun.date, '%Y-%m-%d %H:%M'),
                 'q1': bplot.q1,
                 'q2': bplot.q2,
@@ -214,12 +227,13 @@ def show_qc(request, acqmode, instrument_id, daysago, maxdays):
     qcruns = qcruns.filter(runtype=runtype_q)
     psmdata = get_line_data(qcruns, dtypes=[LDT.NRSCANS, LDT.NRPSMS])
     miscleavdata = get_line_data(qcruns, dtypes=[LDT.MISCLEAV1, LDT.MISCLEAV2])
-
+    
     totalpsms_date = {x['date']: x['value'] for x in psmdata if x['key'] == LDT.NRPSMS}
     mcratio = [{**x, 'value': x['value'] / totalpsms_date[x['date']]} for x in miscleavdata if x['key'] == LDT.MISCLEAV1]
     outjson = {'runtype': AcquisistionMode(runtype_q).label, 'seriesmap': {
         'line': {k: label for k, label in LDT.choices},
         'box': {k: label for k, label in QDT.choices},
+        'fns': {qcrun.pk: qcrun.rawfile.name for qcrun in qcruns},
         }, 'data': {
         'ident': get_line_data(qcruns, dtypes=[LDT.NRPEPTIDES,
             LDT.NRPROTEINS, LDT.NRPEPTIDES_UNI]),
@@ -228,4 +242,17 @@ def show_qc(request, acqmode, instrument_id, daysago, maxdays):
         }}
     for key, name in zip(QDT.values, QDT.names):
         outjson['data'][name] = get_boxplot_data(qcruns, key)
+
+    #  Extra lines for peptide tracking:
+    # {lplot.dt: [{date, pepid, value, 
+    outjson['extradata'] = defaultdict(list)
+    for qcrun in qcruns:
+        for explot in qcrun.peptidetrackdata_set.all():
+            outjson['extradata'][QDT(explot.datatype).name].append({
+                'value': explot.value,
+                'pepid': explot.peptide_id,
+                'run': qcrun.pk,
+                'date': datetime.strftime(qcrun.date, '%Y-%m-%d %H:%M')
+                })
+    outjson['extradata']['peps'] = {x.pk: x.sequence for x in dm.TrackedPeptide.objects.all()}
     return JsonResponse(outjson)
