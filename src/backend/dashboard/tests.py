@@ -3,11 +3,19 @@ from datetime import datetime
 from kantele.tests import BaseTest
 from kantele import settings
 from analysis import models as am
+from jobs import models as jm
+from jobs import jobs as jj
 from dashboard import models as dm
 from datasets import models as dam
 
 
 class QCBase(BaseTest):
+    pepseq = 'IAMAPEPTIDE'
+    pepcharge = 2
+    tprt = 15.0
+    tpscore = 5e-06
+    tpfwhm=0.09
+    tpms1 = 70000.0
     ddaplots = {
         "nrpsms": 67637,  
         "nrscans": 129968,
@@ -19,38 +27,38 @@ class QCBase(BaseTest):
             "1": 2965,
             "2": 69
             },
-        "ioninj": False,
+        "injtime": False,
         "matchedpeaks": {
             "q1": 10.0,
             "q2": 14.0,
             "q3": 17.0
             }, 
-        "scores": {
+        "score": {
             "q1": 0.29441416,
             "q2": 0.45151624,
             "q3": 0.5780469
             },
-        "retention_times": {
+        "rt": {
             "q1": 15.705895,
             "q2": 24.795988,
             "q3": 32.635075
             },
-        "precursor_errors": {
+        "p_error": {
             "q1": 1.1175711,
             "q2": 2.3226476,
             "q3": 3.9190276
             },
-        "fwhms": {
+        "fwhm": {
             "q1": 0.07856697541417468,
             "q2": 0.11463563697349244,
             "q3": 0.19013413110220512
             },
-        "ionmobilities": {
+        "ionmob": {
             "q1": 0.89153504,
             "q2": 0.99197274,
             "q3": 1.1201969
             },
-        "peptide_areas": {
+        "ms1": {
             "q1": 82378.75,
             "q2": 192032.5,
             "q3": 460915.0
@@ -66,41 +74,66 @@ class QCBase(BaseTest):
         "missed_cleavages": {
             "0": 41661,
             "1": 725,
-            "2": 7
+            "2": 7,
             },
         "peaks_fwhm": 3.012,
-        "scores": {
+        "score": {
             "q1": 1.31007038817188e-06,
             "q2": 4.847267973673297e-06,
-            "q3": 2.0830304492847063e-05
+            "q3": 2.0830304492847063e-05,
             },
-        "retention_times": {
+        "rt": {
             "q1": 13.748827934265137,
             "q2": 21.873414993286133,
-            "q3": 29.986976623535156
+            "q3": 29.986976623535156,
             },
-        "fwhms": {
+        "fwhm": {
             "q1": 0.07407437451183796,
             "q2": 0.08781002461910248,
-            "q3": 0.10342045687139034
+            "q3": 0.10342045687139034,
             },
-        "ionmobilities": {
+        "ionmob": {
             "q1": 0.89760422706604,
             "q2": 0.9681817889213562,
-            "q3": 1.0567045211791992
+            "q3": 1.0567045211791992,
             },
-        "peptide_areas": {
+        "ms1": {
             "q1": 24022.95,
             "q2": 50979.8,
-            "q3": 122692.25
-            }
+            "q3": 122692.25,
+            },
+        "trackedpeptides": {
+            f'{pepseq}_{pepcharge}': {
+                "rt": tprt,
+                "score": tpscore,
+                "fwhm": tpfwhm,
+                "ms1": tpms1,
+                },
+            },
         }
+
 
     def setUp(self):
         super().setUp()
         self.diaana = am.Analysis.objects.create(user=self.user, name='dia ana qc', storage_dir='testdirqc')
         self.diaqc = dm.QCRun.objects.create(rawfile=self.tmpraw, analysis=self.diaana, is_ok=False,
                 message='', runtype=dam.AcquisistionMode.DIA)
+
+        wfv = am.NextflowWfVersionParamset.objects.create(update='qc wfv base',
+                commit='qc ci base', filename='qc.nf', nfworkflow=self.nfw,
+                paramset=self.pset, nfversion='', active=True)
+        self.trackpep = dm.TrackedPeptide.objects.create(sequence=self.pepseq, charge=self.pepcharge)
+        pepset = dm.TrackedPeptideSet.objects.create(name='qcpeps', acqmode=dam.AcquisistionMode.DIA,
+                active=True, frozen=True)
+        dm.PeptideInSet.objects.create(peptideset=pepset, peptide=self.trackpep)
+        qcjob = jm.Job.objects.create(funcname='qcjob', state=jj.Jobstates.PROCESSING,
+                kwargs={'trackpeptides': [[self.trackpep.pk, self.trackpep.sequence, 
+                    self.trackpep.charge]]}, timestamp=datetime.now())
+        uwf = am.UserWorkflow.objects.create(name='qc', wftype=am.UserWorkflow.WFTypeChoices.QC,
+                public=False)
+        uwf.nfwfversionparamsets.add(wfv)
+        am.NextflowSearch.objects.create(nfwfversionparamset=wfv, workflow=uwf, analysis=self.diaana,
+            token='token1234', job=qcjob)
 
 
 class QCSave(QCBase):
@@ -122,7 +155,7 @@ class QCSave(QCBase):
         resp = self.cl.post(self.url, content_type='application/json', data=post)
         self.assertEqual(resp.status_code, 200)
         bp = self.diaqc.boxplotdata_set.get(datatype=dm.QuartileDataTypes.SCORE)
-        self.assertEqual(bp.q2, post['plots']['scores']['q2'])
+        self.assertEqual(bp.q2, post['plots']['score']['q2'])
         lp = self.diaqc.lineplotdata_set.get(datatype=dm.LineDataTypes.NRPSMS)
         self.assertEqual(lp.value, post['plots']['nrpsms'])
         self.assertFalse(self.diaqc.boxplotdata_set.filter(datatype=dm.QuartileDataTypes.MASSERROR).exists())
@@ -136,7 +169,7 @@ class QCSave(QCBase):
         resp = self.cl.post(self.url, content_type='application/json', data=post)
         self.assertEqual(resp.status_code, 200)
         bp = self.diaqc.boxplotdata_set.get(datatype=dm.QuartileDataTypes.SCORE)
-        self.assertEqual(bp.q2, post['plots']['scores']['q2'])
+        self.assertEqual(bp.q2, post['plots']['score']['q2'])
         lp = self.diaqc.lineplotdata_set.get(datatype=dm.LineDataTypes.NRPSMS)
         self.assertEqual(lp.value, post['plots']['nrpsms'])
         self.assertFalse(self.diaqc.lineplotdata_set.filter(datatype=dm.LineDataTypes.PEAKS_FWHM).exists())
@@ -161,10 +194,10 @@ class QCShow(QCBase):
                 dm.LineDataTypes.NRPEPTIDES_UNI: 'nr_unique_peptides',
                 dm.LineDataTypes.PEAKS_FWHM: 'peaks_fwhm',
                 }
-        boxmap = {dm.QuartileDataTypes.FWHM: 'fwhms', dm.QuartileDataTypes.MASSERROR: 'perror',
-                dm.QuartileDataTypes.PEPMS1AREA: 'peptide_areas',
-                dm.QuartileDataTypes.SCORE: 'scores', dm.QuartileDataTypes.IONMOB: 'ionmobilities',
-                dm.QuartileDataTypes.IONINJ: 'ioninj', dm.QuartileDataTypes.RT: 'retention_times',
+        boxmap = {dm.QuartileDataTypes.FWHM: 'fwhm', dm.QuartileDataTypes.MASSERROR: 'p_error',
+                dm.QuartileDataTypes.PEPMS1AREA: 'ms1',
+                dm.QuartileDataTypes.SCORE: 'score', dm.QuartileDataTypes.IONMOB: 'ionmob',
+                dm.QuartileDataTypes.IONINJ: 'injtime', dm.QuartileDataTypes.RT: 'rt',
                 dm.QuartileDataTypes.MATCHED_PEAKS: 'matchedpeaks',
                 }
         for pn, points in js['data'].items():
@@ -207,3 +240,13 @@ class QCShow(QCBase):
             elif 'q2' in points[0]:
                 self.assertEqual(len(points), 1)
                 self.assertEqual(points[0]['q2'], self.diaplots[boxmap[dm.QuartileDataTypes[pn]]]['q2'])
+        # Since it's DIA, we can check trackedpeptides
+        base_val = {'pepid': self.trackpep.pk, 'run': self.diaqc.pk,
+                'date': datetime.strftime(self.tmpraw.date, '%Y-%m-%d %H:%M')}
+        exp_tp = {'RT': [{'value': self.tprt, **base_val}],
+        'FWHM': [{'value': self.tpfwhm, **base_val}],
+        'SCORE': [{'value': self.tpscore, **base_val}],
+        'PEPMS1AREA': [{'value': self.tpms1, **base_val}],
+        'peps': {f'{self.trackpep.pk}': self.trackpep.sequence},
+        }
+        self.assertEqual(js['extradata'], exp_tp)

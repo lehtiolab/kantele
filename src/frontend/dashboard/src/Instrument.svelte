@@ -45,10 +45,13 @@ let qcdata = {
   IONMOB: {data: false, func: linePlotWithQuantiles, div: ionmobplot, title: 'PSM ion mobility', ylab: 'eV'},
   IONINJ: {data: false, func: linePlotWithQuantiles, div: ioninfplot, title: 'Ion injection time', ylab: 'min'},
 }
+
+let extrapeps;
+
 let plotlist = ['ident', 'psms', 'miscleav', 'mcratio', 'MASSERROR', 'RT', 'SCORE', 'FWHM', 'PEPMS1AREA', 
   'PEAKS_FWHM', 'MATCHED_PEAKS', 'IONMOB', 'IONINJ'];
-export let instrument_id;
 
+export let instrument_id;
 let acqmode = 'ALL';
 
 
@@ -67,7 +70,11 @@ export function renderPlots() {
       // Timeout is needed or it will plot too fast or something,
       // and the plots will not be shown
       setTimeout(() => {
-        p.func(p.div, p.data, p.title, p.ylab)
+        if (p.extradata) {
+          p.func(p.div, p.data, p.title, p.ylab, p.extradata);
+        } else {
+          p.func(p.div, p.data, p.title, p.ylab);
+        }
       }, 0);
     }
   }
@@ -82,7 +89,14 @@ export async function loadData(maxdays, firstday) {
   for (let key in result.data) {
     qcdata[key].data = result.data[key];
     qcdata[key].data.map(d => Object.assign(d, d.date = new Date(d.date)));
+    if ('extradata' in result && result.extradata[key]) {
+      qcdata[key].extradata = result.extradata[key];
+      qcdata[key].extradata.map(d => Object.assign(d, d.date = new Date(d.date)));
+    } else {
+      qcdata[key].extradata = false;
+    }
   }
+  extrapeps = result.extradata.peps;
   plotlist = plotlist.filter(x => qcdata[x].data).concat(plotlist.filter(x => !qcdata[x].data))
 }
 
@@ -125,9 +139,62 @@ ${seriesmap.fns[d.run]}`,
 }
 
 
-function linePlotWithQuantiles(plotdiv, data, title, ylabel) {
+function linePlotWithQuantiles(plotdiv, data, title, ylabel, extralines) {
 //  try {
     let theplot;
+    let quantile_marks = [
+        Plot.line(data, {
+          x: 'date',
+          y: 'q2',
+          stroke: 'lightgreen',
+        }),
+        Plot.line(data, {
+          x: 'date',
+          y: 'q1',
+          stroke: 'lightgreen',
+          strokeOpacity: 0.5,
+        }),
+        Plot.line(data, {
+          x: 'date',
+          y: 'q3',
+          stroke: 'lightgreen',
+          strokeOpacity: 0.5,
+        }),
+        Plot.areaY(data, {
+          x: 'date',
+          y1: 'q1',
+          y2: 'q3',
+          fill: 'lightgreen',
+          opacity: 0.2,
+        }),
+        Plot.tip(data, Plot.pointer({
+          x: 'date',
+          y: 'q2',
+          title: (d) => `${d.date}\n
+${seriesmap.box[d.key]}: ${d.q2}\n
+${seriesmap.fns[d.run]}`,
+        })),
+    ];
+    // extralines = {data: [{date, pepid, value}...], peps: {pep_id: IAMAPEP, ...}}
+    if (extralines) {
+      let extraplots = [
+        Plot.line(extralines, {
+          x: 'date',
+          y: 'value',
+          stroke: 'pepid',
+        }),
+        Plot.tip(extralines, Plot.pointer({
+          x: 'date',
+          y: 'value',
+          title: (d) => `${d.date}\n
+${extrapeps[d.pepid]}\n
+${d.value}\n
+${seriesmap.fns[d.run]}`,
+          })),
+        ];
+      quantile_marks.push(...extraplots);
+    }
+
     theplot = Plot.plot({
       title: title,
       subtitle: '0.25/0.75 quantile range',
@@ -136,37 +203,7 @@ function linePlotWithQuantiles(plotdiv, data, title, ylabel) {
       //y: {tickFormat: 's', type: 'log', grid: true, }, // scientific ticks
       marks: [
         Plot.axisY({label: ylabel, tickFormat: (d) => (d > 1e6 ? `${d/1e6}M` : d)}),
-        Plot.line(data, {
-          x: 'date',
-          y: 'q2',
-          stroke: 'key',
-        }),
-        Plot.line(data, {
-          x: 'date',
-          y: 'q1',
-          stroke: 'key',
-          strokeOpacity: 0.5,
-        }),
-        Plot.line(data, {
-          x: 'date',
-          y: 'q3',
-          stroke: 'key',
-          strokeOpacity: 0.5,
-        }),
-        Plot.areaY(data, {
-          x: 'date',
-          y1: 'q1',
-          y2: 'q3',
-          fill: 'key',
-          opacity: 0.2,
-        }),
-        Plot.tip(data, Plot.pointerX({
-          x: 'date',
-          y: 'q2',
-          title: (d) => `${d.date}\n
-            ${seriesmap.box[d.key]}: ${d.q2}\n
-            ${seriesmap.fns[d.run]}`,
-        })),
+        ...quantile_marks,
       ]
     });
     plotdiv?.append(theplot);
