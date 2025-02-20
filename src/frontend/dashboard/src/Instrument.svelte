@@ -126,6 +126,7 @@ function linePlot(plotdiv, data, title, ylabel, denom) {
         Plot.tip(data, Plot.pointerX({
           x: 'date',
           y: 'value',
+          lineWidth: 100,
           title: (d) => `${d.date}\n
 ${seriesmap.line[d.key]}: ${d.value}\n
 ${seriesmap.fns[d.run]}`,
