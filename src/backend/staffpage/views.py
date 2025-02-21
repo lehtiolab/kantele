@@ -277,12 +277,12 @@ def save_tracked_peptides(request):
                 tpsq.update(name=data['tpsname'], frozen=freeze_tps, active=freeze_tps)
             except IntegrityError:
                 return JsonResponse({'state': 'error', 'msg': 'Name for peptide set already exist, '
-                    'choose another'}, status=400)
+                    'choose another'}, status=403)
             tps = tpsq.get()
         else:
             return JsonResponse({'state': 'error', 'msg': 'Cannot update that tracked peptide set '
                 'it has likely been published already. Create a new or select a non-published set'},
-                status=400)
+                status=403)
     else:
         if freeze_tps:
             # Deactivate any other active peptide set on publishing this one
@@ -291,11 +291,31 @@ def save_tracked_peptides(request):
             tps = dam.TrackedPeptideSet.objects.create(name=data['tpsname'], acqmode=acqmode,
                     frozen=freeze_tps, active=freeze_tps)
         except IntegrityError:
-            return JsonResponse({'state': 'error', 'msg': 'Name for peptide set already exist, '
-                'choose another'}, status=400)
+            return JsonResponse({'state': 'error', 'msg': 'Name for peptide set already exists, '
+                'choose another'}, status=403)
     dam.PeptideInSet.objects.filter(peptideset=tps).delete()
     for pep in data['peptides']:
-        tpep, _ = dam.TrackedPeptide.objects.get_or_create(sequence=pep['seq'], charge=pep['charge'])
+        tpep, _ = dam.TrackedPeptide.objects.get_or_create(sequence=pep['seq'].upper(),
+                charge=pep['charge'])
         dam.PeptideInSet.objects.create(peptideset=tps, peptide=tpep)
     return JsonResponse({'state': 'ok', 'data': {'id': tps.pk, 'date': tps.date,
         'frozen': tps.frozen, 'name': tps.name, 'active': tps.active}})
+
+
+@staff_member_required
+@require_POST
+def delete_tracked_peptide_set(request):
+    data = json.loads(request.body.decode('utf-8'))
+    acqmode = dm.AcquisistionMode.DIA
+    tpsid = data.get('tpsid')
+    if not tpsid:
+        return JsonResponse({'state': 'error', 'msg': 'Need to specify ID for deleting tracked '
+            'peptide set'}, status=400)
+    tpsq = dam.TrackedPeptideSet.objects.filter(pk=tpsid, frozen=False)
+    if tpsq.exists():
+        tpsq.delete()
+    else:
+        return JsonResponse({'state': 'error', 'msg': 'Tracked peptide set does not exist or is '
+            'frozen, not possible to delete'}, status=403)
+    return JsonResponse({'state': 'ok'})
+

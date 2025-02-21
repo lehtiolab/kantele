@@ -11,5 +11,6 @@ urlpatterns = [
     path('qc/rerunsingle/', views.rerun_singleqc),
     path('qc/newfile/', views.new_qcfile),
     path('qc/trackpeptides/save/', views.save_tracked_peptides),
+    path('qc/trackpeptides/delete/', views.delete_tracked_peptide_set),
     ]
 

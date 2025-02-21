@@ -280,3 +280,76 @@ class RerunManyQCsTest(BaseQCFileTest):
         self.assertEqual(bup_jobs.count(), nr_archived)
         self.assertEqual(jm.Job.objects.filter(funcname='restore_from_pdc_archive').count(),
                 nr_archived)
+
+
+class TestSaveTrackPeptides(BaseQCFileTest):
+    url = '/manage/qc/trackpeptides/save/'
+
+    def test_bad(self):
+        getresp = self.cl.get(self.url)
+        self.assertEqual(getresp.status_code, 405)
+        noid_resp = self.cl.post(self.url, content_type='application/json', data={})
+        self.assertEqual(noid_resp.status_code, 400)
+        nopep_resp = self.cl.post(self.url, content_type='application/json', data={'tpsname': 'test',
+            'peptides': [{'hello': 'fail'}]})
+        self.assertEqual(nopep_resp.status_code, 400)
+        self.assertIn('Sequence and charge are mandatory', nopep_resp.json()['msg'])
+
+    def test_save(self):
+        noexist = self.cl.post(self.url, content_type='application/json', data={'tpsname': 'test',
+            'peptides': [{'seq': 'PEPTIDE', 'charge': 2}]})
+        self.assertEqual(noexist.status_code, 200)
+        pepset = noexist.json()
+        self.assertEqual(pepset['state'], 'ok')
+        alreadyexist = self.cl.post(self.url, content_type='application/json', data={'tpsname': 'test',
+            'peptides': [{'seq': 'PEPTIDE', 'charge': 2}]})
+        self.assertEqual(alreadyexist.status_code, 403)
+        self.assertIn('Name for peptide set already exists', alreadyexist.json()['msg'])
+        edit = self.cl.post(self.url, content_type='application/json', data={'tpsname': 'editedname',
+            'tpsid': pepset['data']['id'], 'peptides': [{'seq': 'newPEPTIDE', 'charge': 3}]})
+        self.assertEqual(edit.status_code, 200)
+        psdb = dashm.PeptideInSet.objects.filter(peptideset_id=pepset['data']['id'])
+        self.assertEqual(psdb.count(), 1)
+        self.assertEqual(psdb.values('peptide__sequence').get()['peptide__sequence'], 'NEWPEPTIDE')
+
+        freeze = self.cl.post(self.url, content_type='application/json', data={
+            'tpsid': pepset['data']['id'], 'peptides': [{'seq': 'PEPTIDE', 'charge': 2}],
+            'publish': True, 'tpsname': pepset['data']['name']})
+        self.assertEqual(freeze.status_code, 200)
+        self.assertTrue(freeze.json()['data']['frozen'])
+        frozen = self.cl.post(self.url, content_type='application/json', data={
+            'tpsid': pepset['data']['id'], 'peptides': [{'seq': 'PEPTIDE', 'charge': 2}],
+            'tpsname': 'newname'})
+        self.assertEqual(frozen.status_code, 403)
+        self.assertIn('it has likely been published already', frozen.json()['msg'])
+
+
+class TestDeleteTrackPeptides(BaseQCFileTest):
+    url = '/manage/qc/trackpeptides/delete/'
+
+    def test_bad(self):
+        getresp = self.cl.get(self.url)
+        self.assertEqual(getresp.status_code, 405)
+        noid_resp = self.cl.post(self.url, content_type='application/json', data={})
+        self.assertEqual(noid_resp.status_code, 400)
+        noexist = self.cl.post(self.url, content_type='application/json', data={'tpsid': 10})
+        self.assertEqual(noexist.status_code, 403)
+
+    def test_delete(self):
+        tps = dashm.TrackedPeptideSet.objects.create(name='testps', acqmode=dm.AcquisistionMode.DIA)
+        tps2 = dashm.TrackedPeptideSet.objects.create(name='testps2', acqmode=dm.AcquisistionMode.DIA)
+        pep = dashm.TrackedPeptide.objects.create(sequence='PEPTIDE', charge=3)
+        pep2 = dashm.TrackedPeptide.objects.create(sequence='IAMAPEPTIDE', charge=2)
+        pins = dashm.PeptideInSet.objects.create(peptideset=tps, peptide=pep)
+        pins2 = dashm.PeptideInSet.objects.create(peptideset=tps, peptide=pep2)
+        pins3 = dashm.PeptideInSet.objects.create(peptideset=tps2, peptide=pep2)
+        delresp = self.cl.post(self.url, content_type='application/json', data={'tpsid': tps.pk})
+        self.assertEqual(delresp.status_code, 200)
+        pins3.refresh_from_db()
+        for deleted_pins in [pins2, pins]:
+            try:
+                deleted_pins.refresh_from_db()
+            except dashm.PeptideInSet.DoesNotExist:
+                pass
+            else:
+                self.fail()

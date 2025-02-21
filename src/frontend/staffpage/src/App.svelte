@@ -167,6 +167,27 @@ async function saveTrackedPeptides(publish) {
   }
 }
 
+async function deletePepset(publish) {
+  const resp = await postJSON('/manage/qc/trackpeptides/delete/', {
+    tpsid: selectedTrackedPeptides,
+  });
+
+//  trackedPeptides.name = trackedPeptidesName;
+  if (resp.state == 'error') {
+    notif.errors[resp.msg] = 1;
+    setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, resp.msg);
+  } else {
+    const msg = 'Deleted peptide set';
+    notif.messages[msg] = 1;
+    setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg);
+    trackedPeptides = {frozen: false, active: false, peptides: {}, name: '', date: ''}
+    delete(trackedPeptideSets[selectedTrackedPeptides]);
+    trackedPeptideSets = trackedPeptideSets;
+    selectedTrackedPeptides = false;
+  }
+}
+
+
 function newPepsetFromOld() {
   trackedPeptides = {frozen: false, active: false, peptides: trackedPeptides.peptides, name: '', date: ''}
   trackedPeptidesName = '';
@@ -317,13 +338,26 @@ function activateRunButton(openthis) {
       <DynamicSelect on:selectedvalue={selectTPS} bind:intext={trackedPeptidesName} bind:unknowninput={newPeptideSetName} bind:selectval={selectedTrackedPeptides} niceName={x => `${x.name}` } fixedoptions={trackedPeptideSets} />
 
       {#if Object.keys(trackedPeptides.peptides).length}
-      <button class="button is-small is-warning" on:click={e => saveTrackedPeptides(false)}>Save</button>
-      <button class="button is-small is-danger" on:click={e => saveTrackedPeptides(true)}>Publish</button>
-      {#if trackedPeptides.frozen}
-      <button class="button is-small is-info" on:click={newPepsetFromOld}>Copy to new set</button>
+        <button class="button is-small is-warning" on:click={e => saveTrackedPeptides(false)}>Save</button>
+        <button class="button is-small is-success" on:click={e => saveTrackedPeptides(true)}>Publish</button>
       {/if}
-      <button class="button is-small is-info" on:click={newPepsetBlank}>New</button>
+
+      {#if selectedTrackedPeptides}
+        <button class="button is-small is-info" on:click={newPepsetBlank}>New</button>
+        {#if trackedPeptides.frozen}
+          <button class="button is-small is-info" on:click={newPepsetFromOld}>Copy to new set</button>
+        {:else}
+          <button class="button is-small is-danger" on:click={deletePepset}>Delete</button>
+        {/if}
       {/if}
+
+      {#if trackedPeptides.name && !trackedPeptides.frozen}
+        <p class="control">
+          <label class="label">Edit peptide set name</label>
+          <input class="input" bind:value={trackedPeptidesName} />
+        </p>
+      {/if}
+
       <hr /> 
       <span class="has-text-weight-bold is-size-6">Peptide / charge</span>
 
@@ -341,6 +375,9 @@ function activateRunButton(openthis) {
             <select bind:value={tp.charge}>
               <option value="2">+2</option>
               <option value="3">+3</option>
+              <option value="4">+4</option>
+              <option value="5">+5</option>
+              <option value="6">+6</option>
             </select>
           </span>
         </p>
