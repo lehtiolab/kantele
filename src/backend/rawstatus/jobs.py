@@ -48,6 +48,7 @@ class CreatePDCArchive(SingleFileJob):
     task = tasks.pdc_archive
 
     def process(self, **kwargs):
+        # FIXME should we not check if we already have a DB row w success=1 here?
         taskargs = upload_file_pdc_runtask(self.getfiles_query(**kwargs), isdir=kwargs['isdir'])
         if taskargs:
             self.run_tasks.append((taskargs, {}))

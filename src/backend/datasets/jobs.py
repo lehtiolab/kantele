@@ -92,6 +92,8 @@ class MoveDatasetServershare(DatasetJob):
         if sfs.count() == 0:
             # Do not error on empty dataset, just skip
             return
+        # FIXME due to getfiles_query being .filter(path=x, ..) this distinct and the error after
+        # will never occur
         paths = sfs.distinct('path')
         if paths.count() > 1:
             return (f'Dataset {dset["pk"]} live files are spread over multiple paths and cannot '

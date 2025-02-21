@@ -69,6 +69,10 @@ class BaseJob:
     """Base class for jobs"""
     retryable = True
     revokable = False
+    # FIXME in most cases, kwargs is passed as a **dict, since we dont know what is in it
+    # except inside the specific job, and on instantiation. This means it's not necessary
+    # to pass AND receive with ** - may as well be a dict. It's a bit dirty though,
+    # better to have more explicit args where that is possible.
 
     def __init__(self, job_id):
         self.job_id = job_id

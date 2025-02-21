@@ -461,6 +461,11 @@ class RenameProjectTest(BaseIntegrationTest):
         self.assertEqual(self.tmpsf.servershare, self.ssnewstore)
 
 
+# FIXME write tests
+#class SaveAcquisition(BaseTest):
+#class SaveSampleprep(BaseTest):
+
+
 class SaveSamples(BaseTest):
     url = '/datasets/save/samples/'
 

@@ -1433,9 +1433,8 @@ def save_files(request):
 
 
 def update_msacq(dset, data):
-#    models.EnzymeDataset.objects.filter(dataset=dset).delete()
-#    models.EnzymeDataset.objects.bulk_create([models.EnzymeDataset(dataset=dset, enzyme_id=enz['id'])
-#        for enz in data['enzymes'] if enz['checked']])
+    # FIXME oneliner:
+    #models.OperatorDataset.objects.filter(dataset=dset).update(operator_id=data['operator_id'])
     if data['operator_id'] != dset.operatordataset.operator_id:
         dset.operatordataset.operator_id = data['operator_id']
         dset.operatordataset.save()
@@ -1848,6 +1847,7 @@ def update_admin_defined_params(dset, data, category):
 
 
 def save_admin_defined_params(data, dset_id):
+    # FIXME wtf is this also for ms acq?
     selects, checkboxes, fields = [], [], []
     for param in data['params'].values():
         if param['inputtype'] == 'select':

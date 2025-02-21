@@ -697,8 +697,8 @@ def transfer_file(request):
         dighash = dighash.hexdigest() 
         if dighash != rawfn.source_md5:
             os.unlink(upload_dst)
-            return JsonResponse({'error': 'Failed to upload file, checksum {dighash} differs from '
-                'expected {rawfn.source_md5}, possibly corrupted in transfer or changed on local disk',
+            return JsonResponse({'error': f'Failed to upload file, checksum {dighash} differs from '
+                f'expected {rawfn.source_md5}, possibly corrupted in transfer or changed on local disk',
                 'state': 'error'}, status=409)
     os.chmod(upload_dst, 0o644)
     file_trf, created = StoredFile.objects.update_or_create(
