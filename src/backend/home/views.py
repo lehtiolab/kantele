@@ -8,8 +8,8 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_GET, require_POST
 from django.contrib.auth.models import User
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
-from django.db.models import Q, Sum, Max, Count, F
-from django.db.models.functions import Trunc, Greatest
+from django.db.models import Q, Sum, Count, F
+from django.db.models.functions import Trunc
 from collections import OrderedDict, defaultdict
 
 from kantele import settings
@@ -18,7 +18,7 @@ from analysis import models as anmodels
 from analysis import views as av
 from analysis import jobs as aj
 from datasets import jobs as dsjobs
-from datasets.views import check_ownership, get_dset_storestate, move_dset_project_servershare, fill_sampleprepparam
+from datasets.views import check_ownership, get_dset_storestate, move_dset_project_servershare, fill_sampleprepparam, populate_proj
 from rawstatus import models as filemodels
 from rawstatus import views as rv
 from jobs import jobs as jj
@@ -32,13 +32,15 @@ from corefac import models as cm
 @login_required
 @require_GET
 def home(request):
-    """Returns home view with Vue apps that will separately request"""
-    context = {'tab': request.GET['tab'] if 'tab' in request.GET else 'datasets',
-               'dsids': request.GET['dsids'].split(',') if 'dsids' in request.GET else [],
-               'anids': request.GET['anids'].split(',') if 'anids' in request.GET else [],
-               'projids': request.GET['projids'].split(',') if 'projids' in request.GET else [],
-               'jobids': request.GET['jobids'].split(',') if 'jobids' in request.GET else [],
-               'username': request.user.username}
+    """Returns home view with apps that will separately request"""
+    context = {
+               'username': request.user.username,
+               'ptypes': [{'name': x.name, 'id': x.id} for x in
+                     dsmodels.ProjectTypeName.objects.all()],
+               'local_ptype_id': settings.LOCAL_PTYPE_ID,
+              'external_pis': {x.id: {'name': x.name, 'id': x.id} for x in
+                  dsmodels.PrincipalInvestigator.objects.all()},
+               }
     return render(request, 'home/home.html', context)
 
 
@@ -409,7 +411,8 @@ def populate_analysis(analyses, user):
 
 @login_required
 def get_proj_info(request, proj_id):
-    proj = dsmodels.Project.objects.filter(pk=proj_id).select_related('projtype__ptype', 'pi').get()
+    # FIXME make sure users can edit project
+    proj = dsmodels.Project.objects.filter(pk=proj_id).select_related('ptype', 'pi').get()
     files = filemodels.StoredFile.objects.select_related('rawfile__producer', 'filetype').filter(
         rawfile__datasetrawfile__dataset__runname__experiment__project=proj)
     sfiles = {}
@@ -426,7 +429,7 @@ def get_proj_info(request, proj_id):
             'name': proj.name,
             'pi': proj.pi.name,
             'regdate': datetime.strftime(proj.registered, '%Y-%m-%d %H:%M'),
-            'type': proj.projtype.ptype.name,
+            'type': proj.ptype.name,
             'instruments': list(set([x.rawfile.producer.name for x in files])),
             'nrdsets': dsets.count(),
             'nrbackupfiles': filemodels.SwestoreBackedupFile.objects.filter(
@@ -434,27 +437,6 @@ def get_proj_info(request, proj_id):
                     storedfile__rawfile__datasetrawfile__dataset__runname__experiment__project_id=proj_id).count(),
         }
     return JsonResponse(info)
-
-
-def populate_proj(dbprojs, user, showjobs=True, include_db_entry=False):
-    projs, order = {}, []
-    dbprojs = dbprojs.annotate(dsmax=Max('experiment__runname__dataset__date'),
-            anamax=Max('experiment__runname__dataset__datasetanalysis__analysis__date')).annotate(
-            greatdate=Greatest('dsmax', 'anamax'))
-    for proj in dbprojs.order_by('-greatdate'): # latest first
-        order.append(proj.id)
-        projs[proj.id] = {
-            'id': proj.id,
-            'name': proj.name,
-            'inactive': proj.active == False,
-            'start': datetime.strftime(proj.registered, '%Y-%m-%d %H:%M'),
-            'ptype': proj.projtype.ptype.name,
-            'dset_ids': [x.dataset.pk for y in proj.experiment_set.all() for x in y.runname_set.all() if hasattr(x, 'dataset')],
-            'details': False,
-            'selected': False,
-            'lastactive': datetime.strftime(proj.greatdate, '%Y-%m-%d %H:%M') if proj.greatdate else '-',
-        }
-    return projs, order
 
 
 def populate_dset(dsids, dbdsets, user):
@@ -466,9 +448,10 @@ def populate_dset(dsids, dbdsets, user):
                     'filejob__storedfile__rawfile__datasetrawfile__dataset_id'):
         dsid = job['filejob__storedfile__rawfile__datasetrawfile__dataset_id']
         jobmap[dsid].append((str(job['pk']), job['state']))
-    for dset in dbdsets.values('pk', 'deleted', 'runname__experiment__project__projtype__ptype_id',
-            'runname__experiment__name', 'runname__experiment__project__projtype__ptype__name',
-            'runname__experiment__project__name', 'runname__name', 'datatype__name',
+    for dset in dbdsets.values('pk', 'deleted', 'runname__experiment__project__ptype_id',
+            'runname__experiment__name', 'runname__experiment__project__ptype__name',
+            'runname__experiment__project__name', 'runname__name', 
+            'runname__experiment__project_id', 'datatype__name',
             'prefractionationdataset__prefractionation__name', 'prefractionationdataset__hiriefdataset__hirief'):
         dsfiles = filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dset['pk'])
         storestate = get_dset_storestate(dset['pk'], dsfiles)
@@ -476,7 +459,7 @@ def populate_dset(dsids, dbdsets, user):
         dsfiles_ids = [x['pk'] for x in dsfiles.values('pk')]
         ownerq = dsmodels.DatasetOwner.objects.filter(dataset_id=dset['pk'])
         owners = [x['user_id'] for x in ownerq.values('user_id')]
-        is_owner  = check_ownership(user, dset['runname__experiment__project__projtype__ptype_id'],
+        is_owner  = check_ownership(user, dset['runname__experiment__project__ptype_id'],
                 dset['deleted'], owners) 
         dsets[dset['pk']] = {
             'id': dset['pk'],
@@ -485,12 +468,13 @@ def populate_dset(dsids, dbdsets, user):
             'deleted': dset['deleted'],
             'proj': dset['runname__experiment__project__name'],
             'ana_ids': ana_ids,
+            'proj_ids': [dset['runname__experiment__project_id']],
             'exp': dset['runname__experiment__name'],
             'run': dset['runname__name'],
             'dtype': dset['datatype__name'],
             'storestate': storestate,
             'fn_ids': dsfiles_ids,
-            'ptype': dset['runname__experiment__project__projtype__ptype__name'],
+            'ptype': dset['runname__experiment__project__ptype__name'],
             'prefrac': False,
             'smallstatus': [],
         }

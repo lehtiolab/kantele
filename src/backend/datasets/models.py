@@ -11,21 +11,38 @@ class PrincipalInvestigator(models.Model):
         return self.name
 
 
+class ProjectTypeName(models.Model):
+    # Local/research, corefac, consortiumABC, etc
+    # In future, this can be used for filtering in project reporting, as
+    # well as assigning if data is allowed on specific server
+    name = models.TextField()
+
+
 class Project(models.Model):
     name = models.TextField(unique=True)
     pi = models.ForeignKey(PrincipalInvestigator, on_delete=models.CASCADE)
     active = models.BooleanField(default=True)
     registered = models.DateTimeField(auto_now_add=True)
-
-
-class ProjectTypeName(models.Model):
-    # FIXME can be enum?
-    name = models.TextField()
-
-
-class ProjType(models.Model):
-    project = models.OneToOneField(Project, on_delete=models.CASCADE)
     ptype = models.ForeignKey(ProjectTypeName, on_delete=models.CASCADE)
+    # external ref for things like iLab API or something, can be blank
+    externalref = models.TextField()
+
+
+class ProjLogLevels(models.IntegerChoices):
+    OPEN = 1, 'Opened'
+    CLOSE = 2, 'Closed'
+    INFO = 3, 'Info'
+    # Security logs are for "user allowed to do X", "user X accessed sensitive data"
+    SECURE = 4, 'Security'
+    # Critical will reach admin
+    CRITICAL = 5, 'Critical'
+
+
+class ProjectLog(models.Model):
+    project = models.ForeignKey(Project, on_delete=models.CASCADE)
+    date = models.DateTimeField()
+    level = models.IntegerField(choices=ProjLogLevels.choices)
+    message = models.TextField()
 
 
 class UserPtype(models.Model):

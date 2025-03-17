@@ -8,7 +8,8 @@ from django.contrib.auth.decorators import login_required
 from django.http import (JsonResponse, HttpResponse, HttpResponseNotFound,
                          HttpResponseForbidden)
 from django.db import IntegrityError, transaction
-from django.db.models import Q, Count
+from django.db.models import Q, Count, Max
+from django.db.models.functions import Greatest
 from django.utils import timezone
 
 from kantele import settings
@@ -23,25 +24,36 @@ from corefac import models as cm
 INTERNAL_PI_PK = 1
 
 
-@login_required
-def new_dataset(request):
-    """Returns dataset view with JS app"""
-    context = {'dataset_id': 'false', 'is_owner': 'true'}
-    return render(request, 'datasets/dataset.html', context)
+def get_dset_context(proj_id):
+    proj = models.Project.objects.values('name', 'pi__name', 'ptype__name', 'ptype_id').get(pk=proj_id)
+    return {'dataset_id': 'false', 'is_owner': 'true', 'projdata': {'name': proj['name'],
+        'proj_id': proj_id, 'pi_name': proj['pi__name'], 'ptype': proj['ptype__name'],
+        'isExternal': proj['ptype_id'] != settings.LOCAL_PTYPE_ID,
+        'datasettypes': [{'name': x.name, 'id': x.id} for x in
+            models.Datatype.objects.filter(public=True)]
+        }
+        }
 
+
+@login_required
+def new_dataset(request, proj_id):
+    """Returns dataset view with JS app"""
+    context = get_dset_context(proj_id)
+    return render(request, 'datasets/dataset.html', context)
 
 
 @login_required
 def show_dataset(request, dataset_id):
     try:
         dset = models.Dataset.objects.filter(purged=False, pk=dataset_id).values('pk', 'deleted',
-                'runname__experiment__project__projtype__ptype_id').get()
+                'runname__experiment__project_id', 'runname__experiment__project__ptype_id').get()
     except models.Dataset.DoesNotExist:
         return HttpResponseNotFound()
     dsown_ids = [x['user_id'] for x in models.DatasetOwner.objects.filter(dataset_id=dset['pk']).values('user_id')]
-    is_owner = check_ownership(request.user, dset['runname__experiment__project__projtype__ptype_id'],
+    is_owner = check_ownership(request.user, dset['runname__experiment__project__ptype_id'],
         dset['deleted'], dsown_ids)
-    context = {'dataset_id': dataset_id, 'is_owner': json.dumps(is_owner)}
+    context = get_dset_context(dset['runname__experiment__project_id'])
+    context.update({'dataset_id': dataset_id, 'is_owner': json.dumps(is_owner)})
     return render(request, 'datasets/dataset.html', context)
 
 
@@ -56,18 +68,12 @@ def get_species(request):
 
 
 @login_required
-def dataset_info(request, dataset_id=False):
-    response_json = {'projdata': {'projects': {x.id:
-        {'name': x.name, 'id': x.id, 'ptype_id': x.projtype.ptype_id,
-            'select': False, 'pi_id': x.pi_id} 
-        for x in models.Project.objects.select_related('projtype').filter(active=True)},
-            'ptypes': [{'name': x.name, 'id': x.id} for x in models.ProjectTypeName.objects.all()],
-            'external_pis': {x.id: {'name': x.name, 'id': x.id} for x in
-                             models.PrincipalInvestigator.objects.all()},
-            'internal_pi_id': INTERNAL_PI_PK,
-            'local_ptype_id': settings.LOCAL_PTYPE_ID,
-            'datasettypes': [{'name': x.name, 'id': x.id} for x in
-                             models.Datatype.objects.filter(public=True)],
+def dataset_info(request, project_id, dataset_id=False):
+    response_json = {'projdata': {
+        'projsamples': {x.id: {'name': x.sample, 'id': x.id} for x in
+            models.ProjectSample.objects.filter(project_id=project_id)},
+        'experiments': [{'id': x.id, 'name': x.name} for x in
+            models.Experiment.objects.filter(project_id=project_id)],
             'prefracs': [{'id': x.id, 'name': x.name}
                           for x in models.Prefractionation.objects.all()],
             'hirief_ranges': [{'name': str(x), 'id': x.id}
@@ -76,7 +82,8 @@ def dataset_info(request, dataset_id=False):
     if dataset_id:
         try:
             dset = models.Dataset.objects.select_related(
-                'runname__experiment__project__projtype', 'datatype',
+                'datatype',
+                'runname__experiment__project',
                 'runname__experiment__project__pi',
                 'prefractionationdataset__prefractionation',
                 'prefractionationdataset__hiriefdataset',
@@ -92,11 +99,6 @@ def dataset_info(request, dataset_id=False):
                 'dataset_id': dset.id,
                 'experiment_id': dset.runname.experiment_id,
                 'runname': dset.runname.name,
-                'pi_id': project.pi_id,
-                'pi_name': project.pi.name,
-                'project_id': project.id,
-                'project_name': project.name,
-                'ptype_id': project.projtype.ptype_id,
                 'datatype_id': dset.datatype_id,
                 'storage_location': dset.storage_loc,
                 'locked': dset.locked,
@@ -104,7 +106,7 @@ def dataset_info(request, dataset_id=False):
         if hasattr(dset, 'prefractionationdataset'):
             response_json['dsinfo'].update(pf_dataset_info_json(
                 dset.prefractionationdataset))
-        if dset.runname.experiment.project.projtype.ptype_id != settings.LOCAL_PTYPE_ID:
+        if dset.runname.experiment.project.ptype_id != settings.LOCAL_PTYPE_ID:
             mail = models.ExternalDatasetContact.objects.get(dataset_id=dset.id)
             response_json['dsinfo'].update({'externalcontactmail': mail.email})
     return JsonResponse(response_json)
@@ -351,53 +353,17 @@ def update_dataset(data):
     # change at the same time.
     # Thus: its time to do "new dset", "new proj" in the excel table view!
     dset = models.Dataset.objects.filter(pk=data['dataset_id']).select_related(
-        'runname__experiment', 'datatype').get()
-    if 'newprojectname' in data:
-        if is_invalid_proj_exp_runnames(data['newprojectname']):
-            return JsonResponse({'error': f'New project name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
-        project = newproject_save(data)
-    else:
-        project = models.Project.objects.get(pk=data['project_id'])
-    if project.id != dset.runname.experiment.project_id:
-        # all ds proj samples need new project, either move or duplicate...
-        dsraws = dset.datasetrawfile_set.all()
-        dspsams = models.ProjectSample.objects.filter(quantchannelsample__dataset=dset).union(
-                models.ProjectSample.objects.filter(quantsamplefile__rawfile__in=dsraws),
-                models.ProjectSample.objects.filter(quantfilechannel__dsrawfile__in=dsraws)
-                ).values('pk')
-        # Since unions cant be filtered/excluded on, re-query
-        dspsams = models.ProjectSample.objects.filter(pk__in=dspsams)
-        # Duplicate multi DS projsamples from QCS, they are going to a new project:
-        multipsams = set()
-        multidsqcs = models.QuantChannelSample.objects.filter(projsample__in=dspsams).exclude(dataset=dset)
-        for qcs in multidsqcs.distinct('projsample'):
-            multipsams.add(qcs.projsample_id)
-            newpsam = models.ProjectSample.objects.create(sample=qcs.projsample.sample, project=project)
-            models.QuantChannelSample.objects.filter(dataset=dset, projsample=qcs.projsample).update(projsample=newpsam)
-        multidsqsf = models.QuantSampleFile.objects.filter(projsample__in=dspsams).exclude(rawfile__in=dsraws)
-        for qsf in multidsqsf.distinct('projsample'):
-            multipsams.add(qsf.projsample_id)
-            newpsam = models.ProjectSample.objects.create(sample=qsf.projsample.sample, project=project)
-            models.QuantSampleFile.objects.filter(rawfile__in=dsraws, projsample=qsf.projsample).update(projsample=newpsam)
-        multidsqfcs = models.QuantFileChannel.objects.filter(projsample__in=dspsams).exclude(dsrawfile__in=dsraws)
-        for qfcs in multidsqfcs.distinct('projsample'):
-            multipsams.add(qfcs.projsample_id)
-            newpsam = models.ProjectSample.objects.create(sample=qfcs.projsample.sample, project=project)
-            models.QuantFileChannel.objects.filter(dsrawfile__in=dsraws, projsample=qfcs.projsample).update(projsample=newpsam)
-        # having found multi-dset-psams, now move project_id on non-shared projectsamples
-        dspsams.exclude(pk__in=multipsams).update(project=project)
-
+        'runname__experiment__project', 'datatype').get()
     newexp = False
     if 'newexperimentname' in data:
         if is_invalid_proj_exp_runnames(data['newexperimentname']):
             return JsonResponse({'error': f'Experiment name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
         experiment = models.Experiment(name=data['newexperimentname'],
-                                       project=project)
+                project=dset.runname.experiment.project)
         dset.runname.experiment = experiment
         newexp = True
     else:
         experiment = models.Experiment.objects.get(pk=data['experiment_id'])
-        experiment.project_id = project.id
         if data['experiment_id'] != dset.runname.experiment_id:
             # another experiment was selected
             newexp = True
@@ -441,8 +407,8 @@ def update_dataset(data):
     dtype = models.Datatype.objects.get(pk=data['datatype_id'])
     prefrac = models.Prefractionation.objects.get(pk=data['prefrac_id']) if data['prefrac_id'] else False
     hrrange_id = data['hiriefrange'] if 'hiriefrange' in data and data['hiriefrange'] else False
-    new_storage_loc = set_storage_location(project, experiment, dset.runname,
-                                           dtype, prefrac, hrrange_id)
+    new_storage_loc = set_storage_location(dset.runname.experiment.project, experiment, dset.runname,
+            dtype, prefrac, hrrange_id)
     err_fpath, err_fname = os.path.split(new_storage_loc)
     prim_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
     if new_storage_loc != dset.storage_loc and filemodels.StoredFile.objects.filter(
@@ -460,7 +426,7 @@ def update_dataset(data):
         if job['error']: 
             return JsonResponse({'error': job['error']}, status=403)
     dset.save()
-    if data['ptype_id'] != settings.LOCAL_PTYPE_ID:
+    if dset.runname.experiment.project.ptype_id != settings.LOCAL_PTYPE_ID:
         try:
             if dset.externaldatasetcontact.email != data['externalcontact']:
                 dset.externaldatasetcontact.email = data['externalcontact']
@@ -472,17 +438,54 @@ def update_dataset(data):
     return JsonResponse({'dataset_id': dset.id})
 
 
-def newproject_save(data):
+@require_POST
+@login_required
+def save_new_project(request):
+    data = json.loads(request.body.decode('utf-8'))
+    try:
+        data['pi_id'], data['ptype_id'], data['name'], data['extref']
+    except KeyError:
+        return JsonResponse({'error': 'Please fill in the fields'}, status=400)
     if 'newpiname' in data:
-        pi = models.PrincipalInvestigator(name=data['newpiname'])
-        pi.save()
-        project = models.Project(name=data['newprojectname'], pi=pi)
+        pi_id = models.PrincipalInvestigator.objects.create(name=data['newpiname']).pk
+    elif data['ptype_id'] == settings.LOCAL_PTYPE_ID:
+        # FIXME set internal PI in conf/settings maybe, or do we even need one since this is
+        # a ONE-PI-SYSTEM!
+        pi_id = INTERNAL_PI_PK
     else:
-        project = models.Project(name=data['newprojectname'], pi_id=data['pi_id'])
-    project.save()
-    ptype = models.ProjType(project=project, ptype_id=data['ptype_id'])
-    ptype.save()
-    return project
+        try:
+            pi_id = int(data['pi_id'])
+        except ValueError:
+            return JsonResponse({'error': 'Please select a PI'}, status=403)
+    try:
+        project = models.Project.objects.create(name=data['name'], pi_id=pi_id,
+                ptype_id=data['ptype_id'], externalref=data['extref'])
+    except IntegrityError:
+        return JsonResponse({'error': 'Project name already exists'}, status=403)
+    tableproject, _order = populate_proj(models.Project.objects.filter(pk=project.pk), request.user)
+    return JsonResponse({'project': tableproject[project.pk]})
+
+
+def populate_proj(dbprojs, user, showjobs=True, include_db_entry=False):
+    projs, order = {}, []
+    dbprojs = dbprojs.annotate(dsmax=Max('experiment__runname__dataset__date'),
+            anamax=Max('experiment__runname__dataset__datasetanalysis__analysis__date')).annotate(
+            greatdate=Greatest('dsmax', 'anamax'))
+    for proj in dbprojs.order_by('-greatdate'): # latest first
+        order.append(proj.id)
+        projs[proj.id] = {
+            'id': proj.id,
+            'name': proj.name,
+            'inactive': proj.active == False,
+            'start': datetime.strftime(proj.registered, '%Y-%m-%d %H:%M'),
+            'ptype': proj.ptype.name,
+            'dset_ids': [x.dataset.pk for y in proj.experiment_set.all() for x in y.runname_set.all() if hasattr(x, 'dataset')],
+            'details': False,
+            'selected': False,
+            'lastactive': datetime.strftime(proj.greatdate, '%Y-%m-%d %H:%M') if proj.greatdate else '-',
+            'actions': ['new dataset'],
+        }
+    return projs, order
 
 
 def get_prefrac_ids():
@@ -533,12 +536,12 @@ def change_owners(request):
     data = json.loads(request.body.decode('utf-8'))
     try:
         dset = models.Dataset.objects.filter(pk=data['dataset_id']).values('pk', 'deleted',
-                'runname__experiment__project__projtype__ptype_id').get()
+                'runname__experiment__project__ptype_id').get()
     except models.Dataset.DoesNotExist:
         print('change_owners could not find dataset with that ID {}'.format(data['dataset_id']))
         return JsonResponse({'error': 'Something went wrong trying to change ownership for that dataset'}, status=403)
     dsownq = models.DatasetOwner.objects.filter(dataset_id=dset['pk'])
-    if not check_ownership(request.user, dset['runname__experiment__project__projtype__ptype_id'],
+    if not check_ownership(request.user, dset['runname__experiment__project__ptype_id'],
             dset['deleted'], [x['user_id'] for x in dsownq.values('user_id')]):
         return HttpResponseForbidden()
     is_already_ownerq = dsownq.filter(user_id=data['owner'])
@@ -590,9 +593,9 @@ def check_save_permission(dset_id, logged_in_user, action=False):
         return ('You cannot edit a locked dataset', 403)
 
     ds = dsq.filter(locked=action == 'unlock').values('deleted',
-            'runname__experiment__project__projtype__ptype_id').get()
+            'runname__experiment__project__ptype_id').get()
     owner_ids = [x['user_id'] for x in models.DatasetOwner.objects.filter(dataset_id=dset_id).values('user_id')]
-    if check_ownership(logged_in_user, ds['runname__experiment__project__projtype__ptype_id'],
+    if check_ownership(logged_in_user, ds['runname__experiment__project__ptype_id'],
             deleted=ds['deleted'], owners=owner_ids):
         return (False, 200)
     else:
@@ -631,10 +634,9 @@ def save_new_dataset(data, project, experiment, runname, user_id):
     dsowner.save()
     if data['prefrac_id']:
         save_dataset_prefrac(dset.id, data)
-    if data['ptype_id'] != settings.LOCAL_PTYPE_ID:
-        dset_mail = models.ExternalDatasetContact(dataset=dset,
-                                                 email=data['externalcontact'])
-        dset_mail.save()
+    if project.ptype_id != settings.LOCAL_PTYPE_ID:
+        dset_mail = models.ExternalDatasetContact.objects.create(dataset=dset,
+                email=data['externalcontact'])
     # Set components
     dtcomp = models.DatatypeComponent.objects.get(datatype_id=dset.datatype_id,
             component=models.DatasetUIComponent.DEFINITION)
@@ -652,6 +654,11 @@ def save_new_dataset(data, project, experiment, runname, user_id):
 
 @login_required
 def move_project_cold(request):
+    '''Closes project:
+        - Set to not active in DB
+        - For each dataset, archive if needed, and remove from servers
+    '''
+    # TODO close_project this should be called
     data = json.loads(request.body.decode('utf-8'))
     if 'item_id' not in data or not data['item_id']:
         return JsonResponse({'state': 'error', 'error': 'No project specified for retiring'}, status=400)
@@ -708,7 +715,7 @@ def merge_projects(request):
                 'pk', 'deleted'):
             dsown_ids = [x['user_id'] for x in models.DatasetOwner.objects.filter(
                 dataset_id=dset['pk']).values('user_id')]
-            if not check_ownership(request.user, proj.projtype.ptype_id, dset['deleted'], dsown_ids):
+            if not check_ownership(request.user, proj.ptype_id, dset['deleted'], dsown_ids):
                 return JsonResponse({'error': f'You do not have the rights to move all datasets in project {proj.name}'}, status=403)
         for exp in proj.experiment_set.all():
             runnames_pks = [x.pk for x in exp.runname_set.all()]
@@ -771,7 +778,7 @@ def rename_project(request):
             # Only first dataset
             storageshare_id = dset['storageshare_id']
         dsown_ids = [x['user_id'] for x in models.DatasetOwner.objects.filter(dataset_id=dset['pk']).values('user_id')]
-        if not check_ownership(request.user, proj.projtype.ptype_id, dset['deleted'], dsown_ids):
+        if not check_ownership(request.user, proj.ptype_id, dset['deleted'], dsown_ids):
             return JsonResponse({'error': f'You do not have the rights to change all datasets in this project'}, status=403)
     # queue jobs to rename project, update project name after that since it is needed in job for path
     prim_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
@@ -946,11 +953,11 @@ def reactivate_dataset(dset):
 def move_dataset_cold(request):
     data = json.loads(request.body.decode('utf-8'))
     try:
-        dset = models.Dataset.objects.select_related('runname__experiment__project__projtype').get(pk=data['item_id'])
+        dset = models.Dataset.objects.select_related('runname__experiment__project__ptype_id').get(pk=data['item_id'])
     except models.Dataset.DoesNotExist:
         return JsonResponse({'error': 'Dataset does not exist'}, status=403)
     dsownq = models.DatasetOwner.objects.filter(dataset_id=dset.pk)
-    if not check_ownership(request.user, dset.runname.experiment.project.projtype.ptype_id,
+    if not check_ownership(request.user, dset.runname.experiment.project.ptype_id,
             dset.deleted, [x['user_id'] for x in dsownq.values('user_id')]):
         return JsonResponse({'error': 'Cannot archive dataset, no permission for user'}, status=403)
     archived = archive_dataset(dset)
@@ -964,11 +971,11 @@ def move_dataset_cold(request):
 def move_dataset_active(request):
     data = json.loads(request.body.decode('utf-8'))
     try:
-        dset = models.Dataset.objects.select_related('runname__experiment__project__projtype').get(pk=data['item_id'])
+        dset = models.Dataset.objects.select_related('runname__experiment__project__ptype_id').get(pk=data['item_id'])
     except models.Dataset.DoesNotExist:
         return JsonResponse({'error': 'Dataset does not exist'}, status=403)
     # check_ownership without deleted demand:
-    pt_id = dset.runname.experiment.project.projtype.ptype_id 
+    pt_id = dset.runname.experiment.project.ptype_id 
     if request.user.id in get_dataset_owners_ids(dset) or request.user.is_staff:
         pass
     elif pt_id == settings.LOCAL_PTYPE_ID:
@@ -1067,37 +1074,30 @@ def save_dataset(request):
     else:
         if is_invalid_proj_exp_runnames(data['runname']):
             return JsonResponse({'error': f'Run name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
-        if 'newprojectname' in data:
-            if is_invalid_proj_exp_runnames(data['newprojectname']):
-                return JsonResponse({'error': f'New project name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
-            project = newproject_save(data)
-        else:
-            try:
-                project = models.Project.objects.get(pk=data['project_id'], active=True)
-            except models.Project.DoesNotExist:
-                print('Project to save to is not active')
-                return HttpResponseForbidden()
+        try:
+            project = models.Project.objects.get(pk=data['project_id'], active=True)
+        except models.Project.DoesNotExist:
+            return JsonResponse({'error': f'Project {data["project_id"]} is not active'}, status=403)
         if data['datatype_id'] in settings.LC_DTYPE_IDS:
             try:
                 experiment = models.Experiment.objects.get(project=project, name=settings.LCEXPNAME)
             except models.Experiment.DoesNotExist:
                 experiment = models.Experiment(name=settings.LCEXPNAME, project=project)
                 experiment.save()
-            runname = models.RunName(name=data['runname'], experiment=experiment)
+            runname = models.RunName.objects.create(name=data['runname'], experiment=experiment)
         else:
             if 'newexperimentname' in data:
                 if is_invalid_proj_exp_runnames(data['newexperimentname']):
                     return JsonResponse({
                         'error': f'Experiment name cannot contain characters '
                         'except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
-                experiment = models.Experiment(name=data['newexperimentname'],
-                                               project_id=project.id)
-                experiment.save()
+                experiment = models.Experiment.objects.create(name=data['newexperimentname'],
+                        project=project)
 
             elif 'experiment_id' in data:
                 experiment = models.Experiment.objects.get(pk=data['experiment_id'])
-            runname = models.RunName(name=data['runname'], experiment=experiment)
-        runname.save()
+            runname = models.RunName.objects.create(name=data['runname'], experiment=experiment)
+        # Have runname/exp/project, now save rest of dataset:
         try:
             dset = save_new_dataset(data, project, experiment, runname, request.user.id)
         except IntegrityError:
@@ -1156,16 +1156,6 @@ def update_dataset_prefrac(pfds, data):
     if (pffa.fractions != data['prefrac_amount']):
         pffa.fractions = data['prefrac_amount']
         pffa.save()
-
-
-@login_required
-def get_project(request, project_id):
-    proj = models.Project.objects.select_related('projtype').get(pk=project_id)
-    return JsonResponse({
-        'id': project_id, 'pi_id': proj.pi_id, 'ptype_id': proj.projtype.ptype_id,
-        'projsamples': {x.id: {'name': x.sample, 'id': x.id} for x in models.ProjectSample.objects.filter(project_id=project_id)},
-        'experiments': [{'id': x.id, 'name': x.name} for x in 
-        models.Experiment.objects.filter(project_id=project_id)]})
 
 
 

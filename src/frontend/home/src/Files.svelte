@@ -106,20 +106,20 @@ async function fetchCleanup() {
 
 <Tabs tabshow="Files" notif={notif} />
 {#if cleanupsize}
-<a class="button" on:click={runCleanup}>Cleanup mzML for {cleanupsize} of raw files</a>
+<a class="button is-small" on:click={runCleanup}>Cleanup mzML for {cleanupsize} of raw files</a>
 {:else if fetchingCleanup}
-<a class="button is-loading">Cleanup mzML for {cleanupsize} of raw files</a>
+<a class="button is-small is-loading">Cleanup mzML for {cleanupsize} of raw files</a>
 {:else}
-<a class="button" on:click={fetchCleanup}>Get old mzML cleanup space</a>
+<a class="button is-small" on:click={fetchCleanup}>Get old mzML cleanup space</a>
 {/if}
 
 {#if selectedFiles.length}
-<a class="button" title="Move deleted files to active storage (admins only)" on:click={reactivateFiles}>Undelete files</a>
-<a class="button" title="Move files to cold storage (admins only)" on:click={archiveFiles}>Archive files</a>
+<a class="button is-small" title="Move deleted files to active storage (admins only)" on:click={reactivateFiles}>Undelete files</a>
+<a class="button is-small" title="Move files to cold storage (admins only)" on:click={archiveFiles}>Archive files</a>
 {:else}
-<a class="button" title="Move deleted files to active storage (admins only)" disabled>Undelete files</a>
-<a class="button" title="Move files to cold storage (admins only)" disabled>Archive files</a>
-<a class="button" title="PERMANENTLY delete files from active and cold storage (admins only)" disabled>Purge files</a>
+<a class="button is-small" title="Move deleted files to active storage (admins only)" disabled>Undelete files</a>
+<a class="button is-small" title="Move files to cold storage (admins only)" disabled>Archive files</a>
+<a class="button is-small" title="PERMANENTLY delete files from active and cold storage (admins only)" disabled>Purge files</a>
 {/if}
   
 <Table tab="Files" bind:treatItems={treatItems} bind:notif={notif} bind:selected={selectedFiles} fetchUrl="/show/files" findUrl="/find/files" getdetails={getFileDetails} fields={tablefields} inactive={['deleted', 'purged']} on:detailview={showDetails} />

@@ -3,11 +3,11 @@ from datasets import views
 
 app_name = 'datasets'
 urlpatterns = [
-    path('new/', views.new_dataset, name="new"),
+    path('new/<int:proj_id>/', views.new_dataset, name="new"),
+    #path('show/<int:project_id>/', views.show_project),
     path('show/<int:dataset_id>/', views.show_dataset, name="show"),
-    path('show/info/<int:dataset_id>/', views.dataset_info),
-    path('show/info/', views.dataset_info),
-    path('show/project/<int:project_id>/', views.get_project),
+    path('show/info/<int:project_id>/', views.dataset_info),
+    path('show/info/<int:project_id>/<int:dataset_id>/', views.dataset_info),
     path('show/files/<int:dataset_id>/', views.dataset_files, name="showfiles"),
     path('show/files/', views.dataset_files),
     path('find/files/', views.find_files),
@@ -21,6 +21,7 @@ urlpatterns = [
     path('show/mssampleprep/', views.dataset_mssampleprep),
     path('show/components/<int:datatype_id>/', views.get_datatype_components),
     path('show/species/', views.get_species),
+    path('save/project/', views.save_new_project),
     path('save/dataset/', views.save_dataset, name="savedset"),
     path('save/dataset/lock/', views.lock_dataset), 
     path('save/dataset/unlock/', views.unlock_dataset), 

@@ -33,21 +33,19 @@ let errors = {
 let saveerrors = Object.assign({}, errors);
 let comperrors = [];
 
+// Project info
+let project_id = projdata.proj_id;
+let project_name = projdata.name;
+let ptype = projdata.ptype;
+let pi_name = projdata.pi_name;
+let isExternal = projdata.isExternal;
+let datasettypes = projdata.datasettypes;
 
 let dsinfo = {
   datatype_id: '',
-  old_project_id: '',
-  project_id: '',
-  project_name: '',
-  ptype_id: '',
   storage_location: '',
-  oldnewprojectname: '',
-  newprojectname: '',
   experiment_id: '',
   runname: '',
-  pi_id: '',
-  newpiname: '',
-  pi_name: '',
   externalcontactmail: '',
   prefrac_id: '',
   prefrac_length: '',
@@ -55,22 +53,12 @@ let dsinfo = {
   hiriefrange: '',
 }
 
-let datasettypes = [];
-let ptypes = [];
-let projects = {};
-let local_ptype_id = '';
-let external_pis = [];
+let experiments = [];
 let prefracs = [];
 let hirief_ranges = [];
-let internal_pi_id = '';
-
 
 let components = [];
-let isNewProject = false;
-let isExternal = false;
 let isNewExperiment = false;
-let isNewPI = false;
-let experiments = []
 let tabshow = 'meta';
 let tabcolor = 'has-text-grey-lighter';
   // Yes, for microscopy/genomics, we need separation between samples/prep
@@ -78,12 +66,11 @@ let tabcolor = 'has-text-grey-lighter';
   // - QMS, LCheck, IP, TPP, microscopy QC?, genomics
 
 $: showMsdata = components.indexOf('ACQUISITION') > -1;
-$: isExternal = Boolean(dsinfo.ptype_id && dsinfo.ptype_id !== local_ptype_id);
 $: isLabelcheck = datasettypes.filter(x => x.id === dsinfo.datatype_id).filter(x => x.name.indexOf('abelcheck') > -1).length;
 $: stored = $dataset_id && !edited;
 
 async function getcomponents() {
-  // FIXME can get these in single shot? Need not network trip.
+  // Could get these in single shot, need not network trip, for all dtype IDs
   const result = await getJSON(`/datasets/show/components/${dsinfo.datatype_id}`);
   components = result.components;
 }
@@ -93,32 +80,6 @@ function switchDatatype() {
   editMade();
 }
 
-async function project_selected(saved=false) {
-  // Gets experiments, project details when selecting a project
-  if (dsinfo.project_id) {
-    const result = await getJSON(`/datasets/show/project/${dsinfo.project_id}`);
-    dsinfo.pi_name = external_pis[result.pi_id].name;
-    dsinfo.ptype_id = result.ptype_id;
-    experiments = result.experiments;
-    for (let key in projsamples) { delete(projsamples[key]);};
-    for (let [key, val] of Object.entries(result.projsamples)) { projsamples[key] = val; }
-    isNewProject = false;
-  }
-  if (!saved) {
-    dsinfo.experiment_id = '';
-  }
-  editMade();
-}
-
-function setNewProj() {
-  isNewProject = true;
-  dsinfo.ptype_id = '';
-  dsinfo.externalcontactmail = '';
-  experiments = [];
-  for (let key in projsamples) { delete(projsamples[key]);};
-
-  editMade();
-}
 
 function editMade() {
   edited = true;
@@ -126,62 +87,43 @@ function editMade() {
 }
 
 async function fetchDataset() {
-  let url = '/datasets/show/info/';
-  url = $dataset_id ? url + $dataset_id : url;
+  let url = `/datasets/show/info/${project_id}/`;
+  url = $dataset_id ? url + $dataset_id + '/': url;
   const resp = await getJSON(url);
   for (let [key, val] of Object.entries(resp.dsinfo)) { dsinfo[key] = val; }
-  datasettypes = resp.projdata.datasettypes;
-  ptypes = resp.projdata.ptypes;
-  projects = resp.projdata.projects;
-  local_ptype_id = resp.projdata.local_ptype_id;
-  external_pis = resp.projdata.external_pis;
-  internal_pi_id = resp.projdata.internal_pi_id;
+  for (let key in projsamples) { delete(projsamples[key]);};
+  for (let [key, val] of Object.entries(resp.projdata.projsamples)) { projsamples[key] = val; }
   prefracs = resp.projdata.prefracs;
+  experiments = resp.projdata.experiments;
   hirief_ranges = resp.projdata.hirief_ranges;
   if ($dataset_id) {
     getcomponents();
-    await project_selected(true); // true is saved param
     isNewExperiment = false;
   }
   edited = false;
 }
 
 function validate() {
-	comperrors = [];
-	const re = RegExp('^[a-z0-9-_]+$', 'i');
-	if ((isNewProject && !dsinfo.newprojectname) || (!isNewProject && !dsinfo.project_id)) {
-		comperrors.push('Project needs to be selected or created');
-	}
-	else if (isNewProject && dsinfo.newprojectname && !re.test(dsinfo.newprojectname)) {
-		comperrors.push('Project name may only contain a-z 0-9 - _');
-	}
-  if (!dsinfo.ptype_id) {
-    comperrors.push('Project type selection is required');
+  comperrors = [];
+  const re = RegExp('^[a-z0-9-_]+$', 'i');
+  if (!dsinfo.runname) {
+    comperrors.push('Run name is required');
   }
-	if (!dsinfo.runname) {
-		comperrors.push('Run name is required');
-	}
-	else if (!re.test(dsinfo.runname)) {
-		comperrors.push('Run name may only contain a-z 0-9 - _');
-	}
+  else if (!re.test(dsinfo.runname)) {
+    comperrors.push('Run name may only contain a-z 0-9 - _');
+  }
   if (showMsdata && ((isNewExperiment && !dsinfo.newexperimentname) || (!isNewExperiment && !dsinfo.experiment_id))) {
-		comperrors.push('Experiment is required');
-	}
-	else if (showMsdata && isNewExperiment && dsinfo.newexperimentname && !re.test(dsinfo.newexperimentname)) {
-		comperrors.push('Experiment name may only contain a-z 0-9 - _');
-	}
-  if (isExternal) {
-		if (isNewProject && !dsinfo.newpiname && (!dsinfo.pi_id || dsinfo.pi_id === internal_pi_id)) {
-			comperrors.push('Need to select or create a PI');
-		}
-		if (!dsinfo.externalcontactmail) {
-			comperrors.push('External contact is required');
-		}
-	}
+    comperrors.push('Experiment is required');
+  } else if (showMsdata && isNewExperiment && dsinfo.newexperimentname && !re.test(dsinfo.newexperimentname)) {
+  comperrors.push('Experiment name may only contain a-z 0-9 - _');
+  }
+  if (isExternal && !dsinfo.externalcontactmail) {
+    comperrors.push('External contact is required');
+  }
   // This is probably not possible to save in UI, button is disabled
-	if (!dsinfo.datatype_id) {
-		comperrors.push('Datatype is required');
-	}
+  if (!dsinfo.datatype_id) {
+    comperrors.push('Datatype is required');
+  }
   return comperrors;
 }
 
@@ -194,30 +136,20 @@ async function save() {
   if (errors.basics.length === 0) { 
     let postdata = {
       dataset_id: $dataset_id,
-      ptype_id: dsinfo.ptype_id,
       datatype_id: dsinfo.datatype_id,
       runname: dsinfo.runname,
       prefrac_id: dsinfo.prefrac_id,
       prefrac_length: dsinfo.prefrac_length,
       prefrac_amount: dsinfo.prefrac_amount,
       hiriefrange: dsinfo.hiriefrange,
+      project_id: project_id,
     };
-    if (isNewProject) {
-      postdata.newprojectname = dsinfo.newprojectname;
-    } else {
-      postdata.project_id = dsinfo.project_id;
-    }
     if (isNewExperiment) {
       postdata.newexperimentname = dsinfo.newexperimentname;
     } else {
       postdata.experiment_id = dsinfo.experiment_id;
     }
-    if (dsinfo.newpiname) {
-      postdata.newpiname = dsinfo.newpiname;
-    } else {
-      postdata.pi_id = isExternal ? dsinfo.pi_id : internal_pi_id;
-    }
-    if (dsinfo.ptype_id !== local_ptype_id) {
+    if (isExternal) {
       postdata.externalcontact = dsinfo.externalcontactmail;
     }
     const response = await postJSON('/datasets/save/dataset/', postdata);
@@ -268,6 +200,7 @@ function showFiles() {
 </script>
 
 
+<div class="container">
 <ErrorNotif cssclass="sticky" errors={Object.values(saveerrors).flat().concat(Object.values(errors).flat())} />
 <!--
 {#if Object.values(errors).flat().length || Object.values(saveerrors).flat().length}
@@ -308,12 +241,19 @@ function showFiles() {
 <div style="display: {tabshow !== 'meta' ? 'none' : ''}">
     <div class="box" id="project">
     
-      {#if dsinfo.storage_location}
     	<article class="message is-info"> 
-        <div class="message-header">Storage location</div>
-        <div class="message-body">{dsinfo.storage_location}</div>
+          <div class="message-body">
+            <div>
+              <span class="has-text-weight-bold">Project:</span>
+              <span>{project_name}</span>
+              <span class="tag is-success is-small">{ptype}</span>
+            </div>
+            <div><span class="has-text-weight-bold">PI:</span> {pi_name}</div>
+            {#if dsinfo.storage_location}
+            <div><span class="has-text-weight-bold">Storage: {dsinfo.storage_location}</div>
+            {/if}
+          </div>
     	</article>
-      {/if}
     
       <h5 class="has-text-primary title is-5">
         {#if stored}
@@ -326,45 +266,11 @@ function showFiles() {
         <button class="button is-small is-info has-text-weight-bold" disabled={!edited || !dsinfo.datatype_id} on:click={fetchDataset}>Revert</button>
       </h5>
     
-      <div class="field"> 
-        <label class="label">Project
-        {#if isNewProject}
-        <span class="tag is-danger is-outlined is-small">New project</span>
-        {#if $dataset_id}
-        <span class="tag is-danger is-outlined is-small">Are you sure?</span>
-        {/if}
-        {/if}
-        </label>
-        <div class="control">
-          <DynamicSelect bind:intext={dsinfo.project_name} fixedoptions={projects} bind:unknowninput={dsinfo.newprojectname} bind:selectval={dsinfo.project_id} on:selectedvalue={e => project_selected()} on:newvalue={setNewProj} niceName={x => x.name}/>
-        {#if isNewProject}
-        <label class="label">Project type</label>
-        <div class="select">
-          <select bind:value={dsinfo.ptype_id}>
-            <option disabled value="">Please select one</option>
-            {#each ptypes as ptype}
-            <option value={ptype.id}>{ptype.name}</option>
-            {/each}
-          </select>
-        </div>
-        {/if}
-
-        {#if isExternal}
-        <span class="tag is-success is-medium">External project: {dsinfo.pi_name}</span>
-        {/if}
-        </div>
-      </div>
 
       {#if isExternal}
       <div class="field">
         <label class="label">contact(s)
-        {#if dsinfo.newpiname}
-        <span class="tag is-danger is-outlined is-small">New PI</span>
-        {/if}
         <div class="control">
-          {#if isNewProject}
-          <DynamicSelect bind:intext={dsinfo.pi_name} fixedoptions={external_pis} bind:unknowninput={dsinfo.newpiname} bind:selectval={dsinfo.pi_id} niceName={x => x.name} />
-          {/if}
           <input class="input" type="text" on:change={editMade} bind:value={dsinfo.externalcontactmail} placeholder="operational contact email (e.g. postdoc)">
         </div>
       </div>
@@ -452,4 +358,6 @@ function showFiles() {
 
 <div style="display: {tabshow !== 'files' ? 'none' : ''}">
     <Files bind:this={filescomp} />
+</div>
+
 </div>

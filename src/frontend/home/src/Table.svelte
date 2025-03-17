@@ -40,6 +40,12 @@ export let treatItems = async function(url, thing, operationmsg, callback, itemi
   }
 }
 
+export let addItem = function(item) {
+  items[item.id] = item;
+  order = [item.id, ...order];
+}
+
+
 const dispatch = createEventDispatcher();
 let order = [];
 let findQueryString = '';
@@ -55,7 +61,7 @@ function toggleSelectAll() {
 }
 
 function fetchItems(ids) {
-	const url = ids.length ? fetchUrl + `?ids=${ids.join(',')}` : fetchUrl;
+  const url = ids.length ? fetchUrl + `?ids=${ids.join(',')}` : fetchUrl;
   loadItems(url);
 }
 
