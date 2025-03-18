@@ -156,7 +156,7 @@ def recurse_nrdsets_baseanalysis(aba):
         analysis=aba.base_analysis, field='__regex')}
     for asf in models.AnalysisDSInputFile.objects.filter(
             analysisset__analysis=aba.base_analysis).select_related(
-                    'sfile__rawfile__producer', 'analysisset__setname'):
+                    'sfile__rawfile__producer', 'analysisset'):
         if asf.dsanalysis.dataset_id in regexes:
             frnr = re.match(regexes[asf.dsanalysis.dataset_id], asf.sfile.filename) or False
             frnr = frnr.group(1) if frnr else 'NA'
@@ -165,11 +165,11 @@ def recurse_nrdsets_baseanalysis(aba):
         oldasf = {'fn': asf.sfile.filename,
                 'instrument': asf.sfile.rawfile.producer.name,
                 'setname': asf.analysisset.setname,
-                'plate': strips[asf.analysisset.dataset_id],
+                'plate': strips[asf.dsanalysis.dataset_id],
                 'fraction': frnr,
                 }
         try:
-            single_ana_oldmzml[asf.analyisset.setname].append(oldasf)
+            single_ana_oldmzml[asf.analysisset.setname].append(oldasf)
             single_ana_oldds[asf.analysisset.setname].add(asf.dsanalysis.dataset_id)
         except KeyError:
             single_ana_oldmzml[asf.analysisset.setname] = [oldasf]
@@ -313,10 +313,10 @@ class RunNextflowWorkflow(MultiFileJob):
             run['infiles'] = infiles
         else:
             # SELECT prefrac with fraction regex to get fractionated datasets in old analysis
-            if ana_baserec.base_analysis.filter(analysisdatasetsetvalue__field='__regex').count():
+            if ana_baserec.base_analysis.analysisdatasetsetvalue_set.filter(field='__regex').count():
                 # rerun/complement runs with fractionated base analysis need --oldmzmldef parameter
                 old_infiles, old_dsets = recurse_nrdsets_baseanalysis(ana_baserec)
-                run['old_infiles'] = ['{}\t{}'.format(x['fn'], '\t'.join([x[key] for key in run['components']['INPUTDEF']]))
+                run['old_infiles'] = ['{}\t{}'.format(x['fn'], '\t'.join([x[key] for key in run['components']['INPUTDEF'][1:]]))
                         for setmzmls in old_infiles.values() for x in setmzmls]
             if not ana_baserec.rerun_from_psms:
                 # Only mzmldef input if not doing a rerun

@@ -169,10 +169,10 @@ def run_nextflow_workflow(self, run, params, stagefiles, profiles, nf_version):
 
     if 'COMPLEMENT_ANALYSIS' in run['components'] and run['old_infiles']:
         with open(os.path.join(rundir, 'oldinputdef.txt'), 'w') as fp:
+            fp.write('\t'.join(run['components']['INPUTDEF']))
             for fn in run['old_infiles']:
-                mzstr = '{}\n'.format(fn)
-                fp.write(mzstr)
-        params.extend(['--oldmzmldef', os.path.join(rundir, 'oldmzmldef.txt')])
+                fp.write(f'\n{fn}')
+        params.extend(['--oldmzmldef', os.path.join(rundir, 'oldinputdef.txt')])
     params = [x if x != 'RUNNAME__PLACEHOLDER' else run['runname'] for x in params]
     outfiles = execute_normal_nf(run, params, rundir, gitwfdir, self.request.id, nf_version, profiles)
     postdata.update({'state': 'ok'})
