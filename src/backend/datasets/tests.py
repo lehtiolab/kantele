@@ -20,8 +20,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
     def test_new_dset(self):
         resp = self.post_json(data={'dataset_id': False, 'project_id': self.p1.pk,
             'experiment_id': self.exp1.pk, 'runname': 'newrunname',
-            'datatype_id': self.dtype.pk, 
-            'prefrac_id': False, 'ptype_id': self.ptype.pk,
+            'datatype_id': self.dtype.pk, 'prefrac_id': False,
             'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.RunName.objects.filter(name='newrunname').count(), 1)
@@ -41,7 +40,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertEqual(dm.Experiment.objects.filter(name=newexpname).count(), 0)
         resp = self.post_json(data={'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'newexperimentname': newexpname, 'runname': self.run1.name,
-            'datatype_id': self.dtype.pk, 'prefrac_id': False, 'ptype_id': self.ptype.pk,
+            'datatype_id': self.dtype.pk, 'prefrac_id': False,
             'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.Experiment.objects.filter(name=newexpname).count(), 1)
@@ -65,7 +64,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         # move dataset
         mvdsresp = self.post_json({'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'newexperimentname': newexpname, 'runname': self.run1.name, 
-            'datatype_id': self.dtype.pk, 'prefrac_id': False, 'ptype_id': self.ptype.pk, 
+            'datatype_id': self.dtype.pk, 'prefrac_id': False,
             'externalcontact': self.contact.email})
         self.assertEqual(mvdsresp.status_code, 200)
         rename_job = jm.Job.objects.filter(funcname='rename_dset_storage_loc').last()
@@ -110,7 +109,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         # move dataset
         mvdsresp = self.post_json({'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'newexperimentname': newexpname, 'runname': self.run1.name,
-            'datatype_id': self.dtype.pk, 'prefrac_id': False, 'ptype_id': self.ptype.pk,
+            'datatype_id': self.dtype.pk, 'prefrac_id': False,
             'externalcontact': self.contact.email})
         self.assertEqual(mvdsresp.status_code, 200)
         rename_job = jm.Job.objects.filter(funcname='rename_dset_storage_loc').last()
@@ -158,7 +157,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         # Try to create new dset 
         resp = self.post_json(data={'dataset_id': False, 'project_id': self.p1.pk,
             'experiment_id': self.exp1.pk, 'runname': fname, 'datatype_id': self.dtype.pk,
-            'prefrac_id': False, 'ptype_id': self.ptype.pk, 'externalcontact': self.contact.email})
+            'prefrac_id': False, 'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 403)
         self.assertIn('storage location not unique, there is either a file', resp.json()['error'])
 
@@ -378,7 +377,7 @@ class RenameProjectTest(BaseIntegrationTest):
         self.assertEqual(resp.status_code, 403)
         self.assertIn(f'cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}',
                 json.loads(resp.content)['error'])
-        oldp = dm.Project.objects.create(name='project to rename', pi=self.pi)
+        oldp = dm.Project.objects.create(name='project to rename', pi=self.pi, ptype=self.ptype)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'projid': oldp.pk, 'newname': self.p1.name})
         self.assertEqual(resp.status_code, 403)
@@ -827,8 +826,7 @@ class MergeProjectsTest(BaseTest):
     def setUp(self):
         super().setUp()
         # make projects
-        self.p2 = dm.Project.objects.create(name='p2', pi=self.pi)
-        pt2 = dm.ProjType.objects.create(project=self.p2, ptype=self.ptype)
+        self.p2 = dm.Project.objects.create(name='p2', pi=self.pi, ptype=self.ptype)
         self.exp2 = dm.Experiment.objects.create(name='e2', project=self.p2)
 
     def test_merge_fails(self):
