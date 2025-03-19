@@ -34,6 +34,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertEqual(dsc.filter(state=dm.DCStates.OK).count(), 1)
         self.assertTrue(dsc.filter(state=dm.DCStates.OK, dtcomp=self.dtcompdef).exists())
         self.assertEqual(dsc.filter(state=dm.DCStates.NEW).count(), self.dtype.datatypecomponent_set.count() - 1)
+        self.assertEqual(dm.ProjectLog.objects.last().message, f'Dataset {ds.pk} created by user {self.user.id}')
 
     def test_update_dset_newexp_location(self):
         newexpname = 'edited_exp'
@@ -51,6 +52,8 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertFalse(os.path.exists(self.f3path))
         new_ds_loc = os.path.join(self.p1.name, newexpname, self.dtype.name, self.run1.name)
         self.assertNotEqual(self.ds.storage_loc, new_ds_loc)
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.pk} changed dataset '
+                f'{self.ds.pk} path to {new_ds_loc} from {self.ds.storage_loc}').exists())
         self.ds.refresh_from_db()
         self.assertEqual(self.ds.storage_loc, new_ds_loc)
         self.assertTrue(os.path.exists(os.path.join(settings.SHAREMAP[self.ds.storageshare.name],
@@ -69,10 +72,15 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertEqual(mvdsresp.status_code, 200)
         rename_job = jm.Job.objects.filter(funcname='rename_dset_storage_loc').last()
         self.assertEqual(rename_job.state, Jobstates.PENDING)
+        self.assertTrue(dm.ProjectLog.objects.filter(message__startswith=f'User {self.user.pk} '
+            f'changed dataset {self.ds.pk} path to').exists())
         # remove files results in a job and claimed files still on tmp
         rmresp = self.cl.post('/datasets/save/files/', content_type='application/json', data={
             'dataset_id': self.ds.pk, 'removed_files': {self.f3raw.pk: {'id': self.f3raw.pk}},
             'added_files': {}})
+        print(dm.ProjectLog.objects.last().message)
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.pk} '
+            f'removed files {self.f3raw.pk} from dataset {self.ds.pk}').exists())
         self.assertEqual(rmresp.status_code, 200)
         self.assertTrue(self.f3raw.claimed)
         self.assertEqual(self.f3sf.servershare, self.ssnewstore)
@@ -160,6 +168,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
             'prefrac_id': False, 'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 403)
         self.assertIn('storage location not unique, there is either a file', resp.json()['error'])
+        self.assertFalse(dm.ProjectLog.objects.exists())
 
         # Try to update existing dataset
         dm.RunName.objects.filter(experiment=self.exp1, name=fname).delete()
@@ -169,6 +178,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
             'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 403)
         self.assertIn('There is already a file with that exact path', resp.json()['error'])
+        self.assertFalse(dm.ProjectLog.objects.exists())
 
 
 class UpdateFilesTest(BaseIntegrationTest):
@@ -181,6 +191,8 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.ds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles).update(state=dm.DCStates.NEW)
         resp = self.post_json({'dataset_id': self.ds.pk, 'added_files': {self.tmpraw.pk: {'id': self.tmpraw.pk}},
             'removed_files': {}})
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.pk} '
+            f'added files {self.tmpraw.pk} to dataset {self.ds.pk}').exists())
         self.assertEqual(resp.status_code, 200)
         newdsr = dm.DatasetRawFile.objects.filter(dataset=self.ds, rawfile=self.tmpraw)
         self.assertEqual(newdsr.count(), 1)
@@ -213,6 +225,7 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.assertFalse(raw.claimed)
         self.assertFalse(self.ds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles,
             state=dm.DCStates.OK).exists())
+        self.assertFalse(dm.ProjectLog.objects.exists())
 
     def test_trigger_movejob_errors(self):
         # add files are already in dset
@@ -231,6 +244,7 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.assertIn(f'Cannot move files selected to dset {self.ds.storage_loc}', resp.json()['error'])
         self.assertEqual(dupe_sf.servershare, self.sstmp)
         self.assertEqual(dupe_sf.path, '')
+        self.assertFalse(dm.ProjectLog.objects.exists())
 
         # remove files results in a job and claimed files still on tmp
         # dupe_raw above is needed!
@@ -247,6 +261,7 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.assertEqual(self.f3sf.path, self.ds.storage_loc)
         self.assertFalse(self.ds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles,
             state=dm.DCStates.OK).exists())
+        self.assertFalse(dm.ProjectLog.objects.exists())
 
     def test_dset_is_filename_job_error(self):
         # new file is dir w same name as dset storage dir
@@ -266,6 +281,7 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.assertEqual(resp.status_code, 403)
         self.assertFalse(self.tmpraw.claimed)
         self.assertIn(f'Cannot move selected files to path {newds.storage_loc}', resp.json()['error'])
+        self.assertFalse(dm.ProjectLog.objects.exists())
         self.assertEqual(self.tmpsf.servershare, self.sstmp)
         self.assertEqual(self.tmpsf.path, '')
         dtc.refresh_from_db()
@@ -289,6 +305,8 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
         resp = self.post_json({'dataset_id': self.ds.pk, 'accepted_files': [self.tmpraw.pk],
             'rejected_files': []})
         self.assertEqual(resp.status_code, 200)
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.id} accepted files '
+                f'{self.tmpraw.pk}, to dset {self.ds.pk}').exists())
         self.assertEqual(newdsr.count(), 1)
         self.assertEqual(self.tmpsf.servershare, self.sstmp)
         self.assertEqual(self.tmpsf.path, '')
@@ -309,6 +327,7 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
         resp = self.post_json({'dataset_id': self.ds.pk, 'rejected_files': [self.tmpraw.pk],
             'accepted_files': []})
         self.assertEqual(resp.status_code, 200)
+        self.assertFalse(dm.ProjectLog.objects.exists())
         newdsr = dm.DatasetRawFile.objects.filter(dataset=self.ds, rawfile=self.tmpraw)
         self.assertEqual(newdsr.count(), 0)
         self.assertEqual(self.tmpsf.servershare, self.sstmp)
@@ -334,6 +353,8 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
         self.assertEqual(newdsr.count(), 0)
         resp = self.post_json({'dataset_id': self.ds.pk, 'accepted_files': [self.tmpraw.pk],
             'rejected_files': [rejectraw.pk]})
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.id} accepted files '
+                f'{self.tmpraw.pk}, to dset {self.ds.pk}').exists())
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(newdsr.count(), 1)
         rejectdsr = dm.DatasetRawFile.objects.filter(dataset=self.ds, rawfile=rejectraw)
@@ -382,6 +403,7 @@ class RenameProjectTest(BaseIntegrationTest):
                 data={'projid': oldp.pk, 'newname': self.p1.name})
         self.assertEqual(resp.status_code, 403)
         self.assertIn('There is already a project by that name', resp.json()['error'])
+        self.assertFalse(dm.ProjectLog.objects.exists())
 
     def test_rename_ok(self):
         newname = 'testnewname'
@@ -389,6 +411,8 @@ class RenameProjectTest(BaseIntegrationTest):
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'projid': self.p1.pk, 'newname': newname})
         self.assertEqual(resp.status_code, 200)
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.id} renamed project '
+            f'from {self.p1.name} to {newname}').exists())
         renamejobs = jm.Job.objects.filter(funcname='rename_top_lvl_projectdir',
                 kwargs={'proj_id': self.p1.pk, 'newname': newname}) 
         self.assertEqual(renamejobs.count(), 1)
@@ -841,6 +865,7 @@ class MergeProjectsTest(BaseTest):
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'projids': [1]})
         self.assertEqual(resp.status_code, 400)
+        self.assertFalse(dm.ProjectLog.objects.exists())
        
     def test_no_ownership_fail(self):
         run = dm.RunName.objects.create(name='someoneelsesrun', experiment=self.exp2)
@@ -851,6 +876,7 @@ class MergeProjectsTest(BaseTest):
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'projids': [self.p1.pk, self.p2.pk]})
         self.assertEqual(resp.status_code, 403)
+        self.assertFalse(dm.ProjectLog.objects.exists())
         
     def test_dataset_exp_run_collision_fail(self):
         """When datasets of different projects have identical experiment and run names,
@@ -863,6 +889,7 @@ class MergeProjectsTest(BaseTest):
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'projids': [self.p1.pk, self.p2.pk]})
         self.assertEqual(resp.status_code, 500)
+        self.assertFalse(dm.ProjectLog.objects.exists())
 
     def test_merge_diff_exps(self):
         """
@@ -892,6 +919,8 @@ class MergeProjectsTest(BaseTest):
         self.assertEqual(ds2jobs.count(), 1)
         self.assertEqual(renamejobs.count(), 1)
         self.assertEqual(dm.Project.objects.filter(pk=self.p2.pk).count(), 0)
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.id} merged in '
+            f'project {self.p2.pk}', project=self.p1).exists())
 
     def test_merge_identical_expnames(self):
         """
@@ -918,6 +947,8 @@ class MergeProjectsTest(BaseTest):
         self.assertEqual(ds3jobs.count(), 1)
         self.assertEqual(renamejobs.count(), 1)
         self.assertEqual(dm.Project.objects.filter(pk=self.p2.pk).count(), 0)
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.id} merged in '
+            f'project {self.p2.pk}', project=self.p1).exists())
 
 
 class TestDeleteDataset(ProcessJobTest):

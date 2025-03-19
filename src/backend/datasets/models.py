@@ -40,7 +40,7 @@ class ProjLogLevels(models.IntegerChoices):
 
 class ProjectLog(models.Model):
     project = models.ForeignKey(Project, on_delete=models.CASCADE)
-    date = models.DateTimeField()
+    date = models.DateTimeField(auto_now_add=True)
     level = models.IntegerField(choices=ProjLogLevels.choices)
     message = models.TextField()
 

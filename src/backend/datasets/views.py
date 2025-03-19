@@ -425,6 +425,9 @@ def update_dataset(data):
         job = create_job('rename_dset_storage_loc', dset_id=dset.id, dstpath=new_storage_loc)
         if job['error']: 
             return JsonResponse({'error': job['error']}, status=403)
+        models.ProjectLog.objects.create(project=dset.runname.experiment.project,
+                level=models.ProjLogLevels.INFO, message=f'User {user_id} changed dataset '
+                f'{dset.pk} path to {new_storage_loc} from {dset.storage_loc}')
     dset.save()
     if dset.runname.experiment.project.ptype_id != settings.LOCAL_PTYPE_ID:
         try:
@@ -463,6 +466,8 @@ def save_new_project(request):
     except IntegrityError:
         return JsonResponse({'error': 'Project name already exists'}, status=403)
     tableproject, _order = populate_proj(models.Project.objects.filter(pk=project.pk), request.user)
+    models.ProjectLog.objects.create(project=project, level=models.ProjLogLevels.OPEN,
+            message=f'Project opened by user {request.user.id}')
     return JsonResponse({'project': tableproject[project.pk]})
 
 
@@ -547,11 +552,16 @@ def change_owners(request):
     is_already_ownerq = dsownq.filter(user_id=data['owner'])
     is_already_owner = is_already_ownerq.exists()
     if data['op'] == 'add' and not is_already_owner:
-        newowner = models.DatasetOwner(dataset_id=dset['pk'], user_id=data['owner'])
-        newowner.save()
+        newowner = models.DatasetOwner.objects.create(dataset_id=dset['pk'], user_id=data['owner'])
+        models.ProjectLog.objects.create(project=dset.runname.experiment.project,
+                level=models.ProjLogLevels.SECURITY,
+                message=f'User {request.user.id} made {data["owner"]} an owner of dset {dset.pk}')
         return JsonResponse({'result': 'ok'})
     elif data['op'] == 'del' and is_already_owner and dsownq.count() > 1:
         is_already_ownerq.delete()
+        models.ProjectLog.objects.create(project=dset.runname.experiment.project,
+                level=models.ProjLogLevels.SECURITY,
+                message=f'User {request.user.id} deleted owner {data["owner"]} from dataset {dset.pk}')
         return JsonResponse({'result': 'ok'})
     else:
         return JsonResponse({'result': 'error', 'message': 'Something went wrong trying to change ownership'}, status=500)
@@ -649,6 +659,8 @@ def save_new_dataset(data, project, experiment, runname, user_id):
         models.DatatypeComponent.objects.filter(
             datatype_id=dset.datatype_id).exclude(
             component=models.DatasetUIComponent.DEFINITION)])
+    models.ProjectLog.objects.create(project=project, level=models.ProjLogLevels.INFO,
+            message=f'Dataset {dset.pk} created by user {user_id}')
     return dset
 
 
@@ -683,6 +695,8 @@ def move_project_cold(request):
         return JsonResponse(result, status=500)
     else:
         projquery.update(active=False)
+        models.ProjectLog.objects.create(project_id=data['item_id'],
+                level=models.ProjLogLevels.INFO, message=f'User {request.user.id} closed project')
         return JsonResponse({})
 
 
@@ -749,6 +763,8 @@ def merge_projects(request):
                         dstpath=new_storage_loc)
                 if job['error']:
                     return JsonResponse({'error': job['error']}, status=403)
+                models.ProjectLog.objects.create(project=projs[0], level=models.ProjLogLevels.INFO,
+                        message=f'User {request.user.id} merged in project {proj.pk}')
             # Also, should we possibly NOT chaneg anything here but only check pre the job, then merge after job complete?
             # In case of waiting times, job problems, etc? Prob doesnt matter much.
         proj.delete()
@@ -790,6 +806,8 @@ def rename_project(request):
     job = create_job('rename_top_lvl_projectdir', newname=data['newname'], proj_id=data['projid'])
     if job['error']:
         return JsonResponse({'error': job['error']}, status=403)
+    models.ProjectLog.objects.create(project=proj, level=models.ProjLogLevels.INFO,
+            message=f'User {request.user.id} renamed project from {proj.name} to {data["newname"]}')
     proj.name = data['newname']
     proj.save()
     return JsonResponse({})
@@ -821,6 +839,8 @@ def move_project_active(request):
         result['error'] = '{} Errors: {}'.format(result['error'], '; '.join(result.pop('errormsgs')))
         return JsonResponse(result, status=500)
     else:
+        models.ProjectLog.objects.create(project=data['item_id'], level=models.ProjLogLevels.INFO,
+                message=f'User {request.user.id} reopened project')
         return JsonResponse({})
 
 
@@ -848,6 +868,8 @@ def purge_project(request):
         return JsonResponse(result, status=500)
     else:
         projquery.update(active=False)
+        models.ProjectLog.objects.create(project=data['item_id'], level=models.ProjLogLevels.INFO,
+                message=f'User {request.user.id} purged project')
         return JsonResponse({})
 
 
@@ -964,6 +986,9 @@ def move_dataset_cold(request):
     if archived['state'] == 'error':
         return JsonResponse(archived, status=500)
     else:
+        models.ProjectLog.objects.create(project=dset.runname.experiment.project,
+                level=models.ProjLogLevels.INFO,
+                message=f'User {request.user.id} deactivated dataset {dset.pk}')
         return JsonResponse(archived)
 
 
@@ -989,6 +1014,9 @@ def move_dataset_active(request):
     if reactivated_msg['state'] == 'error':
         return JsonResponse(reactivated_msg, status=500)
     else:
+        models.ProjectLog.objects.create(project=dset.runname.experiment.project,
+                level=models.ProjLogLevels.INFO,
+                message=f'User {request.user.id} reactivated dataset {dset.pk}')
         return JsonResponse(reactivated_msg)
 
 
@@ -1018,13 +1046,16 @@ def purge_dataset(request):
     if not request.user.is_staff:
         return JsonResponse({'error': 'Only admin can purge dataset'}, status=403)
     try:
-        dset = models.Dataset.objects.get(pk=data['item_id'])
+        dset = models.Dataset.objects.select_related('runname__experiment__project').get(pk=data['item_id'])
     except models.Dataset.DoesNotExist:
         return JsonResponse({'error': 'Dataset does not exist'}, status=403)
     purgemsg = delete_dataset_from_cold(dset)
     if purgemsg['state'] == 'error':
         return JsonResponse(purgemsg, status=500)
     else:
+        models.ProjectLog.objects.create(project=dset.runname.experiment.project,
+                level=models.ProjLogLevels.INFO,
+                message=f'User {request.user.id} purged dataset {dset.pk}')
         return JsonResponse(purgemsg)
 
 
@@ -1045,6 +1076,9 @@ def lock_dataset(request):
     updated = models.Dataset.objects.filter(pk=data['dataset_id'], locked=False).update(locked=True)
     if not updated:
         return JsonResponse({'error': 'Can not find dataset to unlock'}, status=404)
+    proj = models.Project.objects.get(experiment__runname__dataset__id=data['dataset_id'])
+    models.ProjectLog.objects.create(project=proj, level=models.ProjLogLevels.INFO,
+            message=f'User {request.user.id} locked dataset {data["dataset_id"]}')
     return JsonResponse({})
 
 
@@ -1060,6 +1094,9 @@ def unlock_dataset(request):
     updated = models.Dataset.objects.filter(pk=data['dataset_id'], locked=True).update(locked=False)
     if not updated:
         return JsonResponse({'error': 'Can not find dataset to unlock'}, status=404)
+    proj = models.Project.objects.get(experiment__runname__dataset__id=data['dataset_id'])
+    models.ProjectLog.objects.create(project=proj, level=models.ProjLogLevels.INFO,
+            message=f'User {request.user.id} unlocked dataset {data["dataset_id"]}')
     return JsonResponse({})
 
 
@@ -1070,7 +1107,7 @@ def save_dataset(request):
         user_denied, status = check_save_permission(data['dataset_id'], request.user)
         if user_denied:
             return JsonResponse({'error': user_denied}, status=status)
-        return update_dataset(data)
+        return update_dataset(data, request.user.id)
     else:
         if is_invalid_proj_exp_runnames(data['runname']):
             return JsonResponse({'error': f'Run name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
@@ -1311,13 +1348,13 @@ def move_dset_project_servershare(dset_id, storagesharename, dstsharename, proji
     return False
 
 
-def save_or_update_files(data):
-    '''Called from views in jobs, rawstatus as well, so broke out from request
+def save_or_update_files(data, user_id):
+    '''Called from views in jobs as well, so broke out from request
     handling view'''
     dset_id = data['dataset_id']
     added_fnids = [x['id'] for x in data['added_files'].values()]
     removed_ids = [int(x['id']) for x in data['removed_files'].values()]
-    dset = models.Dataset.objects.select_related('storageshare').get(pk=dset_id)
+    dset = models.Dataset.objects.select_related('runname__experiment', 'storageshare').get(pk=dset_id)
     tmpshare = filemodels.ServerShare.objects.get(name=settings.TMPSHARENAME)
     dsrawfn_ids = filemodels.RawFile.objects.filter(datasetrawfile__dataset=dset)
     switch_fileserver = dset.storageshare.server != tmpshare.server
@@ -1349,6 +1386,10 @@ def save_or_update_files(data):
         models.DatasetRawFile.objects.bulk_create([
             models.DatasetRawFile(dataset_id=dset_id, rawfile_id=fnid)
             for fnid in added_fnids])
+        models.ProjectLog.objects.create(project_id=dset.runname.experiment.project_id,
+                level=models.ProjLogLevels.INFO,
+                message=f'User {user_id} added files {",".join([str(x) for x in added_fnids])} '
+                f'to dataset {dset_id}')
         filemodels.RawFile.objects.filter(
             pk__in=added_fnids).update(claimed=True)
     if removed_ids:
@@ -1356,6 +1397,10 @@ def save_or_update_files(data):
             dataset_id=dset_id, rawfile_id__in=removed_ids).delete()
         filemodels.RawFile.objects.filter(pk__in=removed_ids).update(
             claimed=False)
+        models.ProjectLog.objects.create(project_id=dset.runname.experiment.project_id,
+                level=models.ProjLogLevels.INFO,
+                message=f'User {user_id} removed files {",".join([str(x) for x in removed_ids])} '
+                f'from dataset {dset_id}')
     [create_job_without_check(name, **kw) for name,kw in mvjobs]
 
     # If files changed and labelfree, set sampleprep component status
@@ -1395,6 +1440,10 @@ def accept_or_reject_dset_preassoc_files(request):
         models.DatasetRawFile.objects.bulk_create([
             models.DatasetRawFile(dataset_id=data['dataset_id'], rawfile_id=fnid)
             for fnid in data['accepted_files']])
+        proj = models.Project.objects.get(experiment__runname__dataset__id=data['dataset_id'])
+        models.ProjectLog.objects.create(project=proj, level=models.ProjLogLevels.INFO,
+                message=f'User {request.user.id} accepted files '
+                f'{",".join([str(x) for x in data["accepted_files"]])}, to dset {data["dataset_id"]}')
         # If files changed and labelfree, set sampleprep component status
         # to not good. Which should update the tab colour (green to red)
         try:
@@ -1418,7 +1467,7 @@ def save_files(request):
     user_denied, status = check_save_permission(data['dataset_id'], request.user)
     if user_denied:
         return JsonResponse({'error': user_denied}, status=status)
-    err_result, status = save_or_update_files(data)
+    err_result, status = save_or_update_files(data, request.user.id)
     return JsonResponse(err_result, status=status)
 
 
