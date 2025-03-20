@@ -412,10 +412,10 @@ def update_dataset(data, user_id):
             if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
                     settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
                 return JsonResponse({'error': error}, status=403)
+        # Finishing this job will update storage location in DB, so dont set it here in view
         job = create_job('rename_dset_storage_loc', dset_id=dset.id, dstpath=new_storage_loc)
         if job['error']: 
             return JsonResponse({'error': job['error']}, status=403)
-        dset.storage_loc = new_storage_loc
         models.ProjectLog.objects.create(project=dset.runname.experiment.project,
                 level=models.ProjLogLevels.INFO, message=f'User {user_id} changed dataset '
                 f'{dset.pk} path to {new_storage_loc} from {dset.storage_loc}')
