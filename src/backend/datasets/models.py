@@ -33,7 +33,7 @@ class ProjLogLevels(models.IntegerChoices):
     CLOSE = 2, 'Closed'
     INFO = 3, 'Info'
     # Security logs are for "user allowed to do X", "user X accessed sensitive data"
-    SECURE = 4, 'Security'
+    SECURITY = 4, 'Security'
     # Critical will reach admin
     CRITICAL = 5, 'Critical'
 

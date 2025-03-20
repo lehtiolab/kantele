@@ -167,7 +167,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
             'experiment_id': self.exp1.pk, 'runname': fname, 'datatype_id': self.dtype.pk,
             'secclass': 1, 'prefrac_id': False, 'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 403)
-        self.assertIn('storage location not unique, there is either a file', resp.json()['error'])
+        self.assertIn('storage location not unique. There is already a file with that ', resp.json()['error'])
         self.assertFalse(dm.ProjectLog.objects.exists())
 
         # Try to update existing dataset

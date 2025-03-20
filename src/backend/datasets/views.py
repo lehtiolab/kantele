@@ -364,10 +364,7 @@ def update_dataset(data, user_id):
     if project.id != dset.runname.experiment.project_id:
         newproj = True
     if 'newexperimentname' in data:
-        if is_invalid_proj_exp_runnames(data['newexperimentname']):
-            return JsonResponse({'error': f'Experiment name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
-        experiment = models.Experiment(name=data['newexperimentname'],
-                project=dset.runname.experiment.project)
+        experiment = models.Experiment(name=data['newexperimentname'], project=project)
         dset.runname.experiment = experiment
         newexp = True
     else:
@@ -376,13 +373,12 @@ def update_dataset(data, user_id):
             # another experiment was selected
             newexp = True
             dset.runname.experiment = experiment
-    experiment.save()
     if data['runname'] != dset.runname.name or newexp:
-        if is_invalid_proj_exp_runnames(data['runname']):
-            return JsonResponse({'error': f'Run name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
         # Save if new experiment AND/OR new name Runname coupled 1-1 to dataset
+        newrun = True
         dset.runname.name = data['runname']
-        dset.runname.save()
+    
+    new_dtcs = []
     if dset.datatype_id != data['datatype_id']:
         dset.datatype_id = data['datatype_id']
         new_dtcomponents = models.DatatypeComponent.objects.filter(datatype_id=data['datatype_id'])
@@ -395,8 +391,34 @@ def update_dataset(data, user_id):
                 state = models.DCStates.NEW
             else:
                 state = old_dtcs.state
-            dtcs = models.DatasetComponentState(dataset=dset, dtcomp=dtc, state=state)
-            dtcs.save()
+            new_dtcs.append(models.DatasetComponentState(dataset=dset, dtcomp=dtc, state=state))
+
+    dtype = models.Datatype.objects.get(pk=data['datatype_id'])
+    prefrac = models.Prefractionation.objects.get(pk=data['prefrac_id']) if data['prefrac_id'] else False
+    hrrange_id = data['hiriefrange'] if 'hiriefrange' in data and data['hiriefrange'] else False
+    new_storage_loc = set_storage_location(project, experiment, dset.runname,
+            dtype, prefrac, hrrange_id)
+    err_fpath, err_fname = os.path.split(new_storage_loc)
+    prim_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
+    if new_storage_loc != dset.storage_loc and filemodels.StoredFile.objects.filter(
+            servershare=prim_share, path=err_fpath, filename=err_fname).exists():
+        return JsonResponse({'error': 'There is already a file with that exact path '
+            f'{new_storage_loc}'}, status=403)
+    elif (new_storage_loc != dset.storage_loc and 
+            models.DatasetRawFile.objects.filter(dataset_id=dset.id).count()):
+        # Update storage loc, first check if dataset needs moving
+        if dset.storageshare != prim_share:
+            # Last error in method, after this we can save
+            if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
+                    settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
+                return JsonResponse({'error': error}, status=403)
+        job = create_job('rename_dset_storage_loc', dset_id=dset.id, dstpath=new_storage_loc)
+        if job['error']: 
+            return JsonResponse({'error': job['error']}, status=403)
+        dset.storage_loc = new_storage_loc
+        models.ProjectLog.objects.create(project=dset.runname.experiment.project,
+                level=models.ProjLogLevels.INFO, message=f'User {user_id} changed dataset '
+                f'{dset.pk} path to {new_storage_loc} from {dset.storage_loc}')
     # update prefrac
     try:
         pfds = models.PrefractionationDataset.objects.filter(
@@ -412,44 +434,34 @@ def update_dataset(data, user_id):
             dataset_id=data['dataset_id']).delete()
     elif pfds and data['prefrac_id']:
         update_dataset_prefrac(pfds, data)
-    dtype = models.Datatype.objects.get(pk=data['datatype_id'])
-    prefrac = models.Prefractionation.objects.get(pk=data['prefrac_id']) if data['prefrac_id'] else False
-    hrrange_id = data['hiriefrange'] if 'hiriefrange' in data and data['hiriefrange'] else False
-    new_storage_loc = set_storage_location(dset.runname.experiment.project, experiment, dset.runname,
-            dtype, prefrac, hrrange_id)
-    err_fpath, err_fname = os.path.split(new_storage_loc)
-    prim_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
-    if new_storage_loc != dset.storage_loc and filemodels.StoredFile.objects.filter(
-            servershare=prim_share, path=err_fpath, filename=err_fname).exists():
-        return JsonResponse({'error': 'There is already a file with that exact path '
-            f'{new_storage_loc}'}, status=403)
-    elif (new_storage_loc != dset.storage_loc and 
-            models.DatasetRawFile.objects.filter(dataset_id=dset.id).count()):
-        # Update storage loc, first check if dataset needs moving
-        if dset.storageshare != prim_share:
-            if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
-                    settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
-                return JsonResponse({'error': error}, status=403)
-        job = create_job('rename_dset_storage_loc', dset_id=dset.id, dstpath=new_storage_loc)
-        if job['error']: 
-            return JsonResponse({'error': job['error']}, status=403)
-        models.ProjectLog.objects.create(project=dset.runname.experiment.project,
-                level=models.ProjLogLevels.INFO, message=f'User {user_id} changed dataset '
-                f'{dset.pk} path to {new_storage_loc} from {dset.storage_loc}')
+
     # Project etc update
     if newproj:
         move_dset_samples_other_project(dset, project)
+    if newexp:
+        experiment.save()
+    if newrun:
+        dset.runname.save()
     # FIXME security class will have implications
     dset.securityclass = data['secclass']
     dset.save()
+    for dtcs in new_dtcs:
+        dtcs.save()
     if dset.runname.experiment.project.ptype_id != settings.LOCAL_PTYPE_ID:
         try:
             if dset.externaldatasetcontact.email != data['externalcontact']:
                 dset.externaldatasetcontact.email = data['externalcontact']
                 dset.externaldatasetcontact.save()
+                models.ProjectLog.objects.create(project=dset.runname.experiment.project,
+                        level=models.ProjLogLevels.INFO, message=f'User {user_id} changed '
+                        f'dataset {dset.pk} contact mail to {data["externalcontact"]} from '
+                        f'{dset.externaldatasetcontact.email}')
         except models.ExternalDatasetContact.DoesNotExist:
             dset_mail = models.ExternalDatasetContact(dataset=dset,
                     email=data['externalcontact'])
+            models.ProjectLog.objects.create(project=dset.runname.experiment.project,
+                    level=models.ProjLogLevels.INFO, message=f'User {user_id} changed '
+                    f'dataset {dset.pk} contact mail to {data["externalcontact"]} from (no entry)')
             dset_mail.save()
     return JsonResponse({'dataset_id': dset.id})
 
@@ -1146,31 +1158,26 @@ def unlock_dataset(request):
 @login_required
 def save_dataset(request):
     data = json.loads(request.body.decode('utf-8'))
+    if 'newexperimentname' in data and is_invalid_proj_exp_runnames(data['newexperimentname']):
+        return JsonResponse({'error': f'Experiment name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
+    if is_invalid_proj_exp_runnames(data['runname']):
+        return JsonResponse({'error': f'Run name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
+
     if data['dataset_id']:
         user_denied, status = check_save_permission(data['dataset_id'], request.user)
         if user_denied:
             return JsonResponse({'error': user_denied}, status=status)
         return update_dataset(data, request.user.id)
     else:
-        if is_invalid_proj_exp_runnames(data['runname']):
-            return JsonResponse({'error': f'Run name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
         try:
             project = models.Project.objects.get(pk=data['project_id'], active=True)
         except models.Project.DoesNotExist:
             return JsonResponse({'error': f'Project {data["project_id"]} is not active'}, status=403)
         if data['datatype_id'] in settings.LC_DTYPE_IDS:
-            try:
-                experiment = models.Experiment.objects.get(project=project, name=settings.LCEXPNAME)
-            except models.Experiment.DoesNotExist:
-                experiment = models.Experiment(name=settings.LCEXPNAME, project=project)
-                experiment.save()
+            experiment = models.Experiment.objects.get_or_create(project=project, name=settings.LCEXPNAME)
             runname = models.RunName.objects.create(name=data['runname'], experiment=experiment)
         else:
             if 'newexperimentname' in data:
-                if is_invalid_proj_exp_runnames(data['newexperimentname']):
-                    return JsonResponse({
-                        'error': f'Experiment name cannot contain characters '
-                        'except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
                 experiment = models.Experiment.objects.create(name=data['newexperimentname'],
                         project=project)
 
@@ -1180,10 +1187,9 @@ def save_dataset(request):
         # Have runname/exp/project, now save rest of dataset:
         try:
             dset = save_new_dataset(data, project, experiment, runname, request.user.id)
-        except IntegrityError:
+        except IntegrityError as e:
             return JsonResponse({'state': 'error', 'error': 'Cannot save dataset, storage location '
-                'not unique, there is either a file or an existing dataset on that location.'},
-                status=403)
+                f'not unique. {e}'}, status=403)
     return JsonResponse({'dataset_id': dset.id})
 
 
