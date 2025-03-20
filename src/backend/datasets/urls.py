@@ -4,7 +4,7 @@ from datasets import views
 app_name = 'datasets'
 urlpatterns = [
     path('new/<int:proj_id>/', views.new_dataset, name="new"),
-    #path('show/<int:project_id>/', views.show_project),
+    path('show/project/<int:project_id>/', views.get_project),
     path('show/<int:dataset_id>/', views.show_dataset, name="show"),
     path('show/info/<int:project_id>/', views.dataset_info),
     path('show/info/<int:project_id>/<int:dataset_id>/', views.dataset_info),

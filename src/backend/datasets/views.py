@@ -26,11 +26,14 @@ INTERNAL_PI_PK = 1
 
 def get_dset_context(proj_id):
     proj = models.Project.objects.values('name', 'pi__name', 'ptype__name', 'ptype_id').get(pk=proj_id)
-    return {'dataset_id': 'false', 'is_owner': 'true', 'projdata': {'name': proj['name'],
+    return {'dataset_id': 'false', 'is_owner': 'true', 'initdata': {'name': proj['name'],
         'proj_id': proj_id, 'pi_name': proj['pi__name'], 'ptype': proj['ptype__name'],
+        'secclass': max(models.DatasetSecurityClass),
         'isExternal': proj['ptype_id'] != settings.LOCAL_PTYPE_ID,
         'datasettypes': [{'name': x.name, 'id': x.id} for x in
-            models.Datatype.objects.filter(public=True)]
+            models.Datatype.objects.filter(public=True)],
+        'securityclasses': [{'id': x[0], 'name': x[1]} for x in models.DatasetSecurityClass.choices],
+        'all_projects': {x.id: {'name': x.name, 'id': x.id} for x in models.Project.objects.filter(active=True)},
         }
         }
 
@@ -46,14 +49,16 @@ def new_dataset(request, proj_id):
 def show_dataset(request, dataset_id):
     try:
         dset = models.Dataset.objects.filter(purged=False, pk=dataset_id).values('pk', 'deleted',
-                'runname__experiment__project_id', 'runname__experiment__project__ptype_id').get()
+                'runname__experiment__project_id', 'runname__experiment__project__ptype_id',
+                'securityclass').get()
     except models.Dataset.DoesNotExist:
         return HttpResponseNotFound()
     dsown_ids = [x['user_id'] for x in models.DatasetOwner.objects.filter(dataset_id=dset['pk']).values('user_id')]
     is_owner = check_ownership(request.user, dset['runname__experiment__project__ptype_id'],
         dset['deleted'], dsown_ids)
     context = get_dset_context(dset['runname__experiment__project_id'])
-    context.update({'dataset_id': dataset_id, 'is_owner': json.dumps(is_owner)})
+    context.update({'dataset_id': dataset_id, 'is_owner': json.dumps(is_owner),
+        'secclass': dset['securityclass']})
     return render(request, 'datasets/dataset.html', context)
 
 
@@ -343,7 +348,7 @@ def get_admin_params_for_dset(response, dset_id, category):
         response['newparams'] = [x for x in newparams.values()]
 
 
-def update_dataset(data):
+def update_dataset(data, user_id):
     # FIXME it is v annoying to do all the hierarchical creations in multiple steps
     # in a single method, as this generates a lot of error checking, and things like
     # saves that are done when an error pops up later (storage loc is checked last, but a
@@ -354,7 +359,10 @@ def update_dataset(data):
     # Thus: its time to do "new dset", "new proj" in the excel table view!
     dset = models.Dataset.objects.filter(pk=data['dataset_id']).select_related(
         'runname__experiment__project', 'datatype').get()
-    newexp = False
+    project = models.Project.objects.get(pk=data['project_id'])
+    newrun, newexp, newproj = False, False, False
+    if project.id != dset.runname.experiment.project_id:
+        newproj = True
     if 'newexperimentname' in data:
         if is_invalid_proj_exp_runnames(data['newexperimentname']):
             return JsonResponse({'error': f'Experiment name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
@@ -428,6 +436,11 @@ def update_dataset(data):
         models.ProjectLog.objects.create(project=dset.runname.experiment.project,
                 level=models.ProjLogLevels.INFO, message=f'User {user_id} changed dataset '
                 f'{dset.pk} path to {new_storage_loc} from {dset.storage_loc}')
+    # Project etc update
+    if newproj:
+        move_dset_samples_other_project(dset, project)
+    # FIXME security class will have implications
+    dset.securityclass = data['secclass']
     dset.save()
     if dset.runname.experiment.project.ptype_id != settings.LOCAL_PTYPE_ID:
         try:
@@ -439,6 +452,36 @@ def update_dataset(data):
                     email=data['externalcontact'])
             dset_mail.save()
     return JsonResponse({'dataset_id': dset.id})
+
+
+def move_dset_samples_other_project(dset, project):
+    # all ds proj samples need new project, either move or duplicate...
+    dsraws = dset.datasetrawfile_set.all()
+    dspsams = models.ProjectSample.objects.filter(quantchannelsample__dataset=dset).union(
+            models.ProjectSample.objects.filter(quantsamplefile__rawfile__in=dsraws),
+            models.ProjectSample.objects.filter(quantfilechannel__dsrawfile__in=dsraws)
+            ).values('pk')
+    # Since unions cant be filtered/excluded on, re-query
+    dspsams = models.ProjectSample.objects.filter(pk__in=dspsams)
+    # Duplicate multi DS projsamples from QCS, they are going to a new project:
+    multipsams = set()
+    multidsqcs = models.QuantChannelSample.objects.filter(projsample__in=dspsams).exclude(dataset=dset)
+    for qcs in multidsqcs.distinct('projsample'):
+        multipsams.add(qcs.projsample_id)
+        newpsam = models.ProjectSample.objects.create(sample=qcs.projsample.sample, project=project)
+        models.QuantChannelSample.objects.filter(dataset=dset, projsample=qcs.projsample).update(projsample=newpsam)
+    multidsqsf = models.QuantSampleFile.objects.filter(projsample__in=dspsams).exclude(rawfile__in=dsraws)
+    for qsf in multidsqsf.distinct('projsample'):
+        multipsams.add(qsf.projsample_id)
+        newpsam = models.ProjectSample.objects.create(sample=qsf.projsample.sample, project=project)
+        models.QuantSampleFile.objects.filter(rawfile__in=dsraws, projsample=qsf.projsample).update(projsample=newpsam)
+    multidsqfcs = models.QuantFileChannel.objects.filter(projsample__in=dspsams).exclude(dsrawfile__in=dsraws)
+    for qfcs in multidsqfcs.distinct('projsample'):
+        multipsams.add(qfcs.projsample_id)
+        newpsam = models.ProjectSample.objects.create(sample=qfcs.projsample.sample, project=project)
+        models.QuantFileChannel.objects.filter(dsrawfile__in=dsraws, projsample=qfcs.projsample).update(projsample=newpsam)
+    # having found multi-dset-psams, now move project_id on non-shared projectsamples
+    dspsams.exclude(pk__in=multipsams).update(project=project)
 
 
 @require_POST
@@ -639,9 +682,9 @@ def save_new_dataset(data, project, experiment, runname, user_id):
             filename=err_fname).exists():
         raise IntegrityError(f'There is already a file with that exact path {storloc}')
     dset = models.Dataset.objects.create(date=timezone.now(), runname_id=runname.id,
-            storage_loc=storloc, storageshare=prim_share, datatype=dtype)
-    dsowner = models.DatasetOwner(dataset=dset, user_id=user_id)
-    dsowner.save()
+            storage_loc=storloc, storageshare=prim_share, datatype=dtype,
+            securityclass=data['secclass'])
+    dsowner = models.DatasetOwner.objects.create(dataset=dset, user_id=user_id)
     if data['prefrac_id']:
         save_dataset_prefrac(dset.id, data)
     if project.ptype_id != settings.LOCAL_PTYPE_ID:
@@ -1194,6 +1237,16 @@ def update_dataset_prefrac(pfds, data):
         pffa.fractions = data['prefrac_amount']
         pffa.save()
 
+
+@login_required
+def get_project(request, project_id):
+    proj = models.Project.objects.select_related('pi', 'ptype').get(pk=project_id)
+    return JsonResponse({
+        'id': project_id, 'pi_name': proj.pi.name, 'name': proj.name,
+		'ptype_name': proj.ptype.name, 'isExternal': proj.ptype_id != settings.LOCAL_PTYPE_ID,
+        'projsamples': {x.id: {'name': x.sample, 'id': x.id} for x in models.ProjectSample.objects.filter(project_id=project_id)},
+        'experiments': [{'id': x.id, 'name': x.name} for x in 
+        models.Experiment.objects.filter(project_id=project_id)]})
 
 
 def pf_dataset_info_json(pfds):

@@ -4,11 +4,11 @@
 
 {% block head %}
     <link rel='stylesheet' href='{% static "datasets/bundle.css" %}'>
-  {{ projdata | json_script:'projdata' }}
+  {{ initdata | json_script:'initdata' }}
   <script>
     let init_dataset_id = {{ dataset_id }};
     const ownership = {{ is_owner }};
-    const projdata = JSON.parse(document.getElementById('projdata').textContent);
+    const initdata = JSON.parse(document.getElementById('initdata').textContent);
   </script>
     <script defer src='{% static "datasets/bundle.js" %}'></script>
 {% endblock head %}

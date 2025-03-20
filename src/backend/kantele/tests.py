@@ -94,9 +94,9 @@ class BaseTest(TestCase):
         self.exp1, _ = dm.Experiment.objects.get_or_create(name='e1', project=self.p1)
         self.run1, _ = dm.RunName.objects.get_or_create(name='run1', experiment=self.exp1)
         self.storloc = os.path.join(self.p1.name, self.exp1.name, self.dtype.name, self.run1.name)
-        self.ds, _ = dm.Dataset.objects.update_or_create(date=self.p1.registered, runname=self.run1,
-                datatype=self.dtype, defaults={'storageshare': self.ssnewstore, 
-                    'storage_loc': self.storloc})
+        self.ds = dm.Dataset.objects.create(date=self.p1.registered, runname=self.run1,
+                datatype=self.dtype, storageshare=self.ssnewstore, storage_loc=self.storloc,
+                securityclass=max(dm.DatasetSecurityClass))
         dm.DatasetComponentState.objects.create(dataset=self.ds, state=dm.DCStates.OK, dtcomp=self.dtcompfiles)
         dm.DatasetComponentState.objects.create(dataset=self.ds, state=dm.DCStates.OK, dtcomp=self.dtcompsamples)
         self.contact, _ = dm.ExternalDatasetContact.objects.get_or_create(dataset=self.ds,
@@ -144,9 +144,9 @@ class BaseTest(TestCase):
         self.oldexp, _ = dm.Experiment.objects.get_or_create(name='olde', project=self.oldp)
         self.oldrun, _ = dm.RunName.objects.get_or_create(name='run1', experiment=self.oldexp)
         self.oldstorloc = os.path.join(self.oldp.name, self.oldexp.name, self.oldrun.name)
-        self.oldds, _ = dm.Dataset.objects.update_or_create(date=self.oldp.registered,
-                runname=self.oldrun, datatype=self.dtype, defaults={
-                    'storageshare': self.ssoldstorage, 'storage_loc': self.oldstorloc})
+        self.oldds = dm.Dataset.objects.create(date=self.oldp.registered, runname=self.oldrun,
+                datatype=self.dtype, storageshare=self.ssoldstorage, storage_loc=self.oldstorloc,
+                securityclass=max(dm.DatasetSecurityClass)) 
         dm.QuantDataset.objects.get_or_create(dataset=self.oldds, quanttype=self.lfqt)
         dm.DatasetComponentState.objects.create(dataset=self.oldds, dtcomp=self.dtcompfiles, state=dm.DCStates.OK)
         dm.DatasetComponentState.objects.create(dataset=self.oldds, dtcomp=self.dtcompsamples, state=dm.DCStates.OK)

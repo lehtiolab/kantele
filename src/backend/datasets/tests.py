@@ -19,7 +19,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
 
     def test_new_dset(self):
         resp = self.post_json(data={'dataset_id': False, 'project_id': self.p1.pk,
-            'experiment_id': self.exp1.pk, 'runname': 'newrunname',
+            'experiment_id': self.exp1.pk, 'runname': 'newrunname', 'secclass': 1,
             'datatype_id': self.dtype.pk, 'prefrac_id': False,
             'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 200)
@@ -42,7 +42,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         resp = self.post_json(data={'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'newexperimentname': newexpname, 'runname': self.run1.name,
             'datatype_id': self.dtype.pk, 'prefrac_id': False,
-            'externalcontact': self.contact.email})
+            'secclass': 1, 'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.Experiment.objects.filter(name=newexpname).count(), 1)
         self.assertTrue(os.path.exists(self.f3path))
@@ -68,7 +68,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         mvdsresp = self.post_json({'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'newexperimentname': newexpname, 'runname': self.run1.name, 
             'datatype_id': self.dtype.pk, 'prefrac_id': False,
-            'externalcontact': self.contact.email})
+            'secclass': 1, 'externalcontact': self.contact.email})
         self.assertEqual(mvdsresp.status_code, 200)
         rename_job = jm.Job.objects.filter(funcname='rename_dset_storage_loc').last()
         self.assertEqual(rename_job.state, Jobstates.PENDING)
@@ -118,7 +118,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         mvdsresp = self.post_json({'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'newexperimentname': newexpname, 'runname': self.run1.name,
             'datatype_id': self.dtype.pk, 'prefrac_id': False,
-            'externalcontact': self.contact.email})
+            'secclass': 1, 'externalcontact': self.contact.email})
         self.assertEqual(mvdsresp.status_code, 200)
         rename_job = jm.Job.objects.filter(funcname='rename_dset_storage_loc').last()
         self.assertEqual(rename_job.state, Jobstates.PENDING)
@@ -165,7 +165,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         # Try to create new dset 
         resp = self.post_json(data={'dataset_id': False, 'project_id': self.p1.pk,
             'experiment_id': self.exp1.pk, 'runname': fname, 'datatype_id': self.dtype.pk,
-            'prefrac_id': False, 'externalcontact': self.contact.email})
+            'secclass': 1, 'prefrac_id': False, 'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 403)
         self.assertIn('storage location not unique, there is either a file', resp.json()['error'])
         self.assertFalse(dm.ProjectLog.objects.exists())
@@ -175,7 +175,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         resp = self.post_json(data={'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'experiment_id': self.exp1.pk, 'runname': fname, 'datatype_id': self.dtype.pk,
             'prefrac_id': False, 'ptype_id': self.ptype.pk,
-            'externalcontact': self.contact.email})
+            'secclass': 1, 'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 403)
         self.assertIn('There is already a file with that exact path', resp.json()['error'])
         self.assertFalse(dm.ProjectLog.objects.exists())
@@ -270,7 +270,8 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.tmpsf.filename = newfn
         self.tmpsf.save()
         newds = dm.Dataset.objects.create(date=self.p1.registered, runname=run,
-                datatype=self.dtype, storageshare=self.ssnewstore, storage_loc=newpath)
+                datatype=self.dtype, storageshare=self.ssnewstore, storage_loc=newpath,
+                securityclass=max(dm.DatasetSecurityClass))
         dm.DatasetOwner.objects.get_or_create(dataset=newds, user=self.user)
         dtc = newds.datasetcomponentstate_set.create(dtcomp=self.dtcompfiles, state=dm.DCStates.NEW)
         resp = self.cl.post(self.url, content_type='application/json', data={
@@ -379,7 +380,8 @@ class RenameProjectTest(BaseIntegrationTest):
     def test_no_ownership_fail(self):
         run = dm.RunName.objects.create(name='someoneelsesrun', experiment=self.exp1)
         ds = dm.Dataset.objects.create(date=self.p1.registered, runname=run,
-                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         otheruser = User.objects.create(username='test', password='test')
         dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
         resp = self.cl.post(self.url, content_type='application/json',
@@ -495,7 +497,8 @@ class SaveSamples(BaseTest):
     def test_fails(self):
         newrun = dm.RunName.objects.create(name='failrun', experiment=self.exp1)
         newds = dm.Dataset.objects.create(date=self.p1.registered, runname=newrun,
-                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         otheruser = User.objects.create(username='test', password='test')
         dm.DatasetOwner.objects.create(dataset=newds, user=otheruser)
 
@@ -524,7 +527,8 @@ class SaveSamples(BaseTest):
     def test_save_new_samples_multiplex(self):
         newrun = dm.RunName.objects.create(name='newds_nosamples_plex', experiment=self.exp1)
         newds = dm.Dataset.objects.create(date=self.p1.registered, runname=newrun,
-                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         dm.DatasetOwner.objects.create(dataset=newds, user=self.user)
         samplename = 'new proj sample A'
         dm.DatasetComponentState.objects.get_or_create(dataset=newds,
@@ -559,7 +563,8 @@ class SaveSamples(BaseTest):
         # Create dset
         newrun = dm.RunName.objects.create(name='newds_nosamples_fns', experiment=self.exp1)
         newds = dm.Dataset.objects.create(date=self.p1.registered, runname=newrun,
-                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         dm.DatasetOwner.objects.create(dataset=newds, user=self.user)
         dm.DatasetComponentState.objects.get_or_create(dataset=newds,
                 defaults={'state': dm.DCStates.NEW, 'dtcomp': self.dtcompsamples})
@@ -680,7 +685,8 @@ class SaveSamples(BaseTest):
         # will not update since sample is in use in another dataset
         newrun = dm.RunName.objects.create(name='newds_samples_plex', experiment=self.ds.runname.experiment)
         newds = dm.Dataset.objects.create(date=self.p1.registered, runname=newrun,
-                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         dm.DatasetOwner.objects.create(dataset=newds, user=self.user)
         dm.DatasetSample.objects.create(dataset=newds, projsample=self.projsam1)
         dm.QuantChannelSample.objects.create(dataset=newds, channel=self.qtch, projsample=self.projsam1)
@@ -870,7 +876,8 @@ class MergeProjectsTest(BaseTest):
     def test_no_ownership_fail(self):
         run = dm.RunName.objects.create(name='someoneelsesrun', experiment=self.exp2)
         ds = dm.Dataset.objects.create(date=self.p2.registered, runname=run,
-                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         otheruser = User.objects.create(username='test', password='test')
         dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
         resp = self.cl.post(self.url, content_type='application/json',
@@ -884,7 +891,8 @@ class MergeProjectsTest(BaseTest):
         exp3 = dm.Experiment.objects.create(name='e1', project=self.p2)
         run3 = dm.RunName.objects.create(name=self.run1.name, experiment=exp3)
         ds3 = dm.Dataset.objects.create(date=self.p2.registered, runname=run3,
-                datatype=self.dtype, storage_loc='testloc3', storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc='testloc3', storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         dm.DatasetOwner.objects.create(dataset=ds3, user=self.user)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'projids': [self.p1.pk, self.p2.pk]})
@@ -899,7 +907,8 @@ class MergeProjectsTest(BaseTest):
         run2 = dm.RunName.objects.create(name='run2', experiment=self.exp2)
         oldstorloc = 'testloc2'
         ds2 = dm.Dataset.objects.create(date=self.p2.registered, runname=run2,
-                datatype=self.dtype, storage_loc=oldstorloc, storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc=oldstorloc, storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         dm.DatasetOwner.objects.create(dataset=ds2, user=self.user)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'projids': [self.p1.pk, self.p2.pk]})
@@ -932,7 +941,8 @@ class MergeProjectsTest(BaseTest):
         run3 = dm.RunName.objects.create(name='run3', experiment=exp3)
         oldstorloc = 'testloc3'
         ds3 = dm.Dataset.objects.create(date=self.p2.registered, runname=run3,
-                datatype=self.dtype, storage_loc=oldstorloc, storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc=oldstorloc, storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         own3 = dm.DatasetOwner.objects.create(dataset=ds3, user=self.user)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'projids': [self.p1.pk, self.p2.pk]})

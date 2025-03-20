@@ -34,17 +34,32 @@ let saveerrors = Object.assign({}, errors);
 let comperrors = [];
 
 // Project info
-let project_id = projdata.proj_id;
-let project_name = projdata.name;
-let ptype = projdata.ptype;
-let pi_name = projdata.pi_name;
-let isExternal = projdata.isExternal;
-let datasettypes = projdata.datasettypes;
+let project_id = initdata.proj_id;
+let project_name = initdata.name;
+let ptype = initdata.ptype;
+let pi_name = initdata.pi_name;
+let securityclass = initdata.secclass;
+let isExternal = initdata.isExternal;
+let datasettypes = initdata.datasettypes;
+let allprojects = initdata.all_projects;
+let allsecclasses = initdata.securityclasses;
+let allproj_order = Object.keys(initdata.all_projects);
+
+// Danger zone binds
+let newProjId;
+let newProjName;
+let newPtype;
+let newPiName;
+let newExperiments;
+let newClassification;
+
 
 let dsinfo = {
   datatype_id: '',
   storage_location: '',
   experiment_id: '',
+  newexperimentname: '',
+  newexperimentname: '',
   runname: '',
   externalcontactmail: '',
   prefrac_id: '',
@@ -52,6 +67,10 @@ let dsinfo = {
   prefrac_amount: '',
   hiriefrange: '',
 }
+
+// For danger zone selection
+let showDangerZone;
+let safeWord;
 
 let experiments = [];
 let prefracs = [];
@@ -78,6 +97,51 @@ async function getcomponents() {
 function switchDatatype() {
   getcomponents();
   editMade();
+}
+
+async function project_selected() {
+  // Gets experiments, project details when selecting a project
+  if (newProjId) {
+    const result = await getJSON(`/datasets/show/project/${newProjId}/`);
+    newPiName = result.pi_name;
+    newProjId = result.id;
+    newPtype = result.ptype_name;
+    newExperiments = result.experiments;
+    newProjName= result.name;
+    for (let key in projsamples) { delete(projsamples[key]);};
+    for (let [key, val] of Object.entries(result.projsamples)) { projsamples[key] = val; }
+  }
+}
+
+
+function cancelDangerZoneEdit() {
+  newProjId = '';
+  newPiName = '';
+  newPiName = '';
+  newProjName = '';
+  newExperiments = [];
+  safeWord = '';
+  showDangerZone = false;
+}
+
+
+function confirmDangerZoneEdit() {
+  if (safeWord === 'kantele') {
+    if (newProjId) {
+      pi_name = newPiName;
+      project_id = newProjId;
+      ptype = newPiName;
+      project_name = newProjName;
+      experiments = newExperiments;
+      dsinfo.experiment_id = '';
+      editMade();
+    }
+    if (newClassification !== securityclass) {
+      securityclass = newClassification;
+      editMade();
+    }
+    cancelDangerZoneEdit();
+  }
 }
 
 
@@ -127,6 +191,7 @@ function validate() {
   return comperrors;
 }
 
+
 async function save() {
   errors.basics = validate();
   if (showMsdata) { 
@@ -137,6 +202,8 @@ async function save() {
     let postdata = {
       dataset_id: $dataset_id,
       datatype_id: dsinfo.datatype_id,
+      project_id: '',
+      secclass: securityclass,
       runname: dsinfo.runname,
       prefrac_id: dsinfo.prefrac_id,
       prefrac_length: dsinfo.prefrac_length,
@@ -241,6 +308,17 @@ function showFiles() {
 <div style="display: {tabshow !== 'meta' ? 'none' : ''}">
     <div class="box" id="project">
     
+      <h5 class="has-text-primary title is-5">
+        {#if stored}
+        <i class="icon fas fa-check-circle"></i>
+        {:else}
+        <i class="icon fas fa-edit"></i>
+        {/if}
+        Basics
+        <button class="button is-small is-danger has-text-weight-bold" disabled={!edited} on:click={save}>Save</button>
+        <button class="button is-small is-info has-text-weight-bold" disabled={!edited || !dsinfo.datatype_id} on:click={fetchDataset}>Revert</button>
+      </h5>
+    
     	<article class="message is-info"> 
           <div class="message-body">
             <div>
@@ -252,19 +330,39 @@ function showFiles() {
             {#if dsinfo.storage_location}
             <div><span class="has-text-weight-bold">Storage: {dsinfo.storage_location}</div>
             {/if}
+            <div>
+              <span class="has-text-weight-bold">Classification:</span>
+              <span class="tag is-danger is-small">{allsecclasses.filter(x => x.id === securityclass)[0].name}</span>
+            </div>
+            {#if !showDangerZone}
+            <div class="field">
+              <button on:click={e => showDangerZone = true} class="button is-small">Edit</button>
+            </div>
+            {:else}
+            <h4 class="title is-5 mt-4">Danger zone</h4>
+            <div class="field">
+              <label class="label">Change project</label>
+              <DynamicSelect placeholder='Find project' bind:selectval={newProjId} on:selectedvalue={project_selected} niceName={x => x.name} fixedoptions={allprojects} fixedorder={allproj_order} />
+            </div>
+            <div class="field">
+              <label class="label">Change classification</label>
+              <div class="select">
+                <select bind:value={newClassification}>
+                  {#each allsecclasses as secclass}
+                  <option value={secclass.id}>{secclass.name}</option>
+                  {/each}
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label class="label">Type "kantele" in the box below to confirm</label>
+              <input class="input" bind:value={safeWord} type="text" />
+            </div>
+            <button on:click={confirmDangerZoneEdit} class="button is-small has-text-danger">Confirm changes</button>
+            <button on:click={cancelDangerZoneEdit} class="button is-small">Cancel</button>
+            {/if}
           </div>
     	</article>
-    
-      <h5 class="has-text-primary title is-5">
-        {#if stored}
-        <i class="icon fas fa-check-circle"></i>
-        {:else}
-        <i class="icon fas fa-edit"></i>
-        {/if}
-        Basics
-        <button class="button is-small is-danger has-text-weight-bold" disabled={!edited} on:click={save}>Save</button>
-        <button class="button is-small is-info has-text-weight-bold" disabled={!edited || !dsinfo.datatype_id} on:click={fetchDataset}>Revert</button>
-      </h5>
     
 
       {#if isExternal}
