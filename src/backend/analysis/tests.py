@@ -343,7 +343,8 @@ class TestGetDatasetsBad(AnalysisTest):
                 filetype=self.ft, servershare=self.ssnewstore, path=path, checked=True)
         newrun = dm.RunName.objects.create(experiment=self.ds.runname.experiment, name='noqt_ds')
         newds = dm.Dataset.objects.create(runname=newrun, datatype=self.ds.datatype, 
-                storage_loc=path, storageshare=self.ds.storageshare, date=timezone.now())
+                storage_loc=path, storageshare=self.ds.storageshare, date=timezone.now(),
+                securityclass=1)
         dsr = dm.DatasetRawFile.objects.create(dataset=newds, rawfile=raw)
         dm.DatasetOwner.objects.create(dataset=newds, user=self.user)
         resp = self.cl.get(f'{self.url}{self.nfwf.pk}/', data={'dsids': f'{newds.pk}', 'anid': 0})
@@ -867,7 +868,8 @@ class TestStoreExistingLFAnalysis(AnalysisLabelfreeSamples):
                 size=100, date=timezone.now(), claimed=True)
         newrun = dm.RunName.objects.create(experiment=self.ds.runname.experiment, name='noqt_ds')
         newds = dm.Dataset.objects.create(runname=newrun, datatype=self.ds.datatype, 
-                storage_loc=path, storageshare=self.ds.storageshare, date=timezone.now())
+                storage_loc=path, storageshare=self.ds.storageshare, date=timezone.now(),
+                securityclass=1)
         dsr = dm.DatasetRawFile.objects.create(dataset=newds, rawfile=raw)
         dm.DatasetOwner.objects.create(dataset=newds, user=self.user)
         params = {'flags': {}, 'inputparams': {self.param3.pk: 42}, 

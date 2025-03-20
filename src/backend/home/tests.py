@@ -39,7 +39,8 @@ class MzmlTests(BaseTest):
         self.run = dm.RunName.objects.create(name=self.id(), experiment=self.exp1)
         self.storloc = os.path.join(self.p1.name, self.exp1.name, self.run.name) 
         self.ds = dm.Dataset.objects.create(date=self.p1.registered, runname=self.run,
-                datatype=self.dtype, storageshare=self.ssnewstore, storage_loc=self.storloc)
+                datatype=self.dtype, storageshare=self.ssnewstore, storage_loc=self.storloc,
+                securityclass=1)
         dm.QuantDataset.objects.get_or_create(dataset=self.ds, quanttype=self.qt)
         self.qeraw, _ = rm.RawFile.objects.update_or_create(name='file1', defaults={
             'producer': self.prodqe, 'source_md5': '52416cc60390c66e875ee6ed8e03103a',
