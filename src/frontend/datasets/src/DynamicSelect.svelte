@@ -1,5 +1,4 @@
 <script>
-import { onMount } from 'svelte';
 import { getJSON } from './funcJSON.js';
 import { createEventDispatcher } from 'svelte';
 
@@ -42,8 +41,6 @@ let mouseSelect = false;
 // Fall back initval in case user backs out from selection
 const initval = selectval;
 
-// options change -> Input done -> newvalue -> setNewProj -> ptype_id='' fuckat
-
 function populateInitial() {
   if (selectval && selectval in fixedoptions) {
     intext = niceName(fixedoptions[selectval]);
@@ -64,7 +61,8 @@ export function inputdone() {
       intext = niceName(options[selectval]);
     } else {
       unknowninput = intext;
-      dispatch('newvalue', {});
+      selectval = '';
+      dispatch('novalue', {});
     } 
     // FIXME should we dispatch illegalvalue when the value is not in fixedoptions
     // and we are not allowed to create new values?
@@ -157,11 +155,6 @@ function starttyping() {
   placeholder = selectval ? niceName(selectval) : '';
 }
  
-onMount(async() => {
-  // call inputdone to load the intexts from selectedval
-  await inputdone();
-})
-
 </script>
 
 <div class="control has-icons-right" tabindex="0">

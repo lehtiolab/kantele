@@ -676,22 +676,6 @@ onMount(async() => {
     if (existing_analysis) {
       runButtonActive = false;
       await populate_analysis_and_fetch_wf();
-      // Populate dynamic select components by calling .inputdone()
-      // Does not work if it is in populate_analysis, possibly is too fast
-      // and values havent made it to selectval in the components yet
-      if (wf) {
-        Object.keys(wf.fileparams).forEach(x => {
-          wf.fileparams[x].component.inputdone();
-        });
-      }
-      // wf.mfp: [{id: 1, components: []}, ]
-      // cfg.mfp: {1: {0: 3, 1: 4}, ...}
-      Object.entries(config.multifileparams).forEach(([paramid, ix_val]) => {
-        let mfp = wf.multifileparams.filter(mfp => mfp.id === parseInt(paramid))[0];
-        Object.keys(ix_val).forEach(ix => {
-          mfp.components[ix].inputdone();
-        });
-      });
       runButtonActive = true;
     }
   }
