@@ -26,6 +26,7 @@ const tablefields = [
   {id: 'proj', name: 'Project', type: 'str', multi: false, links: 'proj_ids', linkroute: '#/projects'},
   {id: 'exp', name: 'Experiment', type: 'str', multi: false},
   {id: 'run', name: 'Run', type: 'str', multi: false},
+  {id: 'date', name: 'Date', type: 'str', multi: false},
   {id: 'usr', name: 'Creator', type: 'str', multi: false},
   {id: 'dtype', name: 'Datatype', type: 'str', multi: false},
 ];

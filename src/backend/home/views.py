@@ -454,7 +454,7 @@ def populate_dset(dsids, dbdsets, user):
             'runname__experiment__project_id', 'datatype__name',
             'prefractionationdataset__prefractionation__name', 'prefractionationdataset__hiriefdataset__hirief'):
         dsfiles = filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dset['pk'])
-        storestate = get_dset_storestate(dset['pk'], dsfiles)
+        storestate, nrfiles = get_dset_storestate(dset['pk'], dsfiles)
         ana_ids = [x['id'] for x in anmodels.Analysis.objects.filter(datasetanalysis__dataset_id=dset['pk']).values('id')]
         dsfiles_ids = [x['pk'] for x in dsfiles.values('pk')]
         ownerq = dsmodels.DatasetOwner.objects.filter(dataset_id=dset['pk'])
@@ -471,8 +471,9 @@ def populate_dset(dsids, dbdsets, user):
             'proj_ids': [dset['runname__experiment__project_id']],
             'exp': dset['runname__experiment__name'],
             'run': dset['runname__name'],
+            'date': datetime.strftime(dset['date'], '%Y-%m-%d'),
             'dtype': dset['datatype__name'],
-            'storestate': storestate,
+            'storestate': [storestate, nrfiles],
             'lockstate': dset['locked'],
             'fn_ids': dsfiles_ids,
             'ptype': dset['runname__experiment__project__ptype__name'],

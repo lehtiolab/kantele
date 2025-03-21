@@ -938,7 +938,7 @@ def get_dset_storestate(dset_id, dsfiles=False):
     dsfiles = dsfiles.exclude(mzmlfile__isnull=False)
     dsfc = dsfiles.count()
     if dsfc == 0:
-        return 'empty'
+        return 'empty', '-'
     coldfiles = dsfiles.filter(pdcbackedupfile__deleted=False, pdcbackedupfile__success=True)
     if dsfiles.filter(checked=True, deleted=False).count() == dsfc == coldfiles.count():
         storestate = 'complete'
@@ -955,12 +955,12 @@ def get_dset_storestate(dset_id, dsfiles=False):
         storestate = 'new'
     else:
         storestate = 'unknown'
-    return storestate
+    return storestate, dsfc
 
 
 def archive_dataset(dset):
     # FIXME dataset reactivating and archiving reports error when ok and vv? I mean, if you click archive and reactivate quickly, you will get error (still in active storage), and also in this func, storestate is not updated at same time as DB (it is result of jobs)
-    storestate = get_dset_storestate(dset.pk)
+    storestate, _ = get_dset_storestate(dset.pk)
     prim_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
     backing_up = False
     if storestate == 'purged':
@@ -1005,7 +1005,7 @@ def reactivate_dataset(dset):
     #  - delete/undelete ALSO in post-job view - bad UI, dataset keeps showing in interface, should not
     #  - reactivate cancels delete job (if it is pending
     #  - 
-    storestate = get_dset_storestate(dset.pk)
+    storestate, _ = get_dset_storestate(dset.pk)
     if storestate == 'purged':
         return {'state': 'error', 'error': 'Cannot reactivate purged dataset'}
     elif storestate == 'broken':
@@ -1089,7 +1089,7 @@ def delete_dataset_from_cold(dset):
     # FIXME add check if active on primary share
     create_job('delete_active_dataset', dset_id=dset.id)
     create_job('delete_empty_directory', sf_ids=[x.id for x in filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=dset)])
-    storestate = get_dset_storestate(dset.pk)
+    storestate, _ = get_dset_storestate(dset.pk)
     if storestate != 'empty':
         create_job('delete_dataset_coldstorage', dset_id=dset.id)
     sfids = [sf.id for dsrf in dset.datasetrawfile_set.select_related('rawfile') for sf in dsrf.rawfile.storedfile_set.all()]
