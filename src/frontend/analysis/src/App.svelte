@@ -812,7 +812,7 @@ onMount(async() => {
       </span>
       {:else}
       <span class="tag is-medium is-warning">
-        {name} (locked)
+        {name} (not locked)
         <button class="delete is-small" on:click={e => removeDataset(dsid)}></button>
       </span>
       {/if}

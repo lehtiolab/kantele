@@ -364,16 +364,22 @@ def update_dataset(data, user_id):
     newrun, newexp, newproj = False, False, False
     if project.id != dset.runname.experiment.project_id:
         newproj = True
-    if 'newexperimentname' in data:
+    if 'newexperimentname' in data and data['newexperimentname']:
         experiment = models.Experiment(name=data['newexperimentname'], project=project)
         dset.runname.experiment = experiment
         newexp = True
-    else:
-        experiment = models.Experiment.objects.get(pk=data['experiment_id'])
+    elif 'experiment_id' in data:
+        try:
+            experiment = models.Experiment.objects.get(pk=data['experiment_id'])
+        except (models.Experiment.DoesNotExist, ValueError):
+            return JsonResponse({'error': f'Experiment ID not found!'}, status=404)
         if data['experiment_id'] != dset.runname.experiment_id:
             # another experiment was selected
             newexp = True
             dset.runname.experiment = experiment
+    else:
+        return JsonResponse({'error': f'You  must fill in an experiment'}, status=400)
+
     if data['runname'] != dset.runname.name or newexp:
         # Save if new experiment AND/OR new name Runname coupled 1-1 to dataset
         newrun = True
@@ -654,7 +660,7 @@ def check_save_permission(dset_id, logged_in_user, action=False):
     '''
     dsq = models.Dataset.objects.filter(purged=False, deleted=False, pk=dset_id)
     if not dsq.exists():
-        return ('Cannot find dataset to edit', 404)
+        return ('Cannot find dataset to edit, maybe it is deleted?', 404)
     elif action != 'unlock' and dsq.filter(locked=True).exists():
         return ('You cannot edit a locked dataset', 403)
     elif action == 'unlock' and dsq.filter(locked=False).exists():
@@ -1194,12 +1200,17 @@ def save_dataset(request):
             experiment = models.Experiment.objects.get_or_create(project=project, name=settings.LCEXPNAME)
             runname = models.RunName.objects.create(name=data['runname'], experiment=experiment)
         else:
-            if 'newexperimentname' in data:
+            if 'newexperimentname' in data and data['newexperimentname']:
                 experiment = models.Experiment.objects.create(name=data['newexperimentname'],
                         project=project)
 
             elif 'experiment_id' in data:
-                experiment = models.Experiment.objects.get(pk=data['experiment_id'])
+                try:
+                    experiment = models.Experiment.objects.get(pk=data['experiment_id'])
+                except (models.Experiment.DoesNotExist, ValueError):
+                    return JsonResponse({'error': f'Experiment ID not found!'}, status=404)
+            else:
+                return JsonResponse({'error': f'You  must fill in an experiment'}, status=400)
             runname = models.RunName.objects.create(name=data['runname'], experiment=experiment)
         # Have runname/exp/project, now save rest of dataset:
         try:
@@ -1394,8 +1405,6 @@ def find_files(request):
                           'date': x.date.timestamp() * 1000,
                           'instrument': x.producer.name, 'checked': False}
                          for x in newfiles}})
-
-
 
 
 def move_dset_project_servershare(dset_id, storagesharename, dstsharename, projid):
