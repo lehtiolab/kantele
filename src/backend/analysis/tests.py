@@ -18,6 +18,10 @@ from datasets import models as dm
 class AnalysisTest(BaseTest):
     def setUp(self):
         super().setUp()
+        self.oldds.locked = True
+        self.oldds.save()
+        self.ds.locked = True
+        self.ds.save()
         self.usrfraw = rm.RawFile.objects.create(name='usrfiledone', producer=self.prod, 
                 source_md5='usrfmd5', size=100, claimed=True, date=timezone.now())
         self.sfusr, _ = rm.StoredFile.objects.update_or_create(rawfile=self.usrfraw,
@@ -304,7 +308,7 @@ class TestGetAnalysis(AnalysisTest):
         html_dsids = f'''<script>
         let existing_analysis = JSON.parse(document.getElementById('analysis_data').textContent);
         const dbwfs = JSON.parse(document.getElementById('allwfs').textContent);
-        const initial_dsnames = JSON.parse(document.getElementById('ds_id_names').textContent);
+        const initial_dsets = JSON.parse(document.getElementById('dsets').textContent);
         const allwfs = dbwfs.wfs;
         const wforder = dbwfs.order;
         const ds_errors = [
@@ -343,7 +347,8 @@ class TestGetDatasetsBad(AnalysisTest):
                 filetype=self.ft, servershare=self.ssnewstore, path=path, checked=True)
         newrun = dm.RunName.objects.create(experiment=self.ds.runname.experiment, name='noqt_ds')
         newds = dm.Dataset.objects.create(runname=newrun, datatype=self.ds.datatype, 
-                storage_loc=path, storageshare=self.ds.storageshare, date=timezone.now())
+                storage_loc=path, storageshare=self.ds.storageshare, date=timezone.now(),
+                securityclass=1)
         dsr = dm.DatasetRawFile.objects.create(dataset=newds, rawfile=raw)
         dm.DatasetOwner.objects.create(dataset=newds, user=self.user)
         resp = self.cl.get(f'{self.url}{self.nfwf.pk}/', data={'dsids': f'{newds.pk}', 'anid': 0})
@@ -393,6 +398,7 @@ class TestGetDatasetsIso(AnalysisTest):
                     'prefrac': False,
                     'hr': False,
                     'setname': '',
+                    'locked': self.ds.locked,
                     'storage': f'{self.ds.storage_loc.replace(os.path.sep, f" {os.path.sep} ")}',
                     'fields': {'fake': '', '__regex': am.PsetComponent.objects.get(pset=self.pset,
                         component=am.PsetComponent.ComponentChoices.PREFRAC).value},
@@ -430,6 +436,7 @@ class TestGetDatasetsIso(AnalysisTest):
                     'prefrac': False,
                     'hr': False,
                     'setname': self.ads1.setname.setname,
+                    'locked': self.ds.locked,
                     'storage': f'{self.ds.storage_loc.replace(os.path.sep, f" {os.path.sep} ")}',
                     'fields': {'fake': '', '__regex': self.ads1.value},
                     'instruments': [self.prod.name],
@@ -470,6 +477,7 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
                     'prefrac': False,
                     'hr': False,
                     'setname': '',
+                    'locked': self.oldds.locked,
                     'storage': f'{self.oldds.storage_loc.replace(os.path.sep, f" {os.path.sep} ")}',
                     'fields': {'fake': '', '__regex': am.PsetComponent.objects.get(pset=self.pset,
                         component=am.PsetComponent.ComponentChoices.PREFRAC).value},
@@ -507,6 +515,7 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
                     'prefrac': False,
                     'hr': False,
                     'setname': '',
+                    'locked': self.oldds.locked,
                     'storage': f'{self.oldds.storage_loc.replace(os.path.sep, f" {os.path.sep} ")}',
                     'fields': {'fake': '', '__regex': am.PsetComponent.objects.get(pset=self.pset,
                         component=am.PsetComponent.ComponentChoices.PREFRAC).value},
@@ -867,7 +876,8 @@ class TestStoreExistingLFAnalysis(AnalysisLabelfreeSamples):
                 size=100, date=timezone.now(), claimed=True)
         newrun = dm.RunName.objects.create(experiment=self.ds.runname.experiment, name='noqt_ds')
         newds = dm.Dataset.objects.create(runname=newrun, datatype=self.ds.datatype, 
-                storage_loc=path, storageshare=self.ds.storageshare, date=timezone.now())
+                storage_loc=path, storageshare=self.ds.storageshare, date=timezone.now(),
+                locked=True, securityclass=1)
         dsr = dm.DatasetRawFile.objects.create(dataset=newds, rawfile=raw)
         dm.DatasetOwner.objects.create(dataset=newds, user=self.user)
         params = {'flags': {}, 'inputparams': {self.param3.pk: 42}, 
@@ -971,3 +981,10 @@ class TestStoreExistingLFAnalysis(AnalysisLabelfreeSamples):
         self.assertEqual(resp.status_code, 403)
         err = resp.json()['error']
         self.assertEqual(resp.json(), {'error': 'You do not have permission to edit this analysis'})
+        
+        # Locked dataset
+        newds.locked = False
+        newds.save()
+        resp = self.cl.post(self.url, content_type='application/json', data=postdata)
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json(), {'error': 'Only locked datasets can be analyzed'})

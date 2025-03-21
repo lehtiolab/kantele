@@ -224,6 +224,8 @@ class RunNextflowWorkflow(MultiFileJob):
         is_msdata = sfiles_passed.distinct('rawfile__producer__msinstrument').count()
         job = analysis.nextflowsearch.job
         dsa = analysis.datasetanalysis_set.all()
+        if dsa.filter(dataset__locked=False).exists():
+            raise RuntimeError('Cannot run analysis as one or more datasets are in unlocked state')
         # First new files included:
         dsfiles_not_in_job = rm.StoredFile.objects.filter(deleted=False,
             rawfile__datasetrawfile__dataset__datasetanalysis__in=dsa).select_related(

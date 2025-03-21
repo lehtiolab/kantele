@@ -93,8 +93,8 @@ def get_file_production(request, daysago, maxdays):
     # First project sizes in DB
     # get from db: list of [(size, projtype)]
     projsizelist = [(x['sizesum'] >> 30,
-        x['datasetrawfile__dataset__runname__experiment__project__projtype__ptype__name']) for x in 
-        RawFile.objects.filter(producer__msinstrument__isnull=False, datasetrawfile__dataset__runname__experiment__project__active=True).values('datasetrawfile__dataset__runname__experiment__project__projtype__ptype__name', 'datasetrawfile__dataset__runname__experiment__project').annotate(sizesum=Sum('size')).order_by('sizesum')]
+        x['datasetrawfile__dataset__runname__experiment__project__ptype__name']) for x in 
+        RawFile.objects.filter(producer__msinstrument__isnull=False, datasetrawfile__dataset__runname__experiment__project__active=True).values('datasetrawfile__dataset__runname__experiment__project__ptype__name', 'datasetrawfile__dataset__runname__experiment__project').annotate(sizesum=Sum('size')).order_by('sizesum')]
     lowestsize, highestsize  = projsizelist[0][0], projsizelist[-1][0]
     # Need to round until the last bin of approx size
     #if len(str(lowestsize)) < 3:
@@ -125,9 +125,9 @@ def get_file_production(request, daysago, maxdays):
     todate = datetime.now() - timedelta(daysago)
     lastdate = todate - timedelta(maxdays)
     projdate = {}
-    for date_proj in RawFile.objects.filter(date__gt=lastdate, date__lt=todate, producer__msinstrument__isnull=False, claimed=True).annotate(day=Trunc('date', 'day')).values('day', 'datasetrawfile__dataset__runname__experiment__project__projtype__ptype__name').annotate(sizesum=Sum('size')):
+    for date_proj in RawFile.objects.filter(date__gt=lastdate, date__lt=todate, producer__msinstrument__isnull=False, claimed=True).annotate(day=Trunc('date', 'day')).values('day', 'datasetrawfile__dataset__runname__experiment__project__ptype__name').annotate(sizesum=Sum('size')):
         day = datetime.strftime(date_proj['day'], '%Y-%m-%d')
-        key = date_proj['datasetrawfile__dataset__runname__experiment__project__projtype__ptype__name']
+        key = date_proj['datasetrawfile__dataset__runname__experiment__project__ptype__name']
         try:
             projdate[day][key] = date_proj['sizesum']
         except KeyError:
@@ -150,7 +150,7 @@ def get_file_production(request, daysago, maxdays):
 
     # Projects age and size
     proj_age = {}
-    dbprojects = Project.objects.filter(active=True).select_related('projtype__ptype').annotate(
+    dbprojects = Project.objects.filter(active=True).select_related('ptype__name').annotate(
             rawsum=Sum('experiment__runname__dataset__datasetrawfile__rawfile__size'),
             dsmax=Max('experiment__runname__dataset__date'),
             anamax=Max('experiment__runname__dataset__datasetanalysis__analysis__date')).annotate(
@@ -161,12 +161,12 @@ def get_file_production(request, daysago, maxdays):
             continue
         day = datetime.strftime(proj.greatdate, '%Y')
         try:
-            proj_age[day][proj.projtype.ptype.name] += proj.rawsum
+            proj_age[day][proj.ptype.name] += proj.rawsum
         except KeyError:
             try:
-                proj_age[day].update({proj.projtype.ptype.name: proj.rawsum})
+                proj_age[day].update({proj.ptype.name: proj.rawsum})
             except KeyError:
-                proj_age[day] = {proj.projtype.ptype.name: proj.rawsum}
+                proj_age[day] = {proj.ptype.name: proj.rawsum}
     proj_age = {'xkey': 'day', 'data': [{'day': day, **vals} for day, vals in proj_age.items()]}
 
     return JsonResponse({

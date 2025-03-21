@@ -5,7 +5,7 @@ import Analyses from './Analysis.svelte'
 import Projects from './Projects.svelte'
 
 const routes = {
-    '/': Datasets,
+    '/': Projects,
     '/datasets': Datasets,
     '/jobs': Jobs,
     '/projects': Projects,

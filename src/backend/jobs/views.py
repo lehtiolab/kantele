@@ -239,9 +239,8 @@ def register_external_file(request):
     # FIXME handle errors in save_or_up
     StoredFile.objects.filter(pk=data['sf_id']).update(md5=data['md5'], checked=True)
     RawFile.objects.filter(pk=data['raw_id']).update(source_md5=data['md5'])
-    dsviews.save_or_update_files(dataset)
-    if 'task' in data:
-        set_task_done(data['task'])
+    dsviews.save_or_update_files(dataset, f'task {data["task"]}')
+    set_task_done(data['task'])
     return HttpResponse()
 
 

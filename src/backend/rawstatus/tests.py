@@ -1244,7 +1244,8 @@ class TestMoveSingleFile(ProcessJobTest):
         run = dm.RunName.objects.create(name='run1.raw', experiment=self.exp1)
         storloc = os.path.join(self.p1.name, self.exp1.name, self.dtype.name, run.name)
         ds = dm.Dataset.objects.create(date=self.p1.registered, runname=run,
-                datatype=self.dtype, storageshare=self.ssnewstore, storage_loc=storloc)
+                datatype=self.dtype, storageshare=self.ssnewstore, storage_loc=storloc,
+                securityclass=1)
         newpath, newname = os.path.split(storloc)
         kwargs = {'sf_id': sf.pk, 'dst_path': newpath, 'newname': newname}
         self.assertIn('A dataset with the same directory name as your new', self.job.check_error(**kwargs))

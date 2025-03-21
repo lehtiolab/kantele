@@ -32,10 +32,6 @@ function okChannel(fid) {
   editMade();
 }
 
-function badChannel(fid) {
-  lcdata.samples[fid].badChannel = true;
-}
-
 
 function parseSampleNames() {
   /* Parses samples/files/channel combinations pasted in textbox */
@@ -161,17 +157,10 @@ async function fetchData() {
       <td>
         <div class="field">
           <div class="control">
-            <p class={lcdata.samples[file.associd].badChannel ? 'control has-icons-left': ''}>
             {#if lcdata.quanttype}
-            <DynamicSelect bind:intext={lcdata.samples[file.associd].channelname} niceName={x=>x.name} bind:fixedoptions={lcdata.quants[lcdata.quanttype].chans} bind:fixedorder={lcdata.quants[lcdata.quanttype].chanorder} bind:selectval={lcdata.samples[file.associd].channel} on:selectedvalue={e => okChannel(file.associd)} on:illegalvalue={e => badChannel(file.associd)} />
+            <DynamicSelect bind:intext={lcdata.samples[file.associd].channelname} niceName={x=>x.name} bind:fixedoptions={lcdata.quants[lcdata.quanttype].chans} bind:fixedorder={lcdata.quants[lcdata.quanttype].chanorder} bind:selectval={lcdata.samples[file.associd].channel} />
 
-            {#if lcdata.samples[file.associd].badChannel}
-        <span class="icon is-left has-text-danger">
-          <i class="fas fa-asterisk"></i>
-        </span>
             {/if}
-            {/if}
-            </p>
           </div>
         </div>
       </td>

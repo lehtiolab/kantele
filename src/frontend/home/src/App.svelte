@@ -33,7 +33,7 @@ onMount(async() => {
 
 </script>
 
-<div class="container">
+<div class="container is-fluid">
 
   {#if messages}
   <article class="message is-info"> 

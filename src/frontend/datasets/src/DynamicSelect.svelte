@@ -1,5 +1,4 @@
 <script>
-import { onMount } from 'svelte';
 import { getJSON } from './funcJSON.js';
 import { createEventDispatcher } from 'svelte';
 
@@ -14,15 +13,16 @@ export let fixedorder = [];
 export let fetchUrl = false;
 export let fetchedData;
 export let niceName = function(text) { return text; }
-export let unknowninput = '__ILLEGAL_PLACEHOLDER__';
+export let unknowninput = '';
 export let placeholder = 'Filter by typing';
 
 let options = {};
 $: {
-  // When options change (e.g. loaded from base analysis during first page load),
-  // also call inputdone to populate the thing
-  options = Object.fromEntries(Object.entries(fixedoptions));
-  inputdone();
+  // When selectvalue changes (e.g. loaded from base analysis during first page load),
+  // call populate the thing
+  // Indeed a console.log call is enought to trigger this
+  console.log(selectval);
+  populateInitial();
 }
 
 let optorder = [];
@@ -41,27 +41,31 @@ let mouseSelect = false;
 // Fall back initval in case user backs out from selection
 const initval = selectval;
 
-// options change -> Input done -> newvalue -> setNewProj -> ptype_id='' fuckat
+function populateInitial() {
+  if (selectval && selectval in fixedoptions) {
+    intext = niceName(fixedoptions[selectval]);
+  }
+}
 
 export function inputdone() {
   /* This only does something if mouseSelect is false, but 
   then it is called when the input is received (e.g. esc, enter, mouse selectvalue).
   The intext is then set if there is a slected value, 
   */
-  if (selectval && selectval in fixedoptions) {
-    intext = niceName(fixedoptions[selectval]);
-  }
   if (!mouseSelect) {
     typing = false;
+    // Always run this, do not elseif chain, for when there are 
+    // fixedoptions but also an unknown input (eg new value to save)
+    // With elseif the unknown input would not be set
     if (selectval && selectval in options) {
       intext = niceName(options[selectval]);
-    } else if (unknowninput === '__ILLEGAL_PLACEHOLDER__') {
-      // FIXME nothing is actually catching this?
-      dispatch('illegalvalue', {});
     } else {
       unknowninput = intext;
-      dispatch('newvalue', {});
-    }
+      selectval = '';
+      dispatch('novalue', {});
+    } 
+    // FIXME should we dispatch illegalvalue when the value is not in fixedoptions
+    // and we are not allowed to create new values?
   }
 }
 
@@ -120,6 +124,7 @@ async function handleKeyInput(event) {
     typing = true;
 
   } else if (!fetchUrl && fixedoptions && intext.trim().length) {
+    // Typing with filter changes the options here
     let searched_opt = Object.entries(fixedoptions);
     for (let word of intext.trim().split(' ')) {
       searched_opt = searched_opt.filter(x => x[1].name.toLowerCase().includes(word.toLowerCase()));
@@ -133,24 +138,23 @@ async function handleKeyInput(event) {
     options = Object.fromEntries(Object.entries(fixedoptions));
     optorder = fixedorder.length ? fixedorder : Object.keys(options);
     typing = true;
+
+  } else{
   }
   if (!optorder.length) { hoveropt = false };
 }
 
 function starttyping() {
-  intext = '';
+  intext = '';;
   const keys = Object.keys(options);
-  optorder = fixedorder.length ? fixedorder : keys;
-  options = fixedorder.length ? fixedoptions : options;
+  //optorder = fixedorder.length ? fixedorder : keys;
+  //options = fixedorder.length ? fixedoptions : options;
+  optorder = [];
+  options = [];
   typing = true;
   placeholder = selectval ? niceName(selectval) : '';
 }
  
-onMount(async() => {
-  // call inputdone to load the intexts from selectedval
-  await inputdone();
-})
-
 </script>
 
 <div class="control has-icons-right" tabindex="0">

@@ -87,17 +87,16 @@ class BaseTest(TestCase):
         self.lfqt, _ = dm.QuantType.objects.get_or_create(name='labelfree', shortname='lf')
 
         # Project/dset on new storage
-        self.p1, _ = dm.Project.objects.get_or_create(name='p1', pi=self.pi)
+        self.p1 = dm.Project.objects.create(name='p1', pi=self.pi, ptype=self.ptype)
         self.projsam1, _ = dm.ProjectSample.objects.get_or_create(sample='sample1', project=self.p1)
         dm.SampleMaterial.objects.create(sample=self.projsam1, sampletype=self.samtype1)
         dm.SampleSpecies.objects.create(sample=self.projsam1, species=self.spec1)
-        dm.ProjType.objects.get_or_create(project=self.p1, ptype=self.ptype)
         self.exp1, _ = dm.Experiment.objects.get_or_create(name='e1', project=self.p1)
         self.run1, _ = dm.RunName.objects.get_or_create(name='run1', experiment=self.exp1)
         self.storloc = os.path.join(self.p1.name, self.exp1.name, self.dtype.name, self.run1.name)
-        self.ds, _ = dm.Dataset.objects.update_or_create(date=self.p1.registered, runname=self.run1,
-                datatype=self.dtype, defaults={'storageshare': self.ssnewstore, 
-                    'storage_loc': self.storloc})
+        self.ds = dm.Dataset.objects.create(date=self.p1.registered, runname=self.run1,
+                datatype=self.dtype, storageshare=self.ssnewstore, storage_loc=self.storloc,
+                securityclass=max(dm.DatasetSecurityClass))
         dm.DatasetComponentState.objects.create(dataset=self.ds, state=dm.DCStates.OK, dtcomp=self.dtcompfiles)
         dm.DatasetComponentState.objects.create(dataset=self.ds, state=dm.DCStates.OK, dtcomp=self.dtcompsamples)
         self.contact, _ = dm.ExternalDatasetContact.objects.get_or_create(dataset=self.ds,
@@ -138,17 +137,16 @@ class BaseTest(TestCase):
 
         # Project/dataset/files on old storage
         oldfn = 'raw1'
-        self.oldp, _ = dm.Project.objects.get_or_create(name='oldp', pi=self.pi)
+        self.oldp = dm.Project.objects.create(name='oldp', pi=self.pi, ptype=self.ptype)
         self.projsam2, _ = dm.ProjectSample.objects.get_or_create(sample='sample2', project=self.oldp)
         dm.SampleMaterial.objects.create(sample=self.projsam2, sampletype=self.samtype2)
         dm.SampleSpecies.objects.create(sample=self.projsam2, species=self.spec2)
-        dm.ProjType.objects.get_or_create(project=self.oldp, ptype=self.ptype)
         self.oldexp, _ = dm.Experiment.objects.get_or_create(name='olde', project=self.oldp)
         self.oldrun, _ = dm.RunName.objects.get_or_create(name='run1', experiment=self.oldexp)
         self.oldstorloc = os.path.join(self.oldp.name, self.oldexp.name, self.oldrun.name)
-        self.oldds, _ = dm.Dataset.objects.update_or_create(date=self.oldp.registered,
-                runname=self.oldrun, datatype=self.dtype, defaults={
-                    'storageshare': self.ssoldstorage, 'storage_loc': self.oldstorloc})
+        self.oldds = dm.Dataset.objects.create(date=self.oldp.registered, runname=self.oldrun,
+                datatype=self.dtype, storageshare=self.ssoldstorage, storage_loc=self.oldstorloc,
+                securityclass=max(dm.DatasetSecurityClass)) 
         dm.QuantDataset.objects.get_or_create(dataset=self.oldds, quanttype=self.lfqt)
         dm.DatasetComponentState.objects.create(dataset=self.oldds, dtcomp=self.dtcompfiles, state=dm.DCStates.OK)
         dm.DatasetComponentState.objects.create(dataset=self.oldds, dtcomp=self.dtcompsamples, state=dm.DCStates.OK)

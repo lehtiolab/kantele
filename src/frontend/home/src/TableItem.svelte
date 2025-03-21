@@ -23,9 +23,9 @@ function setConfirm() {
 
 {#if field.type === 'tag'}
   {#if color}
-  <span class={`tag ${color[value]}`}>{value}</span>
+  <span class={`tag ${color[value[0]]}`}>{value[0]} ({value[1]})</span>
   {:else}
-  <span class="tag is-info">{value}</span>
+  <span class="tag is-info">{value[0]} ({value[1]})</span>
   {/if}
 
 {:else if field.type === 'bool'}

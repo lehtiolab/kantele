@@ -27,7 +27,6 @@
 	    <div class="navbar-start">
 		  {% with request.resolver_match.app_name as appname %}
 		  <a class="navbar-item {% if appname == 'home' %}is-active{% endif %}" href="{% url 'home:home' %}">HOME</a>
-		    <a class="navbar-item {% if appname == 'datasets' %}is-active{% endif %}" href="{% url 'datasets:new' %}">NEW DATASET</a>
 		    <a class="navbar-item {% if appname == 'dashboard' %}is-active{% endif %}" href="{% url 'dashboard:dash' %}">DASHBOARD</a>
 		    <a class="navbar-item {% if appname == 'files' %}is-active{% endif %}" href="{% url 'files:inflow' %}">DATA UPLOADS</a>
 		    <a class="navbar-item {% if appname == 'mstulos' %}is-active{% endif %}" href="{% url 'mstulos:front' %}">RESULTS VIEWER</a>
@@ -42,7 +41,7 @@
 	{% endif %}
   </nav>
 
-  <div class="container mt-2">
+  <div class="container mt-2 is-fluid">
 {% block content %}
 {% endblock content %}
   </div>

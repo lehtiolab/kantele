@@ -6,12 +6,12 @@
   <link rel='stylesheet' href='{% static "analysis/bundle.css" %}'>
   {{ analysis | json_script:'analysis_data'}}
   {{ wfs | json_script:'allwfs'}}
-  {{ dsets | json_script:'ds_id_names'}}
+  {{ dsets | json_script:'dsets'}}
   <script defer src='{% static "analysis/bundle.js" %}'></script>
   <script>
     let existing_analysis = JSON.parse(document.getElementById('analysis_data').textContent);
     const dbwfs = JSON.parse(document.getElementById('allwfs').textContent);
-    const initial_dsnames = JSON.parse(document.getElementById('ds_id_names').textContent);
+    const initial_dsets = JSON.parse(document.getElementById('dsets').textContent);
     const allwfs = dbwfs.wfs;
     const wforder = dbwfs.order;
     const ds_errors = [
