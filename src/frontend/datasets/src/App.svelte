@@ -246,6 +246,9 @@ async function unlockDataset() {
     const response = await postJSON('/datasets/save/dataset/unlock/', postdata);
     if ('error' in response) {
       saveerrors.basics = [response.error, ...saveerrors.basics];
+    } else if ('msg' in response) {
+      saveerrors.basics = [response.msg, ...saveerrors.basics];
+      dsinfo.locked = false;
     } else {
       dsinfo.locked = false;
     }
@@ -299,9 +302,9 @@ function showFiles() {
 
 <h4 class="title is-4">
   {#if dsinfo.locked}
-  <a title="Click to unlock dataset" on:click={unlockDataset}><i class="icon fas fa-lock has-text-grey"></i></a>
+  <i class="icon fas fa-lock has-text-success"></i>
   {:else}
-  <a title="Click to lock dataset" on:click={lockDataset}><i class="icon fas fa-lock-open has-text-grey"></i></a>
+  <i class="icon fas fa-lock-open has-text-grey"></i>
   {/if}
   {!$dataset_id ? 'New dataset' : `Dataset ${$dataset_id}`}
 </h4> 
@@ -321,6 +324,11 @@ function showFiles() {
     
     	<article class="message is-info"> 
           <div class="message-body">
+            {#if $dataset_id && !dsinfo.locked}
+            <label class="label">Only locked datasets can be used in analysis</label>
+            <span class="has-text-danger">Locked datasets cannot be changed or receive files!</span>
+            <button class="button is-small" on:click={lockDataset}>Lock dataset</button>
+            {/if}
             <div>
               <span class="has-text-weight-bold">Project:</span>
               <span>{project_name}</span>
@@ -339,6 +347,11 @@ function showFiles() {
               <button on:click={e => showDangerZone = true} class="button is-small">Edit</button>
             </div>
             {:else}
+              {#if $dataset_id && dsinfo.locked}
+              <div class="field">
+              <button class="button is-small mt-4" on:click={unlockDataset}>Unlock dataset</button>
+              </div>
+              {/if}
             <h4 class="title is-5 mt-4">Danger zone</h4>
             <div class="field">
               <label class="label">Change project</label>

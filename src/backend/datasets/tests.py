@@ -8,6 +8,7 @@ from django.contrib.auth.models import User
 from kantele import settings
 from kantele.tests import BaseTest, BaseIntegrationTest, ProcessJobTest
 from datasets import models as dm
+from analysis import models as am
 from datasets import jobs as dj
 from jobs import models as jm
 from jobs.jobs import Jobstates
@@ -989,3 +990,130 @@ class TestDeleteDataset(ProcessJobTest):
                     self.f3sfmz.pk, False), {})
                 ]
         self.check(exp_t)
+
+
+class TestUnlockDataset(BaseTest):
+    url = '/datasets/save/dataset/unlock/'
+
+    def setUp(self):
+        super().setUp()
+        self.ds.locked = True
+        self.ds.save()
+        ana = am.Analysis.objects.create(user=self.user, name='testana_unlock', storage_dir='testdir_unclock')
+        self.dsa = am.DatasetAnalysis.objects.create(analysis=ana, dataset=self.ds)
+        self.anajob = jm.Job.objects.create(funcname='testjob', kwargs={},
+                state=Jobstates.WAITING, timestamp=timezone.now())
+        nfw = am.NextflowWorkflowRepo.objects.create(description='a wf', repo='gh/wf')
+        pset = am.ParameterSet.objects.create(name='ps1')
+        nfwf = am.NextflowWfVersionParamset.objects.create(update='an update', commit='abc123',
+           filename='main.nf', profiles=[], nfworkflow=nfw, paramset=pset, nfversion='22', active=True)
+        wftype = am.UserWorkflow.WFTypeChoices.STD
+        wf = am.UserWorkflow.objects.create(name='testwf', wftype=wftype, public=True)
+        wf.nfwfversionparamsets.add(nfwf)
+        nfs = am.NextflowSearch.objects.create(analysis=ana, nfwfversionparamset=nfwf,
+                workflow=wf, token='tok123', job=self.anajob)
+
+    def test_fail(self):
+        # Wrong id
+        resp = self.cl.post(self.url, content_type='application/json', data={'dataset_id': False})
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()['error'], 'Can not find dataset to unlock')
+
+        # Wrong user
+        run = dm.RunName.objects.create(name='someoneelsesrun', experiment=self.exp1)
+        ds = dm.Dataset.objects.create(date=self.p1.registered, runname=run,
+                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore,
+                locked=True, securityclass=max(dm.DatasetSecurityClass))
+        ds.save()
+        otheruser = User.objects.create(username='test', password='test')
+        dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
+        resp = self.cl.post(self.url, content_type='application/json', data={'dataset_id': ds.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'You are not authorized to edit this dataset')
+
+        # In a running analysis
+        self.anajob.state = Jobstates.PROCESSING
+        self.anajob.save()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'dataset_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'],
+                'Dataset is currently in an analysis and you cannot edit it')
+
+        # Already unlocked
+        self.ds.locked = False
+        self.ds.save()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'dataset_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'Dataset already unlocked')
+
+
+    def test_has_ana_wait(self):
+        # Analysis in WAIT
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'dataset_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['msg'],
+                f'WARNING - Dataset {self.ds.pk} has one or more analyses that are '
+            'not yet run. Unlocking and editing can potentially change the analyses')
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} unlocked dataset {self.ds.pk}')
+
+    def test_has_ana_done(self):
+        # Analysis DONE
+        self.anajob.state = Jobstates.DONE
+        self.anajob.save()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'dataset_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['msg'],
+                f'WARNING - Dataset {self.ds.pk} has one or more analyses that are '
+            'already finished. Editing the dataset or adding/removing files can distort the view '
+            'of the data that analysis has resulted in')
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} unlocked dataset {self.ds.pk}')
+
+    def test_has_no_ana(self):
+        self.dsa.delete()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'dataset_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['msg'], f'Dataset {self.ds.pk} unlocked')
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} unlocked dataset {self.ds.pk}')
+
+
+class TestLockDataset(BaseTest):
+    url = '/datasets/save/dataset/lock/'
+
+    def test_fail(self):
+        resp = self.cl.post(self.url, content_type='application/json', data={'dataset_id': False})
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()['error'], 'Can not find dataset to lock')
+
+        # Wrong user
+        run = dm.RunName.objects.create(name='someoneelsesrun', experiment=self.exp1)
+        ds = dm.Dataset.objects.create(date=self.p1.registered, runname=run,
+                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
+        ds.save()
+        otheruser = User.objects.create(username='test', password='test')
+        dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
+        resp = self.cl.post(self.url, content_type='application/json', data={'dataset_id': ds.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'You are not authorized to edit this dataset')
+
+        self.ds.locked = True
+        self.ds.save()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'dataset_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'You cannot edit a locked dataset')
+
+    def test_ok(self):
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'dataset_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} locked dataset {self.ds.pk}')

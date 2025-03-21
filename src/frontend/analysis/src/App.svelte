@@ -27,7 +27,8 @@ let resfn_arr = [];
 let resultfiles = {}
 let resultfnorder = [];
 let field_order = [];
-let dsnames = initial_dsnames;
+let dsnames = initial_dsets.names;
+let dslocked = initial_dsets.locks;
 
 let base_analysis = {
   isComplement: false,
@@ -380,6 +381,7 @@ async function fetchDatasetDetails(fetchdsids) {
       dsets[x] = result.dsets[x];
       dsets[x].changed = false;
       dsnames[x] = dsets[x].storage;
+      dslocked[x] = dsets[x].locked;
       });
     Object.keys(dsets).forEach(x => {
       dsets[x].changed = false;
@@ -803,10 +805,17 @@ onMount(async() => {
     <DynamicSelect placeholder='Find dataset to add' bind:selectval={dsetToAdd} on:selectedvalue={addDataset} niceName={x => x.name} fetchUrl="/analysis/find/datasets/" />
     <div class="tags">
     {#each Object.entries(dsnames) as [dsid, name]}
+      {#if dslocked[dsid]}
       <span class="tag is-medium is-info">
         {name}
         <button class="delete is-small" on:click={e => removeDataset(dsid)}></button>
       </span>
+      {:else}
+      <span class="tag is-medium is-warning">
+        {name} (locked)
+        <button class="delete is-small" on:click={e => removeDataset(dsid)}></button>
+      </span>
+      {/if}
     {/each}
     {#if !Object.entries(dsnames).length}
     No datasets selected

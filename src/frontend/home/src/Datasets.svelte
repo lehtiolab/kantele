@@ -18,6 +18,7 @@ let purgeConfirm = false;
 
 const tablefields = [
   {id: 'ptype', name: 'Project type', type: 'str', multi: false},
+  {id: 'lockstate', name: 'Locked', type: 'bool', multi: false},
   {id: 'storestate', name: 'Stored', type: 'tag', multi: false, links: 'fn_ids', linkroute: '#/files/'},
   {id: 'jobstate', name: '__hourglass-half', type: 'state', multi: true, links: 'jobids', linkroute: '#/jobs'},
   {id: 'smallstatus', name: '', type: 'smallcoloured', multi: true},

@@ -448,8 +448,8 @@ def populate_dset(dsids, dbdsets, user):
                     'filejob__storedfile__rawfile__datasetrawfile__dataset_id'):
         dsid = job['filejob__storedfile__rawfile__datasetrawfile__dataset_id']
         jobmap[dsid].append((str(job['pk']), job['state']))
-    for dset in dbdsets.values('pk', 'deleted', 'runname__experiment__project__ptype_id',
-            'runname__experiment__name', 'runname__experiment__project__ptype__name',
+    for dset in dbdsets.values('pk', 'deleted', 'runname__experiment__project__ptype_id', 'locked',
+            'date', 'runname__experiment__name', 'runname__experiment__project__ptype__name',
             'runname__experiment__project__name', 'runname__name', 
             'runname__experiment__project_id', 'datatype__name',
             'prefractionationdataset__prefractionation__name', 'prefractionationdataset__hiriefdataset__hirief'):
@@ -473,6 +473,7 @@ def populate_dset(dsids, dbdsets, user):
             'run': dset['runname__name'],
             'dtype': dset['datatype__name'],
             'storestate': storestate,
+            'lockstate': dset['locked'],
             'fn_ids': dsfiles_ids,
             'ptype': dset['runname__experiment__project__ptype__name'],
             'prefrac': False,

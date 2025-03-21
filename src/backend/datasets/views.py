@@ -14,6 +14,7 @@ from django.utils import timezone
 
 from kantele import settings
 from datasets import models
+from analysis import models as am
 from rawstatus import models as filemodels
 from jobs.jobutil import create_job, check_job_error, create_job_without_check, jobmap
 from jobs import models as jm
@@ -656,6 +657,8 @@ def check_save_permission(dset_id, logged_in_user, action=False):
         return ('Cannot find dataset to edit', 404)
     elif action != 'unlock' and dsq.filter(locked=True).exists():
         return ('You cannot edit a locked dataset', 403)
+    elif action == 'unlock' and dsq.filter(locked=False).exists():
+        return ('Dataset already unlocked', 403)
 
     ds = dsq.filter(locked=action == 'unlock').values('deleted',
             'runname__experiment__project__ptype_id').get()
@@ -1130,7 +1133,7 @@ def lock_dataset(request):
         return JsonResponse({'error': 'Can not find dataset to lock'}, status=404)
     updated = models.Dataset.objects.filter(pk=data['dataset_id'], locked=False).update(locked=True)
     if not updated:
-        return JsonResponse({'error': 'Can not find dataset to unlock'}, status=404)
+        return JsonResponse({'error': 'Can not find dataset to lock'}, status=404)
     proj = models.Project.objects.get(experiment__runname__dataset__id=data['dataset_id'])
     models.ProjectLog.objects.create(project=proj, level=models.ProjLogLevels.INFO,
             message=f'User {request.user.id} locked dataset {data["dataset_id"]}')
@@ -1146,13 +1149,27 @@ def unlock_dataset(request):
             return JsonResponse({'error': user_denied}, status=status)
     else:
         return JsonResponse({'error': 'Can not find dataset to unlock'}, status=404)
+    analysis_q = am.Analysis.objects.filter(datasetanalysis__dataset_id=data['dataset_id'])
+    if analysis_q.filter(nextflowsearch__job__state__in=jj.JOBSTATES_JOB_SENT).exists():
+        return JsonResponse({'error': 'Dataset is currently in an analysis and you cannot edit it'},
+                status=403)
+    elif analysis_q.filter(nextflowsearch__job__state=jj.Jobstates.DONE).exists():
+        usrmessage = (f'WARNING - Dataset {data["dataset_id"]} has one or more analyses that are '
+            'already finished. Editing the dataset or adding/removing files can distort the view of the '
+            'data that analysis has resulted in')
+    elif analysis_q.filter(nextflowsearch__job__state__in=[jj.Jobstates.WAITING, jj.Jobstates.HOLD,
+            jj.Jobstates.PENDING]).exists():
+        usrmessage = (f'WARNING - Dataset {data["dataset_id"]} has one or more analyses that are '
+            'not yet run. Unlocking and editing can potentially change the analyses')
+    else:
+        usrmessage = f'Dataset {data["dataset_id"]} unlocked'
     updated = models.Dataset.objects.filter(pk=data['dataset_id'], locked=True).update(locked=False)
     if not updated:
         return JsonResponse({'error': 'Can not find dataset to unlock'}, status=404)
     proj = models.Project.objects.get(experiment__runname__dataset__id=data['dataset_id'])
     models.ProjectLog.objects.create(project=proj, level=models.ProjLogLevels.INFO,
             message=f'User {request.user.id} unlocked dataset {data["dataset_id"]}')
-    return JsonResponse({})
+    return JsonResponse({'msg': usrmessage})
 
 
 @login_required

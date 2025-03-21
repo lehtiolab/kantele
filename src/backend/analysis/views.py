@@ -43,8 +43,9 @@ def get_analysis_init(request):
         dserrors.append('Deleted datasets can not be analysed')
     if dbdsets.filter(deleted=False).count() + deleted < len(dsids):
         dserrors.append('Some datasets could not be found, they may not exist')
-    dsets = {d.pk: format_dset_tag(d) for d in dbdsets}
-    context = {'dsets': dsets, 'ds_errors': dserrors, 'analysis': False, 'wfs': get_allwfs()}
+    dsnames = {d.pk: format_dset_tag(d) for d in dbdsets}
+    dslocks = {d.pk: d.locked for d in dbdsets}
+    context = {'dsets': {'names': dsnames, 'locks': dslocks}, 'ds_errors': dserrors, 'analysis': False, 'wfs': get_allwfs()}
     return render(request, 'analysis/analysis.html', context)
 
 
@@ -595,6 +596,7 @@ def get_datasets(request, wfversion_id):
                 'exp': dset.runname.experiment.name,
                 'run': dset.runname.name,
                 'storage': format_dset_tag(dset),
+                'locked': dset.locked,
                 'dtype': dset.datatype.name,
                 'prefrac': prefrac,
                 'hr': hr,
@@ -764,7 +766,9 @@ def store_analysis(request):
             'storageshare__server',
             )
     if dsetquery.filter(deleted=True).exists():
-        return JsonResponse({'error': 'Deleted datasets cannot be analyzed'})
+        return JsonResponse({'error': 'Deleted datasets cannot be analyzed'}, status=403)
+    if dsetquery.filter(locked=False).exists():
+        return JsonResponse({'error': 'Only locked datasets can be analyzed'}, status=403)
     if req['analysis_id']:
         analysis = am.Analysis.objects.select_related('nextflowsearch__job').get(pk=req['analysis_id'])
         if analysis.user_id != request.user.id and not request.user.is_staff:
@@ -1401,6 +1405,7 @@ def find_datasets(request):
     dsets = {d.id: {
         'id': d.id,
         'name': format_dset_tag(d),
+        'locked': d.locked, 
         } for d in dbdsets}
     return JsonResponse(dsets)
     
