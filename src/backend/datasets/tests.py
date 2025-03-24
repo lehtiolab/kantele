@@ -8,6 +8,7 @@ from django.contrib.auth.models import User
 from kantele import settings
 from kantele.tests import BaseTest, BaseIntegrationTest, ProcessJobTest
 from datasets import models as dm
+from analysis import models as am
 from datasets import jobs as dj
 from jobs import models as jm
 from jobs.jobs import Jobstates
@@ -19,9 +20,8 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
 
     def test_new_dset(self):
         resp = self.post_json(data={'dataset_id': False, 'project_id': self.p1.pk,
-            'experiment_id': self.exp1.pk, 'runname': 'newrunname',
-            'datatype_id': self.dtype.pk, 
-            'prefrac_id': False, 'ptype_id': self.ptype.pk,
+            'experiment_id': self.exp1.pk, 'runname': 'newrunname', 'secclass': 1,
+            'datatype_id': self.dtype.pk, 'prefrac_id': False,
             'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.RunName.objects.filter(name='newrunname').count(), 1)
@@ -35,14 +35,15 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertEqual(dsc.filter(state=dm.DCStates.OK).count(), 1)
         self.assertTrue(dsc.filter(state=dm.DCStates.OK, dtcomp=self.dtcompdef).exists())
         self.assertEqual(dsc.filter(state=dm.DCStates.NEW).count(), self.dtype.datatypecomponent_set.count() - 1)
+        self.assertEqual(dm.ProjectLog.objects.last().message, f'Dataset {ds.pk} created by user {self.user.id}')
 
     def test_update_dset_newexp_location(self):
         newexpname = 'edited_exp'
         self.assertEqual(dm.Experiment.objects.filter(name=newexpname).count(), 0)
         resp = self.post_json(data={'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'newexperimentname': newexpname, 'runname': self.run1.name,
-            'datatype_id': self.dtype.pk, 'prefrac_id': False, 'ptype_id': self.ptype.pk,
-            'externalcontact': self.contact.email})
+            'datatype_id': self.dtype.pk, 'prefrac_id': False,
+            'secclass': 1, 'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.Experiment.objects.filter(name=newexpname).count(), 1)
         self.assertTrue(os.path.exists(self.f3path))
@@ -52,6 +53,8 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertFalse(os.path.exists(self.f3path))
         new_ds_loc = os.path.join(self.p1.name, newexpname, self.dtype.name, self.run1.name)
         self.assertNotEqual(self.ds.storage_loc, new_ds_loc)
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.pk} changed dataset '
+                f'{self.ds.pk} path to {new_ds_loc} from {self.ds.storage_loc}').exists())
         self.ds.refresh_from_db()
         self.assertEqual(self.ds.storage_loc, new_ds_loc)
         self.assertTrue(os.path.exists(os.path.join(settings.SHAREMAP[self.ds.storageshare.name],
@@ -65,15 +68,20 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         # move dataset
         mvdsresp = self.post_json({'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'newexperimentname': newexpname, 'runname': self.run1.name, 
-            'datatype_id': self.dtype.pk, 'prefrac_id': False, 'ptype_id': self.ptype.pk, 
-            'externalcontact': self.contact.email})
+            'datatype_id': self.dtype.pk, 'prefrac_id': False,
+            'secclass': 1, 'externalcontact': self.contact.email})
         self.assertEqual(mvdsresp.status_code, 200)
         rename_job = jm.Job.objects.filter(funcname='rename_dset_storage_loc').last()
         self.assertEqual(rename_job.state, Jobstates.PENDING)
+        self.assertTrue(dm.ProjectLog.objects.filter(message__startswith=f'User {self.user.pk} '
+            f'changed dataset {self.ds.pk} path to').exists())
         # remove files results in a job and claimed files still on tmp
         rmresp = self.cl.post('/datasets/save/files/', content_type='application/json', data={
             'dataset_id': self.ds.pk, 'removed_files': {self.f3raw.pk: {'id': self.f3raw.pk}},
             'added_files': {}})
+        print(dm.ProjectLog.objects.last().message)
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.pk} '
+            f'removed files {self.f3raw.pk} from dataset {self.ds.pk}').exists())
         self.assertEqual(rmresp.status_code, 200)
         self.assertTrue(self.f3raw.claimed)
         self.assertEqual(self.f3sf.servershare, self.ssnewstore)
@@ -110,8 +118,8 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         # move dataset
         mvdsresp = self.post_json({'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'newexperimentname': newexpname, 'runname': self.run1.name,
-            'datatype_id': self.dtype.pk, 'prefrac_id': False, 'ptype_id': self.ptype.pk,
-            'externalcontact': self.contact.email})
+            'datatype_id': self.dtype.pk, 'prefrac_id': False,
+            'secclass': 1, 'externalcontact': self.contact.email})
         self.assertEqual(mvdsresp.status_code, 200)
         rename_job = jm.Job.objects.filter(funcname='rename_dset_storage_loc').last()
         self.assertEqual(rename_job.state, Jobstates.PENDING)
@@ -158,18 +166,20 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         # Try to create new dset 
         resp = self.post_json(data={'dataset_id': False, 'project_id': self.p1.pk,
             'experiment_id': self.exp1.pk, 'runname': fname, 'datatype_id': self.dtype.pk,
-            'prefrac_id': False, 'ptype_id': self.ptype.pk, 'externalcontact': self.contact.email})
+            'secclass': 1, 'prefrac_id': False, 'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 403)
-        self.assertIn('storage location not unique, there is either a file', resp.json()['error'])
+        self.assertIn('storage location not unique. There is already a file with that ', resp.json()['error'])
+        self.assertFalse(dm.ProjectLog.objects.exists())
 
         # Try to update existing dataset
         dm.RunName.objects.filter(experiment=self.exp1, name=fname).delete()
         resp = self.post_json(data={'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'experiment_id': self.exp1.pk, 'runname': fname, 'datatype_id': self.dtype.pk,
             'prefrac_id': False, 'ptype_id': self.ptype.pk,
-            'externalcontact': self.contact.email})
+            'secclass': 1, 'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 403)
         self.assertIn('There is already a file with that exact path', resp.json()['error'])
+        self.assertFalse(dm.ProjectLog.objects.exists())
 
 
 class UpdateFilesTest(BaseIntegrationTest):
@@ -182,6 +192,8 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.ds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles).update(state=dm.DCStates.NEW)
         resp = self.post_json({'dataset_id': self.ds.pk, 'added_files': {self.tmpraw.pk: {'id': self.tmpraw.pk}},
             'removed_files': {}})
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.pk} '
+            f'added files {self.tmpraw.pk} to dataset {self.ds.pk}').exists())
         self.assertEqual(resp.status_code, 200)
         newdsr = dm.DatasetRawFile.objects.filter(dataset=self.ds, rawfile=self.tmpraw)
         self.assertEqual(newdsr.count(), 1)
@@ -214,6 +226,7 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.assertFalse(raw.claimed)
         self.assertFalse(self.ds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles,
             state=dm.DCStates.OK).exists())
+        self.assertFalse(dm.ProjectLog.objects.exists())
 
     def test_trigger_movejob_errors(self):
         # add files are already in dset
@@ -232,6 +245,7 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.assertIn(f'Cannot move files selected to dset {self.ds.storage_loc}', resp.json()['error'])
         self.assertEqual(dupe_sf.servershare, self.sstmp)
         self.assertEqual(dupe_sf.path, '')
+        self.assertFalse(dm.ProjectLog.objects.exists())
 
         # remove files results in a job and claimed files still on tmp
         # dupe_raw above is needed!
@@ -248,6 +262,7 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.assertEqual(self.f3sf.path, self.ds.storage_loc)
         self.assertFalse(self.ds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles,
             state=dm.DCStates.OK).exists())
+        self.assertFalse(dm.ProjectLog.objects.exists())
 
     def test_dset_is_filename_job_error(self):
         # new file is dir w same name as dset storage dir
@@ -256,7 +271,8 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.tmpsf.filename = newfn
         self.tmpsf.save()
         newds = dm.Dataset.objects.create(date=self.p1.registered, runname=run,
-                datatype=self.dtype, storageshare=self.ssnewstore, storage_loc=newpath)
+                datatype=self.dtype, storageshare=self.ssnewstore, storage_loc=newpath,
+                securityclass=max(dm.DatasetSecurityClass))
         dm.DatasetOwner.objects.get_or_create(dataset=newds, user=self.user)
         dtc = newds.datasetcomponentstate_set.create(dtcomp=self.dtcompfiles, state=dm.DCStates.NEW)
         resp = self.cl.post(self.url, content_type='application/json', data={
@@ -267,6 +283,7 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.assertEqual(resp.status_code, 403)
         self.assertFalse(self.tmpraw.claimed)
         self.assertIn(f'Cannot move selected files to path {newds.storage_loc}', resp.json()['error'])
+        self.assertFalse(dm.ProjectLog.objects.exists())
         self.assertEqual(self.tmpsf.servershare, self.sstmp)
         self.assertEqual(self.tmpsf.path, '')
         dtc.refresh_from_db()
@@ -290,6 +307,8 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
         resp = self.post_json({'dataset_id': self.ds.pk, 'accepted_files': [self.tmpraw.pk],
             'rejected_files': []})
         self.assertEqual(resp.status_code, 200)
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.id} accepted files '
+                f'{self.tmpraw.pk}, to dset {self.ds.pk}').exists())
         self.assertEqual(newdsr.count(), 1)
         self.assertEqual(self.tmpsf.servershare, self.sstmp)
         self.assertEqual(self.tmpsf.path, '')
@@ -310,6 +329,7 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
         resp = self.post_json({'dataset_id': self.ds.pk, 'rejected_files': [self.tmpraw.pk],
             'accepted_files': []})
         self.assertEqual(resp.status_code, 200)
+        self.assertFalse(dm.ProjectLog.objects.exists())
         newdsr = dm.DatasetRawFile.objects.filter(dataset=self.ds, rawfile=self.tmpraw)
         self.assertEqual(newdsr.count(), 0)
         self.assertEqual(self.tmpsf.servershare, self.sstmp)
@@ -335,6 +355,8 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
         self.assertEqual(newdsr.count(), 0)
         resp = self.post_json({'dataset_id': self.ds.pk, 'accepted_files': [self.tmpraw.pk],
             'rejected_files': [rejectraw.pk]})
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.id} accepted files '
+                f'{self.tmpraw.pk}, to dset {self.ds.pk}').exists())
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(newdsr.count(), 1)
         rejectdsr = dm.DatasetRawFile.objects.filter(dataset=self.ds, rawfile=rejectraw)
@@ -359,7 +381,8 @@ class RenameProjectTest(BaseIntegrationTest):
     def test_no_ownership_fail(self):
         run = dm.RunName.objects.create(name='someoneelsesrun', experiment=self.exp1)
         ds = dm.Dataset.objects.create(date=self.p1.registered, runname=run,
-                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         otheruser = User.objects.create(username='test', password='test')
         dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
         resp = self.cl.post(self.url, content_type='application/json',
@@ -378,11 +401,12 @@ class RenameProjectTest(BaseIntegrationTest):
         self.assertEqual(resp.status_code, 403)
         self.assertIn(f'cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}',
                 json.loads(resp.content)['error'])
-        oldp = dm.Project.objects.create(name='project to rename', pi=self.pi)
+        oldp = dm.Project.objects.create(name='project to rename', pi=self.pi, ptype=self.ptype)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'projid': oldp.pk, 'newname': self.p1.name})
         self.assertEqual(resp.status_code, 403)
         self.assertIn('There is already a project by that name', resp.json()['error'])
+        self.assertFalse(dm.ProjectLog.objects.exists())
 
     def test_rename_ok(self):
         newname = 'testnewname'
@@ -390,6 +414,8 @@ class RenameProjectTest(BaseIntegrationTest):
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'projid': self.p1.pk, 'newname': newname})
         self.assertEqual(resp.status_code, 200)
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.id} renamed project '
+            f'from {self.p1.name} to {newname}').exists())
         renamejobs = jm.Job.objects.filter(funcname='rename_top_lvl_projectdir',
                 kwargs={'proj_id': self.p1.pk, 'newname': newname}) 
         self.assertEqual(renamejobs.count(), 1)
@@ -472,7 +498,8 @@ class SaveSamples(BaseTest):
     def test_fails(self):
         newrun = dm.RunName.objects.create(name='failrun', experiment=self.exp1)
         newds = dm.Dataset.objects.create(date=self.p1.registered, runname=newrun,
-                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         otheruser = User.objects.create(username='test', password='test')
         dm.DatasetOwner.objects.create(dataset=newds, user=otheruser)
 
@@ -501,7 +528,8 @@ class SaveSamples(BaseTest):
     def test_save_new_samples_multiplex(self):
         newrun = dm.RunName.objects.create(name='newds_nosamples_plex', experiment=self.exp1)
         newds = dm.Dataset.objects.create(date=self.p1.registered, runname=newrun,
-                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         dm.DatasetOwner.objects.create(dataset=newds, user=self.user)
         samplename = 'new proj sample A'
         dm.DatasetComponentState.objects.get_or_create(dataset=newds,
@@ -536,7 +564,8 @@ class SaveSamples(BaseTest):
         # Create dset
         newrun = dm.RunName.objects.create(name='newds_nosamples_fns', experiment=self.exp1)
         newds = dm.Dataset.objects.create(date=self.p1.registered, runname=newrun,
-                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         dm.DatasetOwner.objects.create(dataset=newds, user=self.user)
         dm.DatasetComponentState.objects.get_or_create(dataset=newds,
                 defaults={'state': dm.DCStates.NEW, 'dtcomp': self.dtcompsamples})
@@ -657,7 +686,8 @@ class SaveSamples(BaseTest):
         # will not update since sample is in use in another dataset
         newrun = dm.RunName.objects.create(name='newds_samples_plex', experiment=self.ds.runname.experiment)
         newds = dm.Dataset.objects.create(date=self.p1.registered, runname=newrun,
-                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc=newrun.name, storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         dm.DatasetOwner.objects.create(dataset=newds, user=self.user)
         dm.DatasetSample.objects.create(dataset=newds, projsample=self.projsam1)
         dm.QuantChannelSample.objects.create(dataset=newds, channel=self.qtch, projsample=self.projsam1)
@@ -827,8 +857,7 @@ class MergeProjectsTest(BaseTest):
     def setUp(self):
         super().setUp()
         # make projects
-        self.p2 = dm.Project.objects.create(name='p2', pi=self.pi)
-        pt2 = dm.ProjType.objects.create(project=self.p2, ptype=self.ptype)
+        self.p2 = dm.Project.objects.create(name='p2', pi=self.pi, ptype=self.ptype)
         self.exp2 = dm.Experiment.objects.create(name='e2', project=self.p2)
 
     def test_merge_fails(self):
@@ -843,16 +872,19 @@ class MergeProjectsTest(BaseTest):
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'projids': [1]})
         self.assertEqual(resp.status_code, 400)
+        self.assertFalse(dm.ProjectLog.objects.exists())
        
     def test_no_ownership_fail(self):
         run = dm.RunName.objects.create(name='someoneelsesrun', experiment=self.exp2)
         ds = dm.Dataset.objects.create(date=self.p2.registered, runname=run,
-                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         otheruser = User.objects.create(username='test', password='test')
         dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'projids': [self.p1.pk, self.p2.pk]})
         self.assertEqual(resp.status_code, 403)
+        self.assertFalse(dm.ProjectLog.objects.exists())
         
     def test_dataset_exp_run_collision_fail(self):
         """When datasets of different projects have identical experiment and run names,
@@ -860,11 +892,13 @@ class MergeProjectsTest(BaseTest):
         exp3 = dm.Experiment.objects.create(name='e1', project=self.p2)
         run3 = dm.RunName.objects.create(name=self.run1.name, experiment=exp3)
         ds3 = dm.Dataset.objects.create(date=self.p2.registered, runname=run3,
-                datatype=self.dtype, storage_loc='testloc3', storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc='testloc3', storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         dm.DatasetOwner.objects.create(dataset=ds3, user=self.user)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'projids': [self.p1.pk, self.p2.pk]})
         self.assertEqual(resp.status_code, 500)
+        self.assertFalse(dm.ProjectLog.objects.exists())
 
     def test_merge_diff_exps(self):
         """
@@ -874,7 +908,8 @@ class MergeProjectsTest(BaseTest):
         run2 = dm.RunName.objects.create(name='run2', experiment=self.exp2)
         oldstorloc = 'testloc2'
         ds2 = dm.Dataset.objects.create(date=self.p2.registered, runname=run2,
-                datatype=self.dtype, storage_loc=oldstorloc, storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc=oldstorloc, storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         dm.DatasetOwner.objects.create(dataset=ds2, user=self.user)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'projids': [self.p1.pk, self.p2.pk]})
@@ -894,6 +929,8 @@ class MergeProjectsTest(BaseTest):
         self.assertEqual(ds2jobs.count(), 1)
         self.assertEqual(renamejobs.count(), 1)
         self.assertEqual(dm.Project.objects.filter(pk=self.p2.pk).count(), 0)
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.id} merged in '
+            f'project {self.p2.pk}', project=self.p1).exists())
 
     def test_merge_identical_expnames(self):
         """
@@ -905,7 +942,8 @@ class MergeProjectsTest(BaseTest):
         run3 = dm.RunName.objects.create(name='run3', experiment=exp3)
         oldstorloc = 'testloc3'
         ds3 = dm.Dataset.objects.create(date=self.p2.registered, runname=run3,
-                datatype=self.dtype, storage_loc=oldstorloc, storageshare=self.ssnewstore)
+                datatype=self.dtype, storage_loc=oldstorloc, storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
         own3 = dm.DatasetOwner.objects.create(dataset=ds3, user=self.user)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'projids': [self.p1.pk, self.p2.pk]})
@@ -920,6 +958,8 @@ class MergeProjectsTest(BaseTest):
         self.assertEqual(ds3jobs.count(), 1)
         self.assertEqual(renamejobs.count(), 1)
         self.assertEqual(dm.Project.objects.filter(pk=self.p2.pk).count(), 0)
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.id} merged in '
+            f'project {self.p2.pk}', project=self.p1).exists())
 
 
 class TestDeleteDataset(ProcessJobTest):
@@ -950,3 +990,130 @@ class TestDeleteDataset(ProcessJobTest):
                     self.f3sfmz.pk, False), {})
                 ]
         self.check(exp_t)
+
+
+class TestUnlockDataset(BaseTest):
+    url = '/datasets/save/dataset/unlock/'
+
+    def setUp(self):
+        super().setUp()
+        self.ds.locked = True
+        self.ds.save()
+        ana = am.Analysis.objects.create(user=self.user, name='testana_unlock', storage_dir='testdir_unclock')
+        self.dsa = am.DatasetAnalysis.objects.create(analysis=ana, dataset=self.ds)
+        self.anajob = jm.Job.objects.create(funcname='testjob', kwargs={},
+                state=Jobstates.WAITING, timestamp=timezone.now())
+        nfw = am.NextflowWorkflowRepo.objects.create(description='a wf', repo='gh/wf')
+        pset = am.ParameterSet.objects.create(name='ps1')
+        nfwf = am.NextflowWfVersionParamset.objects.create(update='an update', commit='abc123',
+           filename='main.nf', profiles=[], nfworkflow=nfw, paramset=pset, nfversion='22', active=True)
+        wftype = am.UserWorkflow.WFTypeChoices.STD
+        wf = am.UserWorkflow.objects.create(name='testwf', wftype=wftype, public=True)
+        wf.nfwfversionparamsets.add(nfwf)
+        nfs = am.NextflowSearch.objects.create(analysis=ana, nfwfversionparamset=nfwf,
+                workflow=wf, token='tok123', job=self.anajob)
+
+    def test_fail(self):
+        # Wrong id
+        resp = self.cl.post(self.url, content_type='application/json', data={'dataset_id': False})
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()['error'], 'Can not find dataset to unlock')
+
+        # Wrong user
+        run = dm.RunName.objects.create(name='someoneelsesrun', experiment=self.exp1)
+        ds = dm.Dataset.objects.create(date=self.p1.registered, runname=run,
+                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore,
+                locked=True, securityclass=max(dm.DatasetSecurityClass))
+        ds.save()
+        otheruser = User.objects.create(username='test', password='test')
+        dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
+        resp = self.cl.post(self.url, content_type='application/json', data={'dataset_id': ds.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'You are not authorized to edit this dataset')
+
+        # In a running analysis
+        self.anajob.state = Jobstates.PROCESSING
+        self.anajob.save()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'dataset_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'],
+                'Dataset is currently in an analysis and you cannot edit it')
+
+        # Already unlocked
+        self.ds.locked = False
+        self.ds.save()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'dataset_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'Dataset already unlocked')
+
+
+    def test_has_ana_wait(self):
+        # Analysis in WAIT
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'dataset_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['msg'],
+                f'WARNING - Dataset {self.ds.pk} has one or more analyses that are '
+            'not yet run. Unlocking and editing can potentially change the analyses')
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} unlocked dataset {self.ds.pk}')
+
+    def test_has_ana_done(self):
+        # Analysis DONE
+        self.anajob.state = Jobstates.DONE
+        self.anajob.save()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'dataset_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['msg'],
+                f'WARNING - Dataset {self.ds.pk} has one or more analyses that are '
+            'already finished. Editing the dataset or adding/removing files can distort the view '
+            'of the data that analysis has resulted in')
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} unlocked dataset {self.ds.pk}')
+
+    def test_has_no_ana(self):
+        self.dsa.delete()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'dataset_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['msg'], f'Dataset {self.ds.pk} unlocked')
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} unlocked dataset {self.ds.pk}')
+
+
+class TestLockDataset(BaseTest):
+    url = '/datasets/save/dataset/lock/'
+
+    def test_fail(self):
+        resp = self.cl.post(self.url, content_type='application/json', data={'dataset_id': False})
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()['error'], 'Can not find dataset to lock')
+
+        # Wrong user
+        run = dm.RunName.objects.create(name='someoneelsesrun', experiment=self.exp1)
+        ds = dm.Dataset.objects.create(date=self.p1.registered, runname=run,
+                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore,
+                securityclass=max(dm.DatasetSecurityClass))
+        ds.save()
+        otheruser = User.objects.create(username='test', password='test')
+        dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
+        resp = self.cl.post(self.url, content_type='application/json', data={'dataset_id': ds.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'You are not authorized to edit this dataset')
+
+        self.ds.locked = True
+        self.ds.save()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'dataset_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'You cannot edit a locked dataset')
+
+    def test_ok(self):
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'dataset_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} locked dataset {self.ds.pk}')

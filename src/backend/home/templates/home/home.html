@@ -3,9 +3,16 @@
 {% load static %}
 
 {% block head %}
+  {{ ptypes | json_script:'all_ptypes'}}
+  {{ local_ptype_id | json_script:'local_ptype_id'}}
+  {{ external_pis | json_script:'external_pis'}}
   <link rel='stylesheet' href='{% static "home/bundle.css" %}'>
-  <!-- <script crossorigin="anonymous" src="https://polyfill.io/v3/polyfill.min.js?features=Object.fromEntries"></script> -->
   <script defer src='{% static "home/bundle.js" %}'></script>
+  <script>
+    let ptypes = JSON.parse(document.getElementById('all_ptypes').textContent);
+    let local_ptype_id = JSON.parse(document.getElementById('local_ptype_id').textContent);
+    let external_pis = JSON.parse(document.getElementById('external_pis').textContent);
+  </script>
 {% endblock head %}
 
 {% block content %}

@@ -105,15 +105,15 @@ function purgeAnalyses() {
 
 <Tabs tabshow="Analyses" notif={notif} />
 
-<a class="button" href="/analysis/new/" target="_blank">New analysis</a>
+<a class="button is-small" href="/analysis/new/" target="_blank">New analysis</a>
 {#if selectedAnalyses.length}
-<a class="button" on:click={deleteAnalyses}>Delete analyses</a>
-<a class="button" on:click={unDeleteAnalyses}>Undelete analyses</a>
-<a class="button" on:click={purgeAnalyses}>Purge analyses</a>
+<a class="button is-small" on:click={deleteAnalyses}>Delete analyses</a>
+<a class="button is-small" on:click={unDeleteAnalyses}>Undelete analyses</a>
+<a class="button is-small" on:click={purgeAnalyses}>Purge analyses</a>
 {:else}
-<a class="button" disabled>Delete analyses</a>
-<a class="button" disabled>Undelete analyses</a>
-<a class="button" disabled>Purge analyses</a>
+<a class="button is-small" disabled>Delete analyses</a>
+<a class="button is-small" disabled>Undelete analyses</a>
+<a class="button is-small" disabled>Purge analyses</a>
 {/if}
 
 <Table tab="Analyses" bind:items={analyses} bind:treatItems={treatItems} bind:notif={notif} bind:selected={selectedAnalyses} fetchUrl="/show/analyses" findUrl="/find/analyses" on:detailview={showDetails} getdetails={getAnalysisDetails} fixedbuttons={fixedbuttons} fields={tablefields} inactive={['deleted', 'purged']} on:rowAction={e => doAction(e.detail.action, e.detail.id)} />

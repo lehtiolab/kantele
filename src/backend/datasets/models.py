@@ -11,21 +11,38 @@ class PrincipalInvestigator(models.Model):
         return self.name
 
 
+class ProjectTypeName(models.Model):
+    # Local/research, corefac, consortiumABC, etc
+    # In future, this can be used for filtering in project reporting, as
+    # well as assigning if data is allowed on specific server
+    name = models.TextField()
+
+
 class Project(models.Model):
     name = models.TextField(unique=True)
     pi = models.ForeignKey(PrincipalInvestigator, on_delete=models.CASCADE)
     active = models.BooleanField(default=True)
     registered = models.DateTimeField(auto_now_add=True)
-
-
-class ProjectTypeName(models.Model):
-    # FIXME can be enum?
-    name = models.TextField()
-
-
-class ProjType(models.Model):
-    project = models.OneToOneField(Project, on_delete=models.CASCADE)
     ptype = models.ForeignKey(ProjectTypeName, on_delete=models.CASCADE)
+    # external ref for things like iLab API or something, can be blank
+    externalref = models.TextField()
+
+
+class ProjLogLevels(models.IntegerChoices):
+    OPEN = 1, 'Opened'
+    CLOSE = 2, 'Closed'
+    INFO = 3, 'Info'
+    # Security logs are for "user allowed to do X", "user X accessed sensitive data"
+    SECURITY = 4, 'Security'
+    # Critical will reach admin
+    CRITICAL = 5, 'Critical'
+
+
+class ProjectLog(models.Model):
+    project = models.ForeignKey(Project, on_delete=models.CASCADE)
+    date = models.DateTimeField(auto_now_add=True)
+    level = models.IntegerField(choices=ProjLogLevels.choices)
+    message = models.TextField()
 
 
 class UserPtype(models.Model):
@@ -80,10 +97,20 @@ class DatatypeComponent(models.Model):
         return f'{self.datatype.name} has component {DatasetUIComponent(self.component).label}'
 
 
+class DatasetSecurityClass(models.IntegerChoices):
+    # Go from lowest to highest classification
+    NOSECURITY = 1, 'Not classified'
+    # FIXME when ready, also have personal data dsets
+    # PERSONAL = 2, 'Personal data'
+
+
 class Dataset(models.Model):
     date = models.DateTimeField('date created')
     runname = models.OneToOneField(RunName, on_delete=models.CASCADE)
+    #experiment = models.ForeignKey(Experiment, on_delete=models.CASCADE)
+    #runname = models.TextField()
     datatype = models.ForeignKey(Datatype, on_delete=models.CASCADE)
+    securityclass = models.IntegerField(choices=DatasetSecurityClass.choices)
     # NB! storage_loc/share should only ever be updated in jobs' post-run (after moves)
     # because it is source of truth for where to/from move files
     storage_loc = models.TextField(max_length=200, unique=True)
