@@ -51,6 +51,13 @@ class MSInstrument(models.Model):
         return 'MS - {}/{}'.format(self.producer.name, self.filetype.name)
 
 
+class DataSecurityClass(models.IntegerChoices):
+    # Go from lowest to highest classification
+    NOSECURITY = 1, 'Not classified'
+    # FIXME when ready, also have personal data dsets
+    # PERSONAL = 2, 'Personal data'
+
+
 class FileServer(models.Model):
     name = models.TextField(unique=True)
     uri = models.TextField() # for users
@@ -64,9 +71,11 @@ class ServerShare(models.Model):
     name = models.TextField(unique=True)  # storage, tmp,
     server = models.ForeignKey(FileServer, on_delete=models.CASCADE)
     share = models.TextField()  # /home/disk1
+    max_security = models.IntegerField(choices=DataSecurityClass.choices)
 
     def __str__(self):
         return self.name
+
 
 class RawFile(models.Model):
     """Data (raw) files as reported by instrument"""
