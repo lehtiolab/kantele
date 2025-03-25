@@ -56,7 +56,7 @@ def find_projects(request):
         dssubquery = Q(runname__name__icontains=term)
         dssubquery |= Q(runname__experiment__name__icontains=term)
         dssubquery |= Q(runname__experiment__project__name__icontains=term)
-        subquery |= Q(name__icontains=term)
+        subquery = Q(name__icontains=term)
         query &= subquery
         dsquery &= dssubquery
     dbdsets = dsmodels.Dataset.objects.filter(dsquery).select_related('runname__experiment__project').values('runname__experiment__project').distinct()
