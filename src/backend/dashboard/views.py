@@ -150,7 +150,7 @@ def get_file_production(request, daysago, maxdays):
 
     # Projects age and size
     proj_age = {}
-    dbprojects = Project.objects.filter(active=True).select_related('ptype__name').annotate(
+    dbprojects = Project.objects.filter(active=True).select_related('ptype').annotate(
             rawsum=Sum('experiment__runname__dataset__datasetrawfile__rawfile__size'),
             dsmax=Max('experiment__runname__dataset__date'),
             anamax=Max('experiment__runname__dataset__datasetanalysis__analysis__date')).annotate(
