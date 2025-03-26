@@ -4,7 +4,7 @@ from django.db.models import F
 from django.urls import reverse
 
 from kantele import settings
-from rawstatus.models import StoredFile, ServerShare, StoredFileType
+from rawstatus.models import StoredFile, ServerShare, StoredFileType, StoredFileLoc
 from datasets.models import Dataset, DatasetRawFile, Project
 from analysis.models import Proteowizard, MzmlFile, NextflowWfVersionParamset
 from datasets import tasks
@@ -143,15 +143,22 @@ class MoveFilesToStorage(DatasetJob):
         identical md5 as registered raw file (i.e. no mzMLs).
         Since these are pre-dataset files, we need to overwrite this getfiles method'''
         dset = Dataset.objects.values('storage_loc', 'storageshare_id').get(pk=kwargs['dset_id'])
-        return StoredFile.objects.exclude(servershare_id=dset['storageshare_id'], path=dset['storage_loc']).filter(
-                rawfile__source_md5=F('md5'), rawfile_id__in=kwargs['rawfn_ids'], checked=True)
+        try:
+            StoredFileLoc.objects.exclude(servershare_id=dset['storageshare_id'],
+                path=dset['storage_loc']).filter(sfile__checked=True,
+                sfile__rawfile__source_md5=F('sfile__md5'), sfile__rawfile_id__in=kwargs['rawfn_ids'])
+        except Exception as e:
+            print(e)
+        return StoredFileLoc.objects.exclude(servershare_id=dset['storageshare_id'],
+                path=dset['storage_loc']).filter(sfile__checked=True,
+                sfile__rawfile__source_md5=F('sfile__md5'), sfile__rawfile_id__in=kwargs['rawfn_ids'])
 
     def check_error(self, **kwargs):
         dset = Dataset.objects.values('storage_loc', 'storageshare_id').get(pk=kwargs['dset_id'])
-        dset_files = self.getfiles_query(**kwargs).values('filename')
+        dset_files = self.getfiles_query(**kwargs).values('sfile__filename')
         # check if dset with name of file to be passed there already exists
         # (e.g. dset run name ends in .raw)
-        fpaths = [os.path.join(dset['storage_loc'], sf['filename']) for sf in dset_files]
+        fpaths = [os.path.join(dset['storage_loc'], sf['sfile__filename']) for sf in dset_files]
         err_ds = Dataset.objects.filter(storage_loc__in=fpaths,
                 storageshare_id=dset['storageshare_id'])
         if err_ds.exists():
@@ -160,7 +167,7 @@ class MoveFilesToStorage(DatasetJob):
                     f'actual dataset (id:{err_ds.pk}, path:{err_ds.storage_loc} on that path '
                     'Consider renaming the dataset.')
         split_loc = os.path.split(dset['storage_loc'])
-        if StoredFile.objects.filter(path=split_loc[0], filename=split_loc[1],
+        if StoredFileLoc.objects.filter(path=split_loc[0], sfile__filename=split_loc[1],
                 servershare_id=dset['storageshare_id']).exists():
             return (f'Cannot create dataset with path {dset["storage_loc"]} as there is an actual file '
                     'with that name there')
@@ -172,7 +179,7 @@ class MoveFilesToStorage(DatasetJob):
 #            return (f'Cannot create dataset with path {dset["storage_loc"]} as there is an actual file '
 #                    'with that name there')
         # check if already file in a dataset by that name:
-        if StoredFile.objects.filter(filename__in=[x['filename'] for x in dset_files],
+        if StoredFileLoc.objects.filter(sfile__filename__in=[x['sfile__filename'] for x in dset_files],
                 path=dset['storage_loc'], servershare_id=dset['storageshare_id']).exists():
             return (f'Cannot move files selected to dset {dset["storage_loc"]} as there is '
                     'already a file with that name there')
@@ -184,7 +191,7 @@ class MoveFilesToStorage(DatasetJob):
         for fn in self.getfiles_query(**kwargs):
             # TODO check for diff os.path.join(sevrershare, dst_path), not just
             # path? Only relevant in case of cross-share moves.
-            self.run_tasks.append(((fn.rawfile.name, fn.servershare.name, fn.path, dstpath, 
+            self.run_tasks.append(((fn.sfile.rawfile.name, fn.servershare.name, fn.path, dstpath, 
                 fn.id, settings.PRIMARY_STORAGESHARENAME), {}))
 
 

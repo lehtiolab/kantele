@@ -21,24 +21,28 @@ def get_host_upload_dst(web_dst):
 
 
 class RsyncFileTransfer(SingleFileJob):
+    # FIXME change name? All these are for web-to-storage, can maybe generalize that
+    # with the also-rsyncing move_dset_servershare, or with (later) any-mover like for analysis results
+    # Possibly dont generalize as this could check if 
     refname = 'rsync_transfer'
     task = tasks.rsync_transfer_file
 
     def check_error(self, **kwargs):
-        src_sf = self.getfiles_query(**kwargs)
-        if models.StoredFile.objects.exclude(pk=src_sf.pk).filter(filename=src_sf.filename,
-                path=src_sf.path, servershare_id=src_sf.servershare_id).exists():
-            return (f'Cannot rsync file {src_sf.pk} to location {src_sf.servershare.name} / '
-                    f'{src_sf.path} as another file with the same name is already there')
+        src_sfloc = self.getfiles_query(**kwargs)
+        if models.StoredFileLoc.objects.exclude(pk=src_sfloc.pk).filter(
+                sfile__filename=src_sfloc.sfile.filename, path=src_sfloc.path,
+                servershare=src_sfloc.servershare).exists():
+            return (f'Cannot rsync file {src_sfloc.pk} to location {src_sfloc.servershare.name} / '
+                    f'{src_sfloc.path} as another file with the same name is already there')
         else:
             return False
 
     def process(self, **kwargs):
-        sfile = self.getfiles_query(**kwargs)
-        dstpath = os.path.join(sfile.path, sfile.filename)
-        self.run_tasks.append(((sfile.id, get_host_upload_dst(kwargs['src_path']),
-            dstpath, sfile.servershare.name, sfile.filetype.is_folder,
-            sfile.filetype.stablefiles), {}))
+        sfloc = self.getfiles_query(**kwargs)
+        dstpath = os.path.join(sfloc.path, sfloc.sfile.filename)
+        self.run_tasks.append(((sfloc.sfile_id, get_host_upload_dst(kwargs['src_path']),
+            dstpath, sfloc.servershare.name, sfloc.sfile.filetype.is_folder,
+            sfloc.sfile.filetype.stablefiles), {}))
 
 
 class CreatePDCArchive(SingleFileJob):
@@ -113,9 +117,9 @@ class ClassifyMSRawFile(SingleFileJob):
     task = tasks.classify_msrawfile
 
     def process(self, **kwargs):
-        sfile = self.getfiles_query(**kwargs)
-        self.run_tasks.append(((kwargs['token'], sfile.id, sfile.filetype.name,
-            sfile.servershare.name, sfile.path, sfile.filename), {}))
+        sfloc = self.getfiles_query(**kwargs)
+        self.run_tasks.append(((kwargs['token'], sfloc.id, sfloc.sfile.filetype.name,
+            sfloc.servershare.name, sfloc.path, sfloc.sfile.filename), {}))
 
 
 class MoveSingleFile(SingleFileJob):
@@ -127,16 +131,17 @@ class MoveSingleFile(SingleFileJob):
 
     def check_error(self, **kwargs):
         '''Check for file name collisions'''
-        src_sf = self.getfiles_query(**kwargs)
+        src_sfloc = self.getfiles_query(**kwargs)
         if dstsharename := kwargs.get('dstsharename'):
             sshare = models.ServerShare.objects.filter(name=dstsharename).get()
         else:
-            sshare = src_sf.servershare
-        newfn = kwargs.get('newname', src_sf.filename)
+            sshare = src_sfloc.servershare
+        newfn = kwargs.get('newname', src_sfloc.sfile.filename)
         fullnewpath = os.path.join(kwargs['dst_path'], newfn)
-        if models.StoredFile.objects.filter(filename=newfn, path=kwargs['dst_path'],
+        if models.StoredFileLoc.objects.filter(sfile__filename=newfn, path=kwargs['dst_path'],
                 servershare=sshare, deleted=False, purged=False).exists():
-            return f'A file in path {kwargs["dst_path"]} with name {src_sf.filename} already exists. Please choose another name.'
+            return (f'A file in path {kwargs["dst_path"]} with name {src_sfloc.sfile.filename} '
+                    'already exists. Please choose another name.')
         elif dm.Dataset.objects.filter(storage_loc=fullnewpath, storageshare=sshare,
                 deleted=False, purged=False).exists():
             return f'A dataset with the same directory name as your new file location {fullnewpath} already exists'
@@ -144,11 +149,11 @@ class MoveSingleFile(SingleFileJob):
             return False
 
     def process(self, **kwargs):
-        sfile = self.getfiles_query(**kwargs)
+        sfloc = self.getfiles_query(**kwargs)
         taskkwargs = {x: kwargs[x] for x in ['newname'] if x in kwargs}
-        dstsharename = kwargs.get('dstsharename') or sfile.servershare.name
+        dstsharename = kwargs.get('dstsharename') or sfloc.servershare.name
         self.run_tasks.append(((
-            sfile.filename, sfile.servershare.name,
+            sfloc.sfile.filename, sfloc.servershare.name,
             sfile.path, kwargs['dst_path'], sfile.id, dstsharename), taskkwargs))
 
 

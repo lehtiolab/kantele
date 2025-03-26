@@ -5,7 +5,7 @@ from celery import states
 
 from kantele import settings
 from jobs.models import Task, Job, JobError
-from rawstatus.models import StoredFile
+from rawstatus.models import StoredFile, StoredFileLoc
 from datasets import models as dm
 
 
@@ -123,8 +123,8 @@ class SingleFileJob(BaseJob):
     def getfiles_query(self, **kwargs):
         # FIXME do .get and .select_related in jobs itself?
         # As in multifile job (PurgeFiles)
-        return StoredFile.objects.filter(pk=kwargs['sf_id']).select_related(
-                'servershare', 'rawfile').get()
+        return StoredFileLoc.objects.filter(pk=kwargs['sfloc_id']).select_related(
+                'servershare', 'sfile__rawfile').get()
 
     def get_sf_ids_jobrunner(self, **kwargs):
         return [self.getfiles_query(**kwargs).id]
@@ -132,7 +132,7 @@ class SingleFileJob(BaseJob):
     def get_dsids_jobrunner(self, **kwargs):
         ''''In case a single file has a dataset'''
         return [x['pk'] for x in dm.Dataset.objects.filter(deleted=False, purged=False,
-            datasetrawfile__rawfile__storedfile__id=kwargs['sf_id']).values('pk')]
+            datasetrawfile__rawfile__storedfile__storedfileloc__id=kwargs['sfloc_id']).values('pk')]
 
 
 class MultiFileJob(BaseJob):
@@ -159,7 +159,7 @@ class DatasetJob(BaseJob):
         removed files on dset path (will be moved to new folder before their move to tmp)'''
         dset = dm.Dataset.objects.get(pk=kwargs['dset_id'])
         dsfiles = StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=kwargs['dset_id'])
-        ds_ondisk = StoredFile.objects.filter(servershare=dset.storageshare, path=dset.storage_loc)
+        ds_ondisk = StoredFile.objects.filter(servershare=dset.storageshare, storedfileloc__path=dset.storage_loc)
         return [x.pk for x in dsfiles.union(ds_ondisk)]
 
     def getfiles_query(self, **kwargs):
@@ -172,7 +172,7 @@ class DatasetJob(BaseJob):
         # FIXME to avoid this particular issue, create_job could create the sfids instead of dset_id when being run.
         '''
         dset = dm.Dataset.objects.get(pk=kwargs['dset_id'])
-        return StoredFile.objects.filter(servershare=dset.storageshare, path=dset.storage_loc)
+        return StoredFile.objects.filter(servershare=dset.storageshare, storedfileloc__path=dset.storage_loc)
 
 
 class ProjectJob(BaseJob):

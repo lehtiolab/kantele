@@ -955,7 +955,7 @@ def store_analysis(request):
             upl_ft = rm.StoredFileType.objects.get(filetype=settings.ANALYSIS_FT_NAME)
             ana_prod = rm.Producer.objects.get(client_id=settings.ANALYSISCLIENT_APIKEY)
             upl_token = create_upload_token(upl_ft.pk, request.user.pk, ana_prod,
-                    rm.UploadToken.UploadFileType.ANALYSIS)
+                    rm.UploadFileType.ANALYSIS)
             exta = am.ExternalAnalysis.objects.create(analysis=analysis,
                     description=req['external_description'], last_token=upl_token)
         else:
@@ -1208,7 +1208,7 @@ def renew_token(request):
     analysis.externalanalysis.last_token.invalidate()
     new_token = create_upload_token(analysis.externalanalysis.last_token.filetype.pk,
             request.user.pk, analysis.externalanalysis.last_token.producer, 
-            rm.UploadToken.UploadFileType.ANALYSIS)
+            rm.UploadFileType.ANALYSIS)
     analysis.externalanalysis.last_token = new_token
     analysis.externalanalysis.save()
     host = settings.KANTELEHOST or request.build_absolute_uri('/')

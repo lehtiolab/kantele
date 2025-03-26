@@ -30,7 +30,7 @@ class AnalysisTest(BaseTest):
                     'path': '', 'checked': True})
         self.usedtoken, _ = rm.UploadToken.objects.update_or_create(user=self.user, token='usrffailtoken',
                 expired=False, producer=self.prod, filetype=self.uft,
-                uploadtype=rm.UploadToken.UploadFileType.USERFILE, defaults={
+                uploadtype=rm.UploadFileType.USERFILE, defaults={
                     'expires': timezone.now() + timedelta(1)})
         self.userfile, _ = rm.UserFile.objects.get_or_create(sfile=self.sfusr,
                 description='This is a userfile', upload=self.usedtoken)
@@ -564,7 +564,7 @@ class TestGetWorkflowVersionDetails(AnalysisTest):
                     'servershare': self.sstmp, 'path': '', 'checked': True})
         utoken_ft = rm.UploadToken.objects.create(user=self.user, token='token_ft', expired=False,
                 producer=self.prod, filetype=sfusr_ft.filetype, expires=timezone.now() + timedelta(1),
-                uploadtype=rm.UploadToken.UploadFileType.USERFILE)
+                uploadtype=rm.UploadFileType.USERFILE)
         userfile_ft = rm.UserFile.objects.create(sfile=sfusr_ft, description='This is a userfile',
                 upload=utoken_ft)
         resp = self.cl.get(self.url, data={'wfvid': self.nfwf.pk, 'dsids': f'{self.ds.pk}'})
