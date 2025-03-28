@@ -180,8 +180,9 @@ def load_base_analysis(request, wfversion_id, baseanid):
 
     # Select files (raw, mzml, refined) used in base analysis
     for dsid in dsets:
+        # FIXME
         dssfiles = rm.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dsid,
-                deleted=False, purged=False, checked=True)
+                storedfileloc__deleted=False, storedfileloc__purged=False, checked=True)
         dsrawfiles = dssfiles.filter(mzmlfile__isnull=True)
         dset_ftype = dsrawfiles.distinct('filetype')
         rawftype = dset_ftype.get().filetype.name
@@ -481,9 +482,9 @@ def get_datasets(request, wfversion_id):
                     dataset=dset).exclude(field__startswith='__')})
 
         # Get dataset files
-        dssfiles = rm.StoredFile.objects.select_related('rawfile__producer', 'servershare',
-                'filetype').filter(rawfile__datasetrawfile__dataset=dset,
-                        deleted=False, purged=False, checked=True)
+        dssfiles = rm.StoredFile.objects.select_related('rawfile__producer', 'filetype').filter(
+                rawfile__datasetrawfile__dataset=dset, storedfileloc__deleted=False,
+                storedfileloc__purged=False, checked=True)
         dsrawfiles = dssfiles.filter(mzmlfile__isnull=True)
 
         # For reporting in interface and checking
@@ -796,7 +797,7 @@ def store_analysis(request):
                     'sample annotations, please edit the dataset first')
         dsregfiles = rm.RawFile.objects.filter(datasetrawfile__dataset_id=dsid)
         dssfiles = rm.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dsid,
-                        deleted=False, purged=False, checked=True)
+                        storedfileloc__deleted=False, storedfileloc__purged=False, checked=True)
         dsrawfiles = dssfiles.filter(mzmlfile__isnull=True)
         nrrawfiles = dsrawfiles.count()
         if nrrawfiles < dsregfiles.count():
@@ -1278,7 +1279,8 @@ def purge_analysis(request):
     analysis.save()
     webshare = rm.ServerShare.objects.get(name=settings.WEBSHARENAME)
     # Delete files on web share here since the job tasks run on storage cannot do that
-    for webfile in rm.StoredFile.objects.filter(analysisresultfile__analysis__id=analysis.pk, servershare_id=webshare.pk):
+    for webfile in rm.StoredFile.objects.filter(analysisresultfile__analysis__id=analysis.pk,
+            storedfileloc__servershare_id=webshare.pk):
         fpath = os.path.join(settings.WEBSHARE, webfile.path, webfile.filename)
         os.unlink(fpath)
     sfiles = rm.StoredFile.objects.filter(analysisresultfile__analysis__id=analysis.pk)

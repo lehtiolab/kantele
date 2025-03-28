@@ -47,18 +47,18 @@ class TestRenamedProject(BaseJobTest):
             source_md5='abcdefgh', size=10, date=datetime.now(),
             claimed=True)
         dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=rf)
-        sf=rm.StoredFile.objects.create(rawfile=rf, filename=rf.name,
-            servershare=self.ssnewstore, path=self.ds.storage_loc, md5=rf.source_md5, checked=True,
-            filetype=sftype)
+        sf = rm.StoredFile.objects.create(rawfile=rf, filename=rf.name,
+                md5=rf.source_md5, checked=True, filetype=sftype)
+        sfloc = rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.ssnewstore, path=self.ds.storage_loc)
         resp = self.cl.post(self.url, content_type='application/json', data={
             'client_id': settings.STORAGECLIENT_APIKEY, 'task': self.taskid,
-            'proj_id': self.p1.pk, 'newname': self.p_newname, 'sf_ids': [sf.pk]})
+            'proj_id': self.p1.pk, 'newname': self.p_newname, 'sfloc_ids': [sfloc.pk]})
         self.assertEqual(resp.status_code, 200)
         newpath = os.path.join(self.p_newname, *self.ds.storage_loc.split(os.path.sep)[1:])
-        sf.refresh_from_db()
+        sfloc.refresh_from_db()
         self.ds.refresh_from_db()
         self.assertEqual(self.ds.storage_loc, newpath)
-        self.assertEqual(sf.path, newpath)
+        self.assertEqual(sfloc.path, newpath)
         self.task.refresh_from_db()
         self.assertEqual(self.task.state, cstates.SUCCESS)
 
@@ -98,7 +98,8 @@ class TestDownloadedFile(BaseJobTest):
         self.rf = rm.RawFile.objects.create(name=self.fn, producer=self.prod,
                 source_md5='testdownloaded', size=10, date=datetime.now(), claimed=True)
         self.sf = rm.StoredFile.objects.create(rawfile=self.rf, filename=self.rf.name,
-            servershare=self.sstmp, path='', md5=self.rf.source_md5, checked=False, filetype=self.ft)
+            md5=self.rf.source_md5, checked=False, filetype=self.ft)
+        rm.StoredFileLoc.objects.create(sfile=self.sf, servershare=self.sstmp, path='')
         self.fpath = f'{self.rf.pk}.{self.sf.filetype.filetype}'
 
     def test_wrong_client(self):
@@ -158,14 +159,15 @@ class TestUpdateStorageLocFile(BaseJobTest):
 
     def test_one_fnid(self):
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'client_id': settings.ANALYSISCLIENT_APIKEY, 'fn_id': self.oldsf.pk,
+                data={'client_id': settings.ANALYSISCLIENT_APIKEY, 'sfloc_id': self.oldsf.pk,
                     'dst_path': 'new_path', 'servershare': self.ssnewstore.name,
                     'task': self.taskid, 'newname': 'newfilename',
                     })
         self.assertEqual(resp.status_code, 200)
+        self.oldsss.refresh_from_db()
         self.oldsf.refresh_from_db()
-        self.assertEqual(self.oldsf.path, 'new_path')
-        self.assertEqual(self.oldsf.servershare, self.ssnewstore)
+        self.assertEqual(self.oldsss.path, 'new_path')
+        self.assertEqual(self.oldsss.servershare, self.ssnewstore)
         self.assertEqual(self.oldsf.filename, 'newfilename')
         self.task.refresh_from_db()
         self.assertEqual(self.task.state, 'SUCCESS')
@@ -174,20 +176,22 @@ class TestUpdateStorageLocFile(BaseJobTest):
         raw2 = rm.RawFile.objects.create(name='file2', producer=self.prod,
                 source_md5='r328j9dqhj32qh98ddh3982q',
                 size=100, date=timezone.now(), claimed=False)
-        sf2 = rm.StoredFile.objects.create(rawfile=raw2, filename=raw2.name, servershare=self.ssnewstore,
-                path='', md5=raw2.source_md5, filetype=self.ft)
-        newshare = rm.ServerShare.objects.create(name='newshare', server=self.newfserver, share='/')
+        sf2 = rm.StoredFile.objects.create(rawfile=raw2, filename=raw2.name,
+                md5=raw2.source_md5, filetype=self.ft)
+        sf2loc = rm.StoredFileLoc.objects.create(sfile=sf2, servershare=self.ssnewstore, path='')
+        newshare = rm.ServerShare.objects.create(name='newshare', server=self.newfserver, share='/',
+                max_security=1)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'client_id': settings.ANALYSISCLIENT_APIKEY, 'fn_ids': [self.oldsf.pk, sf2.pk],
+                data={'client_id': settings.ANALYSISCLIENT_APIKEY, 'sfloc_ids': [self.oldsf.pk, sf2.pk],
                     'dst_path': 'new_path', 'servershare': newshare.name, 'task': self.taskid,
                     'newname': 'newfilename',
                     })
         self.assertEqual(resp.status_code, 200)
-        self.oldsf.refresh_from_db()
-        self.assertEqual(self.oldsf.path, 'new_path')
-        self.assertEqual(self.oldsf.servershare, newshare)
-        sf2.refresh_from_db()
-        self.assertEqual(sf2.path, 'new_path')
-        self.assertEqual(sf2.servershare, newshare)
+        self.oldsss.refresh_from_db()
+        self.assertEqual(self.oldsss.path, 'new_path')
+        self.assertEqual(self.oldsss.servershare, newshare)
+        sf2loc.refresh_from_db()
+        self.assertEqual(sf2loc.path, 'new_path')
+        self.assertEqual(sf2loc.servershare, newshare)
         self.task.refresh_from_db()
         self.assertEqual(self.task.state, 'SUCCESS')

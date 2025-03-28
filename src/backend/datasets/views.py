@@ -407,8 +407,8 @@ def update_dataset(data, user_id):
             dtype, prefrac, hrrange_id)
     err_fpath, err_fname = os.path.split(new_storage_loc)
     prim_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
-    if new_storage_loc != dset.storage_loc and filemodels.StoredFile.objects.filter(
-            servershare=prim_share, path=err_fpath, filename=err_fname).exists():
+    if new_storage_loc != dset.storage_loc and filemodels.StoredFileLoc.objects.filter(
+            servershare=prim_share, path=err_fpath, sfile__filename=err_fname).exists():
         return JsonResponse({'error': 'There is already a file with that exact path '
             f'{new_storage_loc}'}, status=403)
     elif (new_storage_loc != dset.storage_loc and 
@@ -699,8 +699,8 @@ def save_new_dataset(data, project, experiment, runname, user_id):
     prim_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
     storloc = set_storage_location(project, experiment, runname, dtype, prefrac, hrrange_id)
     err_fpath, err_fname = os.path.split(storloc)
-    if filemodels.StoredFile.objects.filter(servershare=prim_share, path=err_fpath,
-            filename=err_fname).exists():
+    if filemodels.StoredFileLoc.objects.filter(servershare=prim_share, path=err_fpath,
+            sfile__filename=err_fname).exists():
         raise IntegrityError(f'There is already a file with that exact path {storloc}')
     dset = models.Dataset.objects.create(date=timezone.now(), runname_id=runname.id,
             storage_loc=storloc, storageshare=prim_share, datatype=dtype,

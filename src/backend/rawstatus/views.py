@@ -488,7 +488,7 @@ def classified_rawfile_treatment(request):
                 dstsharename=settings.PRIMARY_STORAGESHARENAME,
                 dst_path=os.path.join(settings.QC_STORAGE_DIR, sfloc.sfile.rawfile.producer.name))
         user_op = get_operator_user()
-        run_singlefile_qc(sfloc.sfile.rawfile, sfloc.sfile, user_op, dsmodels.AcquisistionMode[is_qc_acqtype])
+        run_singlefile_qc(sfloc.sfile.rawfile, sfloc, user_op, dsmodels.AcquisistionMode[is_qc_acqtype])
     elif dsid:
         # Backup also done 
         #process_new_nonqc_rawfile(sfn, dsid)
@@ -553,13 +553,13 @@ def process_file_confirmed_ready(rfn, sfn, upload, desc):
         if upload.uploadtype == UploadFileType.LIBRARY:
             LibraryFile.objects.create(sfile=sfn, description=desc)
             newname = f'libfile_{sfn.libraryfile.id}_{rfn.name}'
-            create_job('move_single_file', sf_id=sfn.id, dst_path=settings.LIBRARY_FILE_PATH,
+            create_job('move_single_file', sfloc_id=sfloc.id, dst_path=settings.LIBRARY_FILE_PATH,
                     newname=newname)
         elif upload.uploadtype == UploadFileType.USERFILE:
             UserFile.objects.create(sfile=sfn, description=desc, upload=upload)
             newname = f'userfile_{rfn.id}_{rfn.name}'
             # FIXME can we move a folder!?
-            create_job('move_single_file', sf_id=sfn.id, dst_path=settings.USERFILEDIR,
+            create_job('move_single_file', sfloc_id=sfloc.id, dst_path=settings.USERFILEDIR,
                     newname=newname)
         elif upload.uploadtype == UploadFileType.ANALYSIS:
             # TODO which analysis uploads go to Kantele? Skip any sens data
@@ -568,7 +568,7 @@ def process_file_confirmed_ready(rfn, sfn, upload, desc):
             # uploaded via sens track at times - maybe make that the only way?
             AnalysisResultFile.objects.create(sfile=sfn, analysis=upload.externalanalysis.analysis)
             # FIXME PDC is already done in transfer_file, so dont do twice
-        create_job('create_pdc_archive', sf_id=sfn.id, sfloc_id=sfloc.pk, isdir=sfn.filetype.is_folder)
+        create_job('create_pdc_archive', sfloc_id=sfloc.pk, isdir=sfn.filetype.is_folder)
     #if upload.archive_only:
     #    # This archive_only is for sens data but we should probably have a completely
     #    # different track for that TODO
@@ -732,7 +732,7 @@ def transfer_file(request):
     return JsonResponse({'fn_id': fn_id, 'state': 'ok'})
 
 
-def run_singlefile_qc(rawfile, storedfile, user_op, acqtype):
+def run_singlefile_qc(rawfile, sfloc, user_op, acqtype):
     """This method is only run for detecting new incoming QC files"""
     params = ['--instrument', rawfile.producer.msinstrument.instrumenttype.name,
             f'--{acqtype.name.lower()}']
@@ -745,7 +745,7 @@ def run_singlefile_qc(rawfile, storedfile, user_op, acqtype):
     trackpeps = [[x['peptide__pk'], x['peptide__sequence'], x['peptide__charge']] for x in
             dashmodels.PeptideInSet.objects.filter(peptideset=tps).values('peptide__pk',
             'peptide__sequence', 'peptide__charge')]
-    create_job('run_longit_qc_workflow', sfloc_id=storedfile.id, analysis_id=analysis.id,
+    create_job('run_longit_qc_workflow', sfloc_id=sfloc.id, analysis_id=analysis.id,
             qcrun_id=qcrun.pk, params=params, trackpeptides=trackpeps)
 
 
@@ -780,7 +780,8 @@ def rename_file(request):
         return JsonResponse({'error': 'Files of this type cannot be renamed'}, status=403)
     elif re.match('^[a-zA-Z_0-9\-]*$', newfilename) is None:
         return JsonResponse({'error': 'Illegal characteres in new file name'}, status=403)
-    job = create_job('rename_file', sf_id=sfile.id, newname=newfilename)
+    for sfloc in sfile.storedfileloc_set.filter(deleted=False, purged=False):
+        job = create_job('rename_file', sfloc_id=sfloc.id, newname=newfilename)
     if job['error']:
         return JsonResponse({'error': job['error']}, status=403)
     else:
@@ -927,7 +928,7 @@ def cleanup_old_files(request):
 
     if queue_job:
         for chunk in chunk_iter(all_old_mzmls, 500):
-            create_job('purge_files', sf_ids=[x.id for x in chunk])
+            create_job('purge_files', sfloc_ids=[x.id for x in chunk])
         return JsonResponse({'ok': True})
     else:
         # cannot aggregate Sum on UNION
@@ -1019,17 +1020,19 @@ def archive_file(request):
         return JsonResponse({'error': 'File does not exist'}, status=404)
     except KeyError:
         return JsonResponse({'error': 'Bad request'}, status=400)
-    if sfile.purged or sfile.deleted:
-        return JsonResponse({'error': 'File is currently marked as deleted, can not archive'}, status=403)
+    sfloc_q = StoredFileLoc.objects.filter(sfile=sfile, deleted=False, purged=False)
+    if not sfloc_q.exists():
+        return JsonResponse({'error': 'File is possibly deleted, can not archive'}, status=403)
     elif sfile.rawfile.claimed or hasattr(sfile.rawfile, 'datasetrawfile'):
         return JsonResponse({'error': 'File is in a dataset, please archive entire set or remove it from dataset first'}, status=403)
     elif hasattr(sfile, 'pdcbackedupfile') and sfile.pdcbackedupfile.success == True and sfile.pdcbackedupfile.deleted == False:
         return JsonResponse({'error': 'File is already archived'}, status=403)
     elif hasattr(sfile, 'mzmlfile'):
         return JsonResponse({'error': 'Derived mzML files are not archived, they can be regenerated from RAW data'}, status=403)
-    create_job('create_pdc_archive', sf_id=sfile.pk, isdir=sfile.filetype.is_folder)
+    sfloc = sfloc_q.first()
+    create_job('create_pdc_archive', sfloc_id=sfloc.pk, isdir=sfile.filetype.is_folder)
     # File is set to deleted,purged=True,True in the post-job-view for purge
-    create_job('purge_files', sf_ids=[sfile.pk], need_archive=True)
+    create_job('purge_files', sfloc_ids=[sfloc.pk], need_archive=True)
     return JsonResponse({'state': 'ok'})
 
 

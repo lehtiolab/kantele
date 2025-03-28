@@ -26,7 +26,7 @@ class RenameProject(ProjectJob):
         those confirmed to be in correct location'''
         dsets = Dataset.objects.filter(runname__experiment__project_id=kwargs['proj_id'],
                 deleted=False, purged=False)
-        return StoredFile.objects.filter(deleted=False, purged=False,
+        return StoredFileLoc.objects.filter(deleted=False, purged=False,
                 servershare__in=[x.storageshare for x in dsets.distinct('storageshare')],
                 path__in=[x.storage_loc for x in dsets.distinct('storage_loc')])
 
@@ -88,7 +88,7 @@ class MoveDatasetServershare(DatasetJob):
 
     def check_error(self, **kwargs):
         dset = Dataset.objects.values('pk', 'storage_loc').get(pk=kwargs['dset_id'])
-        sfs = self.getfiles_query(**kwargs).values('path', 'servershare__name', 'filename', 'pk')
+        sfs = self.getfiles_query(**kwargs).values('path', 'servershare__name', 'sfile__filename', 'pk')
         if sfs.count() == 0:
             # Do not error on empty dataset, just skip
             return
@@ -106,11 +106,11 @@ class MoveDatasetServershare(DatasetJob):
         if sharename == kwargs['dstsharename']:
             return f'Cannot move dataset {dset["pk"]} to same share as its files are on, using this job'
         split_loc = os.path.split(dset['storage_loc'])
-        if StoredFile.objects.filter(path=split_loc[0], filename=split_loc[1],
+        if StoredFileLoc.objects.filter(path=split_loc[0], sfile__filename=split_loc[1],
                 servershare__name=kwargs['dstsharename']).exists():
             return (f'Cannot move dataset {dset["pk"]} to {dset["storage_path"]} as there is already '
                     'a file by that name there')
-        if StoredFile.objects.exclude(pk__in=[x['pk'] for x in sfs]).filter(
+        if StoredFileLoc.objects.exclude(pk__in=[x['pk'] for x in sfs]).filter(
                 path=dset['storage_loc'], servershare__name=kwargs['dstsharename']).exists():
             return (f'Cannot move dataset {dset["pk"]} to {dset["storage_path"]} as there is already '
                     'file(s) stored in that exact directory. Please resolve first.')
@@ -119,11 +119,11 @@ class MoveDatasetServershare(DatasetJob):
     def process(self, **kwargs):
         dset = Dataset.objects.values('storage_loc').get(pk=kwargs['dset_id'])
         sfs = self.getfiles_query(**kwargs).values('path', 'servershare__name', 
-                'servershare__share', 'servershare__server__fqdn', 'filename', 'pk')
+                'servershare__share', 'servershare__server__fqdn', 'sfile__filename', 'pk')
         if sfs.count() == 0:
             # Do not error on empty dataset, just skip
             return
-        rsync_sf = sfs.filter(deleted=False, purged=False, checked=True)
+        rsync_sf = sfs.filter(deleted=False, purged=False, sfile__checked=True)
         firstsf = sfs.first()
         sharename = firstsf['servershare__name']
         src_controller_url = firstsf['servershare__server__fqdn']
@@ -131,7 +131,7 @@ class MoveDatasetServershare(DatasetJob):
         dst_controller_url = ServerShare.objects.get(name=kwargs['dstsharename']).server.fqdn
         self.run_tasks.append(((kwargs['dset_id'], sharename, dset['storage_loc'],
             src_controller_url, src_controller_share, dst_controller_url,
-            kwargs['dstsharename'], [x['filename'] for x in rsync_sf], [x['pk'] for x in sfs]), {}))
+            kwargs['dstsharename'], [x['sfile__filename'] for x in rsync_sf], [x['pk'] for x in sfs]), {}))
 
 
 class MoveFilesToStorage(DatasetJob):
@@ -203,25 +203,25 @@ class MoveFilesStorageTmp(DatasetJob):
     def getfiles_query(self, **kwargs):
         '''Select all files which are in dataset path, but not the purged ones, and
         filter out passed rawfiles'''
-        return super().getfiles_query(**kwargs).select_related('filetype').filter(purged=False,
-            rawfile_id__in=kwargs['fn_ids'])
+        return super().getfiles_query(**kwargs).select_related('sfile__filetype').filter(purged=False,
+            sfile__rawfile_id__in=kwargs['fn_ids'])
 
     def check_error(self, **kwargs):
-        sfs = self.getfiles_query(**kwargs).values('pk', 'filename')
-        if StoredFile.objects.exclude(pk__in=[x['pk'] for x in sfs]).filter(
+        sfs = self.getfiles_query(**kwargs).values('pk', 'sfile__filename')
+        if StoredFileLoc.objects.exclude(pk__in=[x['pk'] for x in sfs]).filter(
                 servershare__name=settings.TMPSHARENAME, path='',
-                filename__in=[x['filename'] for x in sfs]):
+                sfile__filename__in=[x['sfile__filename'] for x in sfs]):
             return (f'Cannot move files from dataset {kwargs["dset_id"]} to tmp storage, as there '
                     'exist file(s) with the same name there. Please resolve this before retrying')
         return False
 
     def process(self, **kwargs):
-        for fn in self.getfiles_query(**kwargs).select_related('mzmlfile', 'servershare'):
-            if hasattr(fn, 'mzmlfile'):
-                fullpath = os.path.join(fn.path, fn.filename)
+        for fn in self.getfiles_query(**kwargs).select_related('sfile__mzmlfile', 'servershare'):
+            if hasattr(fn.sfile, 'mzmlfile'):
+                fullpath = os.path.join(fn.path, fn.sfile.filename)
                 self.run_tasks.append(((fn.servershare.name, fullpath, fn.id), {}, filetasks.delete_file))
             else:
-                self.run_tasks.append(((fn.servershare.name, fn.filename, fn.path, fn.id), {}, tasks.move_stored_file_tmp))
+                self.run_tasks.append(((fn.servershare.name, fn.sfile.filename, fn.path, fn.id), {}, tasks.move_stored_file_tmp))
 
     def queue_tasks(self):
         for task in self.run_tasks:
@@ -238,7 +238,7 @@ class ConvertDatasetMzml(DatasetJob):
     def getfiles_query(self, **kwargs):
         '''Return raw files only (from dset path)'''
         return super().getfiles_query(**kwargs).exclude(mzmlfile__isnull=False).select_related(
-                'servershare', 'rawfile__datasetrawfile__dataset', 'filetype')
+                'servershare', 'rawfile__datasetrawfile__dataset', 'sfile__filetype')
 
     def process(self, **kwargs):
         dset = Dataset.objects.get(pk=kwargs['dset_id'])
@@ -247,7 +247,7 @@ class ConvertDatasetMzml(DatasetJob):
         nf_raws = []
         runpath = f'{dset.id}_convert_mzml_{kwargs["timestamp"]}'
         for fn in self.getfiles_query(**kwargs):
-            mzmlfilename = os.path.splitext(fn.filename)[0] + '.mzML'
+            mzmlfilename = os.path.splitext(fn.sfile.filename)[0] + '.mzML'
             mzsf = get_or_create_mzmlentry(fn, pwiz=pwiz, refined=False,
                     servershare_id=res_share.pk, path=runpath, mzmlfilename=mzmlfilename)
             if mzsf.checked and not mzsf.purged:
@@ -298,13 +298,13 @@ class DeleteActiveDataset(DatasetJob):
     task = filetasks.delete_file
 
     def process(self, **kwargs):
-        for fn in self.getfiles_query(**kwargs).select_related('filetype').filter(purged=False):
-            fullpath = os.path.join(fn.path, fn.filename)
-            print('Purging {} from dataset {}'.format(fullpath, kwargs['dset_id']))
-            if hasattr(fn, 'mzmlfile'):
+        for fn in self.getfiles_query(**kwargs).select_related('sfile__filetype').filter(purged=False):
+            fullpath = os.path.join(fn.path, fn.sfile.filename)
+            print(f'Purging {fullpath} from dataset {kwargs["dset_id"]}')
+            if hasattr(fn.sfile, 'mzmlfile'):
                 is_folder = False
             else:
-                is_folder = fn.filetype.is_folder
+                is_folder = fn.sfile.filetype.is_folder
             self.run_tasks.append(((fn.servershare.name, fullpath, fn.id, is_folder), {}))
 
 
@@ -314,11 +314,11 @@ class BackupPDCDataset(DatasetJob):
     task = filetasks.pdc_archive
     
     def process(self, **kwargs):
-        for sfile in self.getfiles_query(**kwargs).exclude(mzmlfile__isnull=False).exclude(
+        for fn in self.getfiles_query(**kwargs).exclude(mzmlfile__isnull=False).exclude(
                 pdcbackedupfile__success=True, pdcbackedupfile__deleted=False).filter(
                         rawfile__datasetrawfile__dataset_id=kwargs['dset_id']):
-            isdir = hasattr(sfile.rawfile.producer, 'msinstrument') and sfile.filetype.is_folder
-            self.run_tasks.append((rsjobs.upload_file_pdc_runtask(sfile, isdir=isdir), {}))
+            isdir = hasattr(fn.sfile.rawfile.producer, 'msinstrument') and fn.sfile.filetype.is_folder
+            self.run_tasks.append((rsjobs.upload_file_pdc_runtask(fn, isdir=isdir), {}))
 
 
 class ReactivateDeletedDataset(DatasetJob):

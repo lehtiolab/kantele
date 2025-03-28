@@ -716,6 +716,7 @@ class TransferStateTest(BaseFilesTest):
 
     def setUp(self):
         super().setUp()
+        self.primshare = rm.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
         self.trfraw = rm.RawFile.objects.create(name='filetrf', producer=self.prod, source_md5='defghi123',
                 size=100, date=timezone.now(), claimed=False)
         self.doneraw = rm.RawFile.objects.create(name='filedone', producer=self.prod, source_md5='jklmnop123',
@@ -736,7 +737,7 @@ class TransferStateTest(BaseFilesTest):
                 servershare=self.sstmp, path='')
         # ft2 = rm.StoredFileType.objects.create(name='testft2', filetype='tst')
         # FIXME multisf with two diff filenames shouldnt be a problem right?
-        multisf2 = rm.StoredFile.objects.create(rawfile=self.multifileraw,
+        self.multisf2 = rm.StoredFile.objects.create(rawfile=self.multifileraw,
                 filename=f'{self.multifileraw.name}.mzML', md5='', filetype=self.ft)
         self.multisss2 = rm.StoredFileLoc.objects.create(sfile=self.multisf2,
                 servershare=self.sstmp, path='')
@@ -758,8 +759,9 @@ class TransferStateTest(BaseFilesTest):
                 producer=self.prod, source_md5='test_trfstate_libfile',
                 size=100, claimed=False, date=timezone.now())
         sflib = rm.StoredFile.objects.create(rawfile=libraw, md5=libraw.source_md5,
-                filetype=self.ft, checked=True, filename=libraw.name,
-                    servershare=self.sstmp, path='')
+                filetype=self.ft, checked=True, filename=libraw.name)
+        sfloc = rm.StoredFileLoc.objects.create(sfile=sflib, servershare=self.primshare,
+                path=settings.LIBRARY_FILE_PATH)
         libq = am.LibraryFile.objects.filter(sfile=sflib, description='This is a libfile')
         self.assertFalse(libq.exists())
         libtoken = rm.UploadToken.objects.create(user=self.user, token='libtoken123',
@@ -772,10 +774,10 @@ class TransferStateTest(BaseFilesTest):
         self.assertEqual(rj['transferstate'], 'done')
         self.assertTrue(libq.exists())
         pdcjobs = jm.Job.objects.filter(funcname='create_pdc_archive', kwargs={
-            'sf_id': sflib.pk, 'isdir': sflib.filetype.is_folder})
+            'sfloc_id': sflib.pk, 'isdir': sflib.filetype.is_folder})
         self.assertEqual(pdcjobs.count(), 1)
         lf = libq.get()
-        jobs = jm.Job.objects.filter(funcname='move_single_file', kwargs={'sf_id': sflib.pk,
+        jobs = jm.Job.objects.filter(funcname='move_single_file', kwargs={'sfloc_id': sfloc.pk,
             'dst_path': settings.LIBRARY_FILE_PATH,
             'newname': f'libfile_{lf.pk}_{sflib.filename}'})
         self.assertEqual(jobs.count(), 1)
@@ -786,8 +788,9 @@ class TransferStateTest(BaseFilesTest):
         # Create userfile during upload
         usrfraw = rm.RawFile.objects.create(name='usrfiledone', producer=self.prod,
                 source_md5='newusrfmd5', size=100, claimed=True, date=timezone.now())
-        sfusr = rm.StoredFile.objects.create(rawfile=usrfraw, md5=usrfraw.source_md5, filetype=self.uft,
-                filename=usrfraw.name, servershare=self.sstmp, path='', checked=True)
+        sfusr = rm.StoredFile.objects.create(rawfile=usrfraw, md5=usrfraw.source_md5,
+                filetype=self.uft, filename=usrfraw.name, checked=True)
+        sfloc = rm.StoredFileLoc.objects.create(sfile=sfusr, servershare=self.primshare, path=settings.USERFILEDIR)
         usertoken = rm.UploadToken.objects.create(user=self.user, token='usrffailtoken',
                 expired=False, producer=self.prod, filetype=self.uft,
                 uploadtype=rm.UploadFileType.USERFILE, 
@@ -801,10 +804,10 @@ class TransferStateTest(BaseFilesTest):
         self.assertTrue(ufq.exists())
         self.assertEqual(rj['transferstate'], 'done')
         pdcjobs = jm.Job.objects.filter(funcname='create_pdc_archive', kwargs={
-            'sf_id': sfusr.pk, 'isdir': sfusr.filetype.is_folder})
+            'sfloc_id': sfloc.pk, 'isdir': sfusr.filetype.is_folder})
         self.assertEqual(pdcjobs.count(), 1)
         userfile = ufq.get()
-        jobs = jm.Job.objects.filter(funcname='move_single_file', kwargs={'sf_id': sfusr.pk,
+        jobs = jm.Job.objects.filter(funcname='move_single_file', kwargs={'sfloc_id': sfloc.pk,
             'dst_path': settings.USERFILEDIR,
             'newname': f'userfile_{usrfraw.pk}_{sfusr.filename}'})
         self.assertEqual(jobs.count(), 1)
@@ -1028,9 +1031,9 @@ class TestFileTransfer(BaseFilesTest):
         # Test trying to upload file with same name/path but diff MD5
         other_raw = rm.RawFile.objects.create(name=self.registered_raw.name, producer=self.prod,
                 source_md5='fake_existing_md5', size=100, date=timezone.now(), claimed=False)
-        rm.StoredFile.objects.create(rawfile=other_raw, filetype=self.ft,
-                md5=other_raw.source_md5, servershare=self.sstmp, path=settings.TMPPATH,
-                filename=other_raw.name)
+        sf = rm.StoredFile.objects.create(rawfile=other_raw, filetype=self.ft,
+                md5=other_raw.source_md5, filename=other_raw.name)
+        rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.sstmp, path=settings.TMPPATH)
         resp, upload_content = self.do_transfer_file()
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(resp.json(), {'error': 'Another file in the system has the same name '
@@ -1084,22 +1087,23 @@ class TestArchiveFile(BaseFilesTest):
         self.assertEqual(resp.json()['error'], 'File is already archived')
 
     def test_deleted_file(self):
-        sfile1 = rm.StoredFile.objects.create(rawfile=self.registered_raw, filename=self.registered_raw.name, servershare_id=self.sstmp.id,
-                path='', md5='deletedmd5', filetype_id=self.ft.id,
-                deleted=True)
+        sfile1 = rm.StoredFile.objects.create(rawfile=self.registered_raw,
+                filename=self.registered_raw.name, md5='deletedmd5', filetype_id=self.ft.id)
+        rm.StoredFileLoc.objects.create(sfile=sfile1, servershare_id=self.sstmp.id, path='', deleted=True)
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': sfile1.pk})
         self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json()['error'], 'File is currently marked as deleted, can not archive')
+        self.assertEqual(resp.json()['error'], 'File is possibly deleted, can not archive')
         # purged file to also test the check for it. Unrealistic to have it deleted but
         # not purged obviously, as jobrunner shouldnt trigger that - except for when there is a delete job
         # which is deleted before running (no post-job purge set), which is bad!
         sfile2 = rm.StoredFile.objects.create(rawfile=self.registered_raw,
                 filename=f'{self.registered_raw.name}_purged', 
-                servershare_id=self.sstmp.id, path='', md5='deletedmd5_2',
-                filetype_id=self.ft.id, deleted=False, purged=True)
+                md5='deletedmd5_2', filetype_id=self.ft.id)
+        rm.StoredFileLoc.objects.create(sfile=sfile2, deleted=False, purged=True,
+                servershare_id=self.sstmp.id, path='')
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': sfile2.pk})
         self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json()['error'], 'File is currently marked as deleted, can not archive')
+        self.assertEqual(resp.json()['error'], 'File is possibly deleted, can not archive')
 
     def test_mzmlfile(self):
         am.MzmlFile.objects.create(sfile=self.sfile, pwiz=self.pwiz)
@@ -1207,7 +1211,7 @@ class TestPurgeFilesJob(ProcessJobTest):
     jobclass = rjobs.PurgeFiles
 
     def test_fns(self):
-        kwargs = {'sf_ids': [self.f3sf.pk, self.oldsf.pk]}
+        kwargs = {'sfloc_ids': [self.f3sss.pk, self.oldsss.pk]}
         self.job.process(**kwargs)
         exp_t = [
                 ((self.f3sss.servershare.name, os.path.join(self.f3sss.path, self.f3sf.filename),
@@ -1220,7 +1224,7 @@ class TestPurgeFilesJob(ProcessJobTest):
     def test_is_dir(self):
         self.ft.is_folder = True
         self.ft.save()
-        kwargs = {'sf_ids': [self.f3sf.pk, self.f3sfmz.pk]}
+        kwargs = {'sfloc_ids': [self.f3sss.pk, self.f3mzsss.pk]}
         self.job.process(**kwargs)
         exp_t = [
                 ((self.f3sss.servershare.name, os.path.join(self.f3sss.path, self.f3sf.filename),
@@ -1235,8 +1239,8 @@ class TestMoveSingleFile(ProcessJobTest):
     jobclass = rjobs.MoveSingleFile
 
     def test_mv_fn(self):
-        newpath = os.path.split(self.f3sf.path)[0]
-        kwargs = {'sf_id': self.f3sf.pk, 'dst_path': newpath}
+        newpath = os.path.split(self.f3sss.path)[0]
+        kwargs = {'sfloc_id': self.f3sss.pk, 'dst_path': newpath}
         self.assertEqual(self.job.check_error(**kwargs), False)
         self.job.process(**kwargs)
         exp_t = [((self.f3sf.filename, self.f3sss.servershare.name, self.f3sss.path, newpath,
@@ -1248,9 +1252,11 @@ class TestMoveSingleFile(ProcessJobTest):
         oldraw = rm.RawFile.objects.create(name=self.f3sf.filename, producer=self.prod,
                 source_md5='rename_oldraw_fakemd5', size=10, date=timezone.now(), claimed=True)
         sf = rm.StoredFile.objects.create(rawfile=oldraw, filename=self.f3sf.filename, md5=oldraw.source_md5,
-                filetype=self.ft, servershare=self.f3sss.servershare, path='oldpath', checked=True)
+                filetype=self.ft, checked=True)
+        sfloc = rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.f3sss.servershare,
+                path='oldpath')
         newpath = os.path.split(self.f3path)
-        kwargs = {'sf_id': sf.pk, 'dst_path': self.f3sss.path}
+        kwargs = {'sfloc_id': sfloc.pk, 'dst_path': self.f3sss.path}
         self.assertIn('A file in path', self.job.check_error(**kwargs))
         self.assertIn('already exists. Please choose another', self.job.check_error(**kwargs))
 
@@ -1261,7 +1267,7 @@ class TestMoveSingleFile(ProcessJobTest):
                 datatype=self.dtype, storageshare=self.ssnewstore, storage_loc=storloc,
                 securityclass=1)
         newpath, newname = os.path.split(storloc)
-        kwargs = {'sf_id': sf.pk, 'dst_path': newpath, 'newname': newname}
+        kwargs = {'sfloc_id': sfloc.pk, 'dst_path': newpath, 'newname': newname}
         self.assertIn('A dataset with the same directory name as your new', self.job.check_error(**kwargs))
 
 
@@ -1285,7 +1291,7 @@ class TestRenameFile(BaseIntegrationTest):
         self.f3sf.refresh_from_db()
         self.assertEqual(self.f3sf.filename, oldfn)
         job = jm.Job.objects.last()
-        self.assertEqual(job.kwargs, kwargs_postdata)
+        self.assertEqual(job.kwargs, {'sfloc_id': self.f3sss.pk, 'newname': newname})
         # Now run job
         self.run_job()
         job.refresh_from_db()
@@ -1305,7 +1311,8 @@ class TestRenameFile(BaseIntegrationTest):
         oldraw = rm.RawFile.objects.create(name=oldfn, producer=self.prod,
                 source_md5='rename_oldraw_fakemd5', size=10, date=timezone.now(), claimed=True)
         sf = rm.StoredFile.objects.create(rawfile=oldraw, filename=oldfn, md5=oldraw.source_md5,
-                filetype=self.ft, servershare=self.f3sss.servershare, path=self.f3sss.path, checked=True)
+                filetype=self.ft, checked=True)
+        sfloc = rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.f3sss.servershare, path=self.f3sss.path)
         # Try with no file ownership 
         resp = self.post_json(data={'sf_id': sf.pk, 'newname': self.f3sf.filename})
         self.assertEqual(resp.status_code, 403)
@@ -1327,7 +1334,7 @@ class TestDeleteFile(BaseIntegrationTest):
     jobname = 'purge_files'
 
     def test_dir(self):
-        kwargs = {'sf_ids': [self.f3sf.pk]}
+        kwargs = {'sfloc_ids': [self.f3sss.pk]}
         file_path = os.path.join(self.f3path, self.f3sf.filename)
         self.assertTrue(os.path.exists(file_path))
         self.assertTrue(os.path.isdir(file_path))
@@ -1338,31 +1345,32 @@ class TestDeleteFile(BaseIntegrationTest):
         task = job.task_set.get()
         self.assertEqual(task.state, states.SUCCESS)
         self.assertFalse(os.path.exists(file_path))
-        self.f3sf.refresh_from_db()
-        self.assertTrue(self.f3sf.deleted)
-        self.assertTrue(self.f3sf.purged)
+        self.f3sss.refresh_from_db()
+        self.assertTrue(self.f3sss.deleted)
+        self.assertTrue(self.f3sss.purged)
 
     def test_file(self):
-        self.f3sf.path = os.path.join(self.f3sf.path, self.f3sf.filename)
+        self.f3sss.path = os.path.join(self.f3sss.path, self.f3sf.filename)
+        self.f3sss.save()
         self.f3sf.filename = 'analysis.tdf'
         self.f3sf.save()
         self.ft.is_folder = False
         self.ft.save()
-        file_path = os.path.join(self.f3sf.path, self.f3sf.filename)
+        file_path = os.path.join(self.f3sss.path, self.f3sf.filename)
         file_path = os.path.join(settings.SHAREMAP[self.ssnewstore.name], file_path)
         self.assertTrue(os.path.exists(file_path))
         self.assertFalse(os.path.isdir(file_path))
 
-        kwargs = {'sf_ids': [self.f3sf.pk]}
+        kwargs = {'sfloc_ids': [self.f3sf.pk]}
         job = jm.Job.objects.create(funcname=self.jobname, kwargs=kwargs, timestamp=timezone.now(),
                 state=jj.Jobstates.PENDING)
         self.run_job()
         task = job.task_set.get()
         self.assertEqual(task.state, states.SUCCESS)
         self.assertFalse(os.path.exists(file_path))
-        self.f3sf.refresh_from_db()
-        self.assertTrue(self.f3sf.deleted)
-        self.assertTrue(self.f3sf.purged)
+        self.f3sss.refresh_from_db()
+        self.assertTrue(self.f3sss.deleted)
+        self.assertTrue(self.f3sss.purged)
 
 
     def test_no_file(self):
@@ -1375,49 +1383,50 @@ class TestDeleteFile(BaseIntegrationTest):
         badraw = rm.RawFile.objects.create(name=badfn, producer=self.prod,
                 source_md5='badraw_fakemd5', size=10, date=timezone.now(), claimed=True)
         badsf = rm.StoredFile.objects.create(rawfile=badraw, filename=badfn,
-                    md5=badraw.source_md5, filetype=self.ft, servershare=self.ssnewstore,
-                    path=self.storloc, checked=True)
-        file_path = os.path.join(badsf.path, badsf.filename)
+                    md5=badraw.source_md5, filetype=self.ft, checked=True)
+        badloc = rm.StoredFileLoc.objects.create(sfile=badsf, servershare=self.ssnewstore, path=self.storloc)
+        file_path = os.path.join(badloc.path, badsf.filename)
         self.assertFalse(os.path.exists(file_path))
 
-        kwargs = {'sf_ids': [badsf.pk]}
+        kwargs = {'sfloc_ids': [badloc.pk]}
         job = jm.Job.objects.create(funcname=self.jobname, kwargs=kwargs, timestamp=timezone.now(),
                 state=jj.Jobstates.PENDING)
         self.run_job()
         self.assertEqual(job.task_set.get().state, states.SUCCESS)
-        badsf.refresh_from_db()
-        self.assertTrue(badsf.deleted)
-        self.assertTrue(badsf.purged)
+        badloc.refresh_from_db()
+        self.assertTrue(badloc.deleted)
+        self.assertTrue(badloc.purged)
 
     def test_fail_expect_file(self):
         self.ft.is_folder = False
         self.ft.save()
-        kwargs = {'sf_ids': [self.f3sf.pk]}
+        kwargs = {'sfloc_ids': [self.f3sf.pk]}
         job = jm.Job.objects.create(funcname=self.jobname, kwargs=kwargs, timestamp=timezone.now(),
                 state=jj.Jobstates.PENDING)
         self.run_job()
         task = job.task_set.get()
         self.assertEqual(task.state, states.FAILURE)
-        path_noshare = os.path.join(self.f3sf.path, self.f3sf.filename)
+        path_noshare = os.path.join(self.f3sss.path, self.f3sf.filename)
         full_path = os.path.join(settings.SHAREMAP[self.ssnewstore.name], path_noshare)
         msg = (f'When trying to delete file {path_noshare}, expected a file, but encountered '
                 'a directory')
         self.assertEqual(task.taskerror.message, msg)
         self.assertTrue(os.path.exists(full_path))
-        self.f3sf.refresh_from_db()
-        self.assertFalse(self.f3sf.deleted)
-        self.assertFalse(self.f3sf.purged)
+        self.f3sss.refresh_from_db()
+        self.assertFalse(self.f3sss.deleted)
+        self.assertFalse(self.f3sss.purged)
 
     def test_fail_expect_dir(self):
-        self.f3sf.path = os.path.join(self.f3sf.path, self.f3sf.filename)
+        self.f3sss.path = os.path.join(self.f3sss.path, self.f3sf.filename)
+        self.f3sss.save()
         self.f3sf.filename = 'analysis.tdf'
         self.f3sf.save()
-        path_noshare = os.path.join(self.f3sf.path, self.f3sf.filename)
+        path_noshare = os.path.join(self.f3sss.path, self.f3sf.filename)
         file_path = os.path.join(settings.SHAREMAP[self.ssnewstore.name], path_noshare)
         self.assertTrue(os.path.exists(file_path))
         self.assertFalse(os.path.isdir(file_path))          
 
-        kwargs = {'sf_ids': [self.f3sf.pk]}
+        kwargs = {'sfloc_ids': [self.f3sss.pk]}
         job = jm.Job.objects.create(funcname=self.jobname, kwargs=kwargs, timestamp=timezone.now(),
                 state=jj.Jobstates.PENDING)
         self.run_job()
@@ -1427,9 +1436,9 @@ class TestDeleteFile(BaseIntegrationTest):
                 'a file')
         self.assertEqual(task.taskerror.message, msg)
         self.assertTrue(os.path.exists(file_path))
-        self.f3sf.refresh_from_db()
-        self.assertFalse(self.f3sf.deleted)
-        self.assertFalse(self.f3sf.purged)
+        self.f3sss.refresh_from_db()
+        self.assertFalse(self.f3sss.deleted)
+        self.assertFalse(self.f3sss.purged)
 
 
 #class TestDeleteDataset(BaseIntegrationTest):

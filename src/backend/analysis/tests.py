@@ -24,16 +24,14 @@ class AnalysisTest(BaseTest):
         self.ds.save()
         self.usrfraw = rm.RawFile.objects.create(name='usrfiledone', producer=self.prod, 
                 source_md5='usrfmd5', size=100, claimed=True, date=timezone.now())
-        self.sfusr, _ = rm.StoredFile.objects.update_or_create(rawfile=self.usrfraw,
-                md5=self.usrfraw.source_md5, filetype=self.uft,
-                defaults={'filename': self.usrfraw.name, 'servershare': self.sstmp,
-                    'path': '', 'checked': True})
-        self.usedtoken, _ = rm.UploadToken.objects.update_or_create(user=self.user, token='usrffailtoken',
+        self.sfusr = rm.StoredFile.objects.create(rawfile=self.usrfraw, md5=self.usrfraw.source_md5,
+                filetype=self.uft, filename=self.usrfraw.name, checked=True)
+        rm.StoredFileLoc.objects.create(sfile=self.sfusr, servershare=self.sstmp, path='')
+        self.usedtoken = rm.UploadToken.objects.create(user=self.user, token='usrffailtoken',
                 expired=False, producer=self.prod, filetype=self.uft,
-                uploadtype=rm.UploadFileType.USERFILE, defaults={
-                    'expires': timezone.now() + timedelta(1)})
-        self.userfile, _ = rm.UserFile.objects.get_or_create(sfile=self.sfusr,
-                description='This is a userfile', upload=self.usedtoken)
+                uploadtype=rm.UploadFileType.USERFILE, expires=timezone.now() + timedelta(1))
+        self.userfile = rm.UserFile.objects.create(sfile=self.sfusr, description='This is a userfile',
+            upload=self.usedtoken)
 
         self.pset = am.ParameterSet.objects.create(name='ps1')
         self.param1 = am.Param.objects.create(name='a flag', nfparam='--flag', ptype=am.Param.PTypes.FLAG, help='flag help')
@@ -50,9 +48,9 @@ class AnalysisTest(BaseTest):
         self.pfn2 = am.FileParam.objects.create(name='fp1', nfparam='--fp2', filetype=self.ft2, help='helppi')
         self.txtraw = rm.RawFile.objects.create(name='txtfn', producer=self.anaprod,
                 source_md5='txtraw_fakemd5', size=1234, date=timezone.now(), claimed=False)
-        self.txtsf = rm.StoredFile.objects.create(rawfile=self.txtraw,
-                md5=self.txtraw.source_md5, filename=self.txtraw.name, servershare=self.sstmp,
-                path='', checked=True, filetype=self.ft2)
+        self.txtsf = rm.StoredFile.objects.create(rawfile=self.txtraw, md5=self.txtraw.source_md5,
+                filename=self.txtraw.name, checked=True, filetype=self.ft2)
+        rm.StoredFileLoc.objects.create(sfile=self.txtsf, servershare=self.sstmp, path='')
 
         c_ch = am.PsetComponent.ComponentChoices
         self.inputdef = am.PsetComponent.objects.create(pset=self.pset, component=c_ch.INPUTDEF, value=['file_path', 'plate', 'fake'])
@@ -162,7 +160,8 @@ class LoadBaseAnaTestIso(AnalysisTest):
         raw = rm.RawFile.objects.create(name='new_ana_file', producer=self.anaprod,
                 source_md5='added_ana.result', size=100, date=timezone.now(), claimed=True)
         self.newanasfile = rm.StoredFile.objects.create(rawfile=raw, filetype_id=self.ft.id,
-            filename=raw.name, servershare=self.sstmp, path='', md5=raw.source_md5)
+                filename=raw.name, md5=raw.source_md5)
+        rm.StoredFileLoc.objects.create(sfile=self.newanasfile, servershare=self.sstmp, path='') 
         new_resultfn = am.AnalysisResultFile.objects.create(analysis=self.newana, sfile=self.newanasfile)
         self.anafparam.sfile = self.newanasfile
         self.anafparam.save()
@@ -344,7 +343,8 @@ class TestGetDatasetsBad(AnalysisTest):
                 source_md5='noqt_fakemd5',
                 size=100, date=timezone.now(), claimed=True)
         sf = rm.StoredFile.objects.create(rawfile=raw, filename=fn, md5=raw.source_md5, 
-                filetype=self.ft, servershare=self.ssnewstore, path=path, checked=True)
+                filetype=self.ft, checked=True)
+        rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.ssnewstore, path=path)
         newrun = dm.RunName.objects.create(experiment=self.ds.runname.experiment, name='noqt_ds')
         newds = dm.Dataset.objects.create(runname=newrun, datatype=self.ds.datatype, 
                 storage_loc=path, storageshare=self.ds.storageshare, date=timezone.now(),
@@ -368,7 +368,8 @@ class TestGetDatasetsBad(AnalysisTest):
                 source_md5='nosf2_fakemd5',
                 size=100, date=timezone.now(), claimed=True)
         sf2 = rm.StoredFile.objects.create(rawfile=raw2, filename=raw2.name, md5=raw.source_md5,
-                filetype=self.ft2, servershare=self.ssnewstore, path=path, checked=True)
+                filetype=self.ft2, checked=True)
+        rm.StoredFileLoc.objects.create(sfile=sf2, servershare=self.ssnewstore, path=path)
         dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=raw2)
         resp = self.cl.get(f'{self.url}{self.nfwf.pk}/', data={'dsids': f'{self.ds.pk}', 'anid': 0})
         self.assertEqual(resp.status_code, 400)
@@ -559,9 +560,9 @@ class TestGetWorkflowVersionDetails(AnalysisTest):
         usrfraw_ft, _ = rm.RawFile.objects.update_or_create(name='userfile_right_ft', 
                 producer=self.prod, source_md5='usrf_rightft_md5',
                 size=100, defaults={'claimed': False, 'date': timezone.now()})
-        sfusr_ft, _ = rm.StoredFile.objects.update_or_create(rawfile=usrfraw_ft,
-                md5=usrfraw_ft.source_md5, filetype=self.ft2, defaults={'filename': usrfraw_ft.name,
-                    'servershare': self.sstmp, 'path': '', 'checked': True})
+        sfusr_ft = rm.StoredFile.objects.create(rawfile=usrfraw_ft, md5=usrfraw_ft.source_md5,
+                filetype=self.ft2, filename=usrfraw_ft.name, checked=True)
+        rm.StoredFileLoc.objects.create(sfile=sfusr_ft, servershare=self.sstmp, path='')
         utoken_ft = rm.UploadToken.objects.create(user=self.user, token='token_ft', expired=False,
                 producer=self.prod, filetype=sfusr_ft.filetype, expires=timezone.now() + timedelta(1),
                 uploadtype=rm.UploadFileType.USERFILE)
@@ -922,15 +923,18 @@ class TestStoreExistingLFAnalysis(AnalysisLabelfreeSamples):
 
         # picked files fewer than raw files
         sf = rm.StoredFile.objects.create(rawfile=raw, filename=raw.name, md5=raw.source_md5, 
-                filetype=self.ft, servershare=self.ssnewstore, path=path, checked=True)
+                filetype=self.ft, checked=True)
+        rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.ssnewstore, path=path)
         raw2 = rm.RawFile.objects.create(name='second_rawfn', producer=self.prod,
                 source_md5='fewer_fakemd5',
                 size=100, date=timezone.now(), claimed=True)
         dsr = dm.DatasetRawFile.objects.create(dataset=newds, rawfile=raw2)
         sf2 = rm.StoredFile.objects.create(rawfile=raw2, filename=raw2.name, md5=raw2.source_md5, 
-                filetype=self.ft, servershare=self.ssnewstore, path=path, checked=True)
+                filetype=self.ft, checked=True)
+        rm.StoredFileLoc.objects.create(sfile=sf2, servershare=self.ssnewstore, path=path)
         sfmz = rm.StoredFile.objects.create(rawfile=raw2, filename=f'{fn}_mzml', md5='raw2mzml',
-                filetype=self.ft, servershare=self.ssnewstore, path=path, checked=True)
+                filetype=self.ft, checked=True)
+        rm.StoredFileLoc.objects.create(sfile=sfmz, servershare=self.ssnewstore, path=path)
         mzml = am.MzmlFile.objects.create(sfile=sfmz, pwiz=self.pwiz)
         picked_ft = f'mzML (pwiz {mzml.pwiz.version_description})'
         postdata['picked_ftypes'] = {newds.pk: picked_ft}
