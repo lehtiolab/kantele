@@ -268,7 +268,7 @@ def upload_file_pdc_runtask(sfloc, isdir):
         # Dont do more work than necessary, although this is probably too defensive
         if pdcfile.success and not pdcfile.deleted:
             return
-    fnpath = os.path.join(sfloc.path, sfile.filename)
+    fnpath = os.path.join(sfloc.path, sfloc.sfile.filename)
     return (sfloc.sfile.md5, yearmonth, sfloc.servershare.name, fnpath, sfloc.sfile.id, isdir)
 
 

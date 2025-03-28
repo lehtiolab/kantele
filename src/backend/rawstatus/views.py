@@ -198,7 +198,7 @@ def browser_userupload(request):
             'or user type'}, status=403)
 
     dstshare = ServerShare.objects.get(name=dstsharename)
-    if upload.uploadtype == ufiletypes.RAWFILE and StoredFile.objects.filter(filename=fname, path=dstpath,
+    if upload.uploadtype == UploadFileType.RAWFILE and StoredFile.objects.filter(filename=fname, path=dstpath,
             servershare=dstshare, deleted=False).exclude(rawfile__source_md5=raw.source_md5).exists():
         return JsonResponse({'error': 'Another file in the system has the same name '
             f'and is stored in the same path ({dstshare.name} - {dstpath}/{fname}). '
@@ -536,7 +536,7 @@ def classified_rawfile_treatment(request):
     return HttpResponse()
 
 
-def process_file_confirmed_ready(rfn, sfn, upload, desc):
+def process_file_confirmed_ready(rfn, sfn, sfloc, upload, desc):
     """Processing of backup, QC, library/userfile after transfer has succeeded
     (MD5 checked) for newly arrived MS other raw data files (not for analysis etc)
     Files that are for archiving only are also deleted from the archive share after
