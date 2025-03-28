@@ -36,9 +36,9 @@ class QueueNewFile(BaseQCFileTest):
 
     def test_run_new_qc(self):
         mv_jobs = jm.Job.objects.filter(funcname='move_single_file', state=jj.Jobstates.PENDING,
-                kwargs__sf_id=self.tmpsf.pk)
+                kwargs__sfloc_id=self.tmpsss.pk)
         qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow',
-                state=jj.Jobstates.PENDING, kwargs__sf_id=self.tmpsf.pk)
+                state=jj.Jobstates.PENDING, kwargs__sfloc_id=self.tmpsss.pk)
         self.assertEqual(mv_jobs.count(), 0)
         self.assertEqual(mv_jobs.count(), 0)
         resp = self.cl.post(self.url, content_type='application/json', data={
@@ -49,11 +49,11 @@ class QueueNewFile(BaseQCFileTest):
 
     def test_run_qc_file_already_moved(self):
         jm.Job.objects.create(funcname='run_longit_qc_workflow', state=jj.Jobstates.ERROR,
-                kwargs={'sf_id': self.tmpsf.pk}, timestamp=timezone.now())
+                kwargs={'sfloc_id': self.tmpsss.pk}, timestamp=timezone.now())
         mv_jobs = jm.Job.objects.filter(funcname='move_single_file', state=jj.Jobstates.PENDING,
-                kwargs__sf_id=self.tmpsf.pk)
+                kwargs__sfloc_id=self.tmpsss.pk)
         qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow',
-                state=jj.Jobstates.PENDING, kwargs__sf_id=self.tmpsf.pk)
+                state=jj.Jobstates.PENDING, kwargs__sfloc_id=self.tmpsss.pk)
         self.assertEqual(mv_jobs.count(), 0)
         self.assertEqual(mv_jobs.count(), 0)
         resp = self.cl.post(self.url, content_type='application/json', data={
@@ -71,13 +71,13 @@ class RerunSingleQCTest(BaseQCFileTest):
         self.bup_jobs = jm.Job.objects.filter(funcname='restore_from_pdc_archive',
                 kwargs__sf_id=self.oldsf.pk)
         self.qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow',
-                kwargs__sf_id=self.oldsf.pk)
+                kwargs__sfloc_id=self.oldsss.pk)
         ana = am.Analysis.objects.create(name='previousrun', user=self.user, storage_dir='blbala')
         self.qcdata = dashm.QCRun.objects.create(rawfile=self.oldraw, analysis=ana,
                 runtype=dm.AcquisistionMode.DDA)
-        self.oldsf.path = os.path.join(settings.QC_STORAGE_DIR, 'test')
+        self.oldsss.path = os.path.join(settings.QC_STORAGE_DIR, 'test')
         self.olddsr.delete()
-        self.oldsf.save()
+        self.oldsss.save()
 
     def test_fail(self):
         getresp = self.cl.get(self.url)
@@ -100,8 +100,8 @@ class RerunSingleQCTest(BaseQCFileTest):
         self.assertEqual(self.qc_jobs.count(), 2)
 
     def test_run_with_archived_file(self):
-        self.oldsf.deleted, self.oldsf.purged = True, True
-        self.oldsf.save()
+        self.oldsss.deleted, self.oldsss.purged = True, True
+        self.oldsss.save()
         rm.PDCBackedupFile.objects.create(storedfile=self.oldsf, pdcpath='testpath', success=True)
         resp = self.cl.post(self.url, content_type='application/json', data={'sfid': self.oldsf.pk})
         self.assertEqual(resp.status_code, 200)
@@ -111,8 +111,8 @@ class RerunSingleQCTest(BaseQCFileTest):
         self.assertEqual(self.qc_jobs.count(), 1)
 
     def test_not_find_archive(self):
-        self.oldsf.deleted, self.oldsf.purged = True, True
-        self.oldsf.save()
+        self.oldsss.deleted, self.oldsss.purged = True, True
+        self.oldsss.save()
         # No backup
         resp = self.cl.post(self.url, content_type='application/json', data={'sfid': self.oldsf.pk})
         self.assertEqual(resp.status_code, 200)
@@ -159,22 +159,22 @@ class RerunManyQCsTest(BaseQCFileTest):
 
         days_back = 3
         # One too-old file:
-        self.oldsf.path = os.path.join(settings.QC_STORAGE_DIR, 'test')
-        self.oldsf.save()
+        self.oldsss.path = os.path.join(settings.QC_STORAGE_DIR, 'test')
+        self.oldsss.save()
         self.olddsr.delete()
         self.oldraw.date = (timezone.now() - timezone.timedelta(days_back + 1)).date()
         self.oldraw.save()
 
         # One just old enough
-        self.f3sf.path = os.path.join(settings.QC_STORAGE_DIR, 'test')
-        self.f3sf.save()
+        self.f3sss.path = os.path.join(settings.QC_STORAGE_DIR, 'test')
+        self.f3sss.save()
         self.f3dsr.delete()
         self.f3raw.date = (timezone.now() - timezone.timedelta(days_back)).date()
         self.f3raw.save()
 
         # One somewhat newer (date is already "now")
-        self.tmpsf.path = os.path.join(settings.QC_STORAGE_DIR, 'test')
-        self.tmpsf.save()
+        self.tmpsss.path = os.path.join(settings.QC_STORAGE_DIR, 'test')
+        self.tmpsss.save()
         self.tmpraw.claimed = True
         self.tmpraw.prod = prod2
         self.tmpraw.save()
@@ -211,8 +211,8 @@ class RerunManyQCsTest(BaseQCFileTest):
         self.assertEqual(resp.status_code, 200)
         msg = resp.json()['msg']
         self.assertEqual(self.qc_jobs.count(), nr_files - nr_ignored)
-        self.assertEqual(self.qc_jobs.filter(kwargs__sf_id=self.tmpsf.pk).count(), 1)
-        self.assertEqual(self.qc_jobs.filter(kwargs__sf_id=self.f3sf.pk).count(), 0)
+        self.assertEqual(self.qc_jobs.filter(kwargs__sfloc_id=self.tmpsss.pk).count(), 1)
+        self.assertEqual(self.qc_jobs.filter(kwargs__sfloc_id=self.f3sss.pk).count(), 0)
         self.assertIn(queue_msg, msg)
         cur_nr_queued += nr_files - nr_ignored
 
@@ -249,10 +249,10 @@ class RerunManyQCsTest(BaseQCFileTest):
 
         # Rerun with backed up files asks for confirm
         rm.PDCBackedupFile.objects.create(storedfile=self.tmpsf, success=True, deleted=False)
-        self.f3sf.deleted = True
-        self.f3sf.save()
-        self.tmpsf.deleted = True
-        self.tmpsf.save()
+        self.f3sss.deleted = True
+        self.f3sss.save()
+        self.tmpsss.deleted = True
+        self.tmpsss.save()
         resp = self.cl.post(self.url, content_type='application/json', data={
             'instruments': [self.prod.pk, prod2.pk], 'days': days_back, 'confirm': False,
             'ignore_obsolete': False, 'retrieve_archive': False})
