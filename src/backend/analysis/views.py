@@ -255,7 +255,10 @@ def get_analysis(request, anid):
             'external_results': False,
             'base_analysis': {},
             }
-    dsets = {x.dataset_id: format_dset_tag(x.dataset) for x in ana.datasetanalysis_set.select_related('dataset').all()}
+    dsets, dslocks = {}, {}
+    for x in ana.datasetanalysis_set.select_related('dataset').all():
+        dsets[x.dataset_id] = format_dset_tag(x.dataset) 
+        dslocks[x.dataset_id] = x.dataset.locked
     prev_resultfiles_ids = get_prev_resultfiles(dsets.keys(), only_ids=True)
     if hasattr(ana, 'nextflowsearch'):
         analysis.update({
@@ -342,7 +345,8 @@ def get_analysis(request, anid):
             'external_results': True})
 
     context = {
-            'dsets': dsets,
+            'dsets': {'names': dsets, 'locks': dslocks},
+            'ds_errors': [],
             'analysis': analysis,
             'wfs': get_allwfs()
             }
