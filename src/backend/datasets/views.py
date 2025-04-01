@@ -1039,7 +1039,7 @@ def reactivate_dataset(dset):
 def move_dataset_cold(request):
     data = json.loads(request.body.decode('utf-8'))
     try:
-        dset = models.Dataset.objects.select_related('runname__experiment__project__ptype_id').get(pk=data['item_id'])
+        dset = models.Dataset.objects.select_related('runname__experiment__project').get(pk=data['item_id'])
     except models.Dataset.DoesNotExist:
         return JsonResponse({'error': 'Dataset does not exist'}, status=403)
     dsownq = models.DatasetOwner.objects.filter(dataset_id=dset.pk)
@@ -1060,7 +1060,7 @@ def move_dataset_cold(request):
 def move_dataset_active(request):
     data = json.loads(request.body.decode('utf-8'))
     try:
-        dset = models.Dataset.objects.select_related('runname__experiment__project__ptype_id').get(pk=data['item_id'])
+        dset = models.Dataset.objects.select_related('runname__experiment__project').get(pk=data['item_id'])
     except models.Dataset.DoesNotExist:
         return JsonResponse({'error': 'Dataset does not exist'}, status=403)
     # check_ownership without deleted demand:
