@@ -4,19 +4,20 @@
 # Run again when e.g. SSH key rotate
 # TODO: configure rsyslog to listen on TCP/UDP
 
-- hosts: production
+- hosts: kantele
   become: yes
   tasks:
+      - name: Apt upgrade
+        ansible.builtin.apt:
+          upgrade: dist
+          update_cache: yes
+
       - name: Package install
         ansible.builtin.apt:
-            update_cache: yes
-            name: "{{ item }}"
+            name: [docker.io, docker-compose, ufw, acl]
             state: present
-        loop:
-            - docker.io
-            - docker-compose
-            - ufw # uncomplicated firewall
-            - acl # permissions management for ansible user-switching
+            # acl: permissions management for ansible user-switching
+            # ufw: uncomplicated firewall
 
       - name: UFW firewall Allow SSH for admins
         community.general.ufw:

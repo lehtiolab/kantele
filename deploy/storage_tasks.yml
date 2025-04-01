@@ -8,7 +8,7 @@
       src: "{{ item.1 }}"
       state: mounted
       fstype: cifs
-      opts: "credentials={{ mount_cred }},uid={{ kanteleuser }},domain={{ mount_domain }}"
+      opts: "credentials={{ mount_cred }},uid={{ kanteleuser }},domain={{ mount_domain }},mfsymlinks"
   loop: "{{ storagedirs | zip(storageservers) | list }}"
 
 - name: create folder for .ssh
@@ -32,7 +32,7 @@
     mode: '400'
   loop:
     - [files/ssh_key_rsync.secret, "{{ rsync_ssh_key_file }}"]
-    - [files/ssh_key_secondaryserver.secret, "{{ secondary_storage_sshkey }}"]
+    - [files/mslab, "{{ secondary_storage_sshkey }}"]
 
 - name: Get tivoli backup client from IBM
   become: yes
@@ -66,8 +66,11 @@
   become: yes
   become_user: '{{ kanteleuser }}'
   ansible.builtin.template:
-      src: "dsm.sys.j2"
-      dest: "{{ dsm_dir }}/dsm.sys"
+      src: "{{ item }}.j2"
+      dest: "{{ dsm_dir }}/{{ item }}"
+  loop:
+    - dsm.sys
+    - dsm.opt
 
 - name: Install tivoli backup client
   become: yes

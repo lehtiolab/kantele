@@ -1,13 +1,17 @@
 ---
 # Tasks to only run once when you get a provisioned VM
 # Installs packages, nextflow and prepares directories.
-#
-# Upgrading of these can later be done in another playbook (or in code)
+# Upgrades packages
 
 - hosts: analysis
   remote_user: '{{ analysis_connect_user }}'
   become: yes
   tasks:
+    - name: Apt upgrade
+      ansible.builtin.apt:
+        upgrade: dist
+        update_cache: yes
+
     - name: Install packages
       ansible.builtin.apt:
         pkg:
@@ -27,7 +31,6 @@
           - mariadb-server
           - python3-mysqldb
         state: present
-        update_cache: yes
             
     - name: Create kantele group
       ansible.builtin.group:

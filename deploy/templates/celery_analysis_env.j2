@@ -10,11 +10,15 @@ CELERYD_USER="{{ kanteleuser }}"
 CELERYD_GROUP="{{ kantelegroup }}"
 CELERY_CREATE_DIRS=1
 KANTELEHOST="{{ kantele_host }}"
+PROTOCOL=https
 RABBITHOST={{ rabbithost }}
 RABBIT_VHOST={{ mq_vhost }}
 RABBITPASS={{ amqppass }}
 RABBITUSER={{ rabbituser }}
-TMPDIR=/opt/nxfruns
+# For NF
+TMPDIR={{ scratch_dir }}
+# For kantele task
+TMP_SCRATCHDIR={{ scratch_dir }}
 
 CELERY_PREFETCH=1
 SECRET_KEY={{ secret_key }}

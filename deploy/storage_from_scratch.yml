@@ -1,15 +1,20 @@
 ---
 # Tasks to only run once when you get a provisioned VM
 # Installs packages, prepares directories.
-#
-# Upgrading of these can later be done in another playbook (or in code)
+# Upgrades packages
 
 - hosts: storage
   remote_user: '{{ storage_connect_user }}'
+  become: yes
+
   tasks:
+    - name: Apt upgrade
+      ansible.builtin.apt:
+        upgrade: dist
+        update_cache: yes
+
     - name: Install packages
-      become: yes
-      apt:
+      ansible.builtin.apt:
         pkg:
           - git
           - python3-venv
@@ -17,8 +22,8 @@
           - python3-dev
           - build-essential
           - cifs-utils
+          - docker.io
         state: present
-        update_cache: yes
             
     - name: Create kantele group
       ansible.builtin.group:
@@ -29,4 +34,5 @@
       ansible.builtin.user:
         name: "{{ kanteleuser }}"
         group: "{{ kantelegroup }}"
+        groups: docker
         create_home: yes

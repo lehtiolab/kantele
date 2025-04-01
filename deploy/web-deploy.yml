@@ -28,7 +28,7 @@
             - USER_ID: '{{ kanteleuid }}'
             - GROUP_ID: '{{ kantelegid }}'
 
-      - name: Build and start production docker containers
+      - name: Start production docker containers
         community.docker.docker_compose:
             project_src: '{{ kanteledir }}'
             files:
