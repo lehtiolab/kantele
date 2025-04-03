@@ -1,6 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
-from rawstatus.models import RawFile, ServerShare
+from rawstatus.models import RawFile, ServerShare, DataSecurityClass
 from jobs.models import Job
 
 
@@ -97,20 +97,13 @@ class DatatypeComponent(models.Model):
         return f'{self.datatype.name} has component {DatasetUIComponent(self.component).label}'
 
 
-class DatasetSecurityClass(models.IntegerChoices):
-    # Go from lowest to highest classification
-    NOSECURITY = 1, 'Not classified'
-    # FIXME when ready, also have personal data dsets
-    # PERSONAL = 2, 'Personal data'
-
-
 class Dataset(models.Model):
     date = models.DateTimeField('date created')
     runname = models.OneToOneField(RunName, on_delete=models.CASCADE)
     #experiment = models.ForeignKey(Experiment, on_delete=models.CASCADE)
     #runname = models.TextField()
     datatype = models.ForeignKey(Datatype, on_delete=models.CASCADE)
-    securityclass = models.IntegerField(choices=DatasetSecurityClass.choices)
+    securityclass = models.IntegerField(choices=DataSecurityClass.choices)
     # NB! storage_loc/share should only ever be updated in jobs' post-run (after moves)
     # because it is source of truth for where to/from move files
     storage_loc = models.TextField(max_length=200, unique=True)

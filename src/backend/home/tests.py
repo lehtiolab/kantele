@@ -14,17 +14,17 @@ class MzmlTests(BaseTest):
     def setUp(self):
         super().setUp()
         # workflow stuff
-        ps, _ = am.ParameterSet.objects.get_or_create(name='')
-        nfw, _ = am.NextflowWorkflowRepo.objects.get_or_create(description='', repo='')
-        self.nfwv, _ = am.NextflowWfVersionParamset.objects.get_or_create(update='', commit='', filename='',
+        ps = am.ParameterSet.objects.create(name='')
+        nfw = am.NextflowWorkflowRepo.objects.create(description='', repo='')
+        self.nfwv = am.NextflowWfVersionParamset.objects.create(update='', commit='', filename='',
                 nfworkflow=nfw, paramset=ps, nfversion='', active=True)
-        self.pw, _ = am.Proteowizard.objects.get_or_create(version_description='',
+        self.pw = am.Proteowizard.objects.create(version_description='',
                 container_version='', nf_version=self.nfwv, is_docker=True)
 
         # Stored files input
-        self.ssmzml, _ = rm.ServerShare.objects.get_or_create(name=settings.MZMLINSHARENAME, 
-                server=self.newfserver, share='/home/mzmls')
-        self.ft, _ = rm.StoredFileType.objects.get_or_create(name='Thermo raw', filetype='raw')
+        self.ssmzml = rm.ServerShare.objects.create(name=settings.MZMLINSHARENAME, 
+                server=self.newfserver, share='/home/mzmls', max_security=1)
+        self.ft = rm.StoredFileType.objects.create(name='Thermo raw', filetype='raw')
         self.prodqe = rm.Producer.objects.create(name='qe_prod', client_id='qe_abcdefg',
                 shortname='qep1')
         self.prodtims = rm.Producer.objects.create(name='tims_prod', client_id='hijklm',
@@ -45,13 +45,11 @@ class MzmlTests(BaseTest):
         self.qeraw, _ = rm.RawFile.objects.update_or_create(name='file1', defaults={
             'producer': self.prodqe, 'source_md5': '52416cc60390c66e875ee6ed8e03103a',
             'size': 100, 'date': timezone.now(), 'claimed': True})
-        self.qesf, _ = rm.StoredFile.objects.update_or_create(rawfile=self.qeraw, 
-                filename=self.qeraw.name, defaults={'servershare': self.ds.storageshare,
-                    'path': self.storloc, 'md5': self.qeraw.source_md5, 'checked': True,
-                    'filetype': self.ft})
+        self.qesf = rm.StoredFile.objects.create(rawfile=self.qeraw, filename=self.qeraw.name,
+                md5=self.qeraw.source_md5, checked=True, filetype=self.ft)
+        self.qesss = rm.StoredFileLoc.objects.create(sfile=self.qesf, servershare=self.ds.storageshare, path=self.storloc)
         self.timsraw = rm.RawFile.objects.create(name='file2', producer=self.prodtims,
-                source_md5='timsmd4',
-                size=100, date=timezone.now(), claimed=True)
+                source_md5='timsmd4', size=100, date=timezone.now(), claimed=True)
         dm.DatasetRawFile.objects.update_or_create(rawfile=self.qeraw, defaults={'dataset': self.ds})
 
 
@@ -103,7 +101,8 @@ class TestCreateMzmls(MzmlTests):
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
         self.qesf.refresh_from_db()
-        self.assertTrue(self.qesf.deleted)
+        self.qesss.refresh_from_db()
+        self.assertTrue(self.qesss.deleted)
         self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare', kwargs__dset_id=self.ds.pk).count(), 0)
         exist_mzml.delete()
 
@@ -179,8 +178,8 @@ class TestRefineMzmls(MzmlTests):
         dbraw = rm.RawFile.objects.create(name='db.fa', producer=self.prod, source_md5='db.famd5',
                 size=100, date=timezone.now(), claimed=True)
         self.dbsf = rm.StoredFile.objects.create(rawfile=dbraw, filename=dbraw.name,
-                    md5=dbraw.source_md5, filetype=dbft, servershare=self.ssnewstore,
-                    path=self.storloc, checked=True)
+                    md5=dbraw.source_md5, filetype=dbft, checked=True)
+        rm.StoredFileLoc.objects.create(sfile=self.dbsf, servershare=self.ssnewstore, path=self.storloc)
         self.refinewf = am.NextflowWfVersionParamset.objects.create(update='refine wf',
                 commit='refine ci', filename='refine.nf', nfworkflow=self.nfw, paramset=self.pset, 
                 nfversion='', active=True)
@@ -221,7 +220,8 @@ class TestRefineMzmls(MzmlTests):
 
         # refined exists already
         refinedsf = rm.StoredFile.objects.create(rawfile=self.qeraw, filename=f'{self.qeraw.name}_refined',
-                servershare=self.ds.storageshare, path=self.storloc, md5='refined_md5', checked=True, filetype=self.ft)
+                md5='refined_md5', checked=True, filetype=self.ft)
+        rm.StoredFileLoc.objects.create(sfile=refinedsf, servershare=self.ds.storageshare, path=self.storloc)
         am.MzmlFile.objects.create(sfile=refinedsf, pwiz=self.pw, refined=True)
         resp = self.cl.post(self.url, content_type='application/json', data={'dsid': self.ds.pk})
         self.assertEqual(resp.status_code, 403)
@@ -263,9 +263,9 @@ class TestRefineMzmls(MzmlTests):
         dm.DatasetRawFile.objects.create(rawfile=qeraw, dataset=ds)
         qesf = self.qesf
         qesf.pk, qesf.md5 = None, qeraw.source_md5
-        qesf.path, qesf.servershare_id = ds.storage_loc, ds.storageshare_id
         qesf.rawfile, qesf.filename = qeraw, qeraw.name
         qesf.save()
+        rm.StoredFileLoc.objects.create(sfile=qesf, path=ds.storage_loc, servershare=ds.storageshare)
         am.MzmlFile.objects.create(sfile=qesf, pwiz=self.pw)
         self.do_refine(ds)
         self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
