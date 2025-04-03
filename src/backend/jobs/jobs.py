@@ -184,7 +184,7 @@ class ProjectJob(BaseJob):
         '''Get all files with same path as project_dsets.storage_locs, used to update
         path of those files post-job'''
         dsets = dm.Dataset.objects.filter(runname__experiment__project_id=kwargs['proj_id'])
-        return StoredFile.objects.filter(
+        return StoredFileLoc.objects.filter(
                 servershare__in=[x.storageshare for x in dsets.distinct('storageshare')],
                 path__in=[x.storage_loc for x in dsets.distinct('storage_loc')])
 
@@ -196,9 +196,3 @@ class ProjectJob(BaseJob):
         allfiles = StoredFile.objects.filter(storedfileloc__servershare__in=[x.storageshare for x in dsets.distinct('storageshare')],
                 storedfileloc__path__in=[x.storage_loc for x in dsets.distinct('storage_loc')]).union(projfiles)
         return [x.pk for x in allfiles]
-
-
-class MultiDatasetJob(BaseJob):
-
-    def getfiles_query(self, **kwargs):
-        return StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id__in=kwargs['dset_ids'])

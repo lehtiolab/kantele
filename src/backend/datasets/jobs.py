@@ -248,11 +248,11 @@ class ConvertDatasetMzml(DatasetJob):
         runpath = f'{dset.id}_convert_mzml_{kwargs["timestamp"]}'
         for fn in self.getfiles_query(**kwargs):
             mzmlfilename = os.path.splitext(fn.sfile.filename)[0] + '.mzML'
-            mzsf = get_or_create_mzmlentry(fn, pwiz=pwiz, refined=False,
+            mzsf, mzsfl = get_or_create_mzmlentry(fn, pwiz=pwiz, refined=False,
                     servershare_id=res_share.pk, path=runpath, mzmlfilename=mzmlfilename)
-            if mzsf.checked and not mzsf.purged:
+            if mzsf.checked and not mzsfl.purged:
                 continue
-            nf_raws.append((fn.servershare.name, fn.path, fn.filename, mzsf.id, mzmlfilename))
+            nf_raws.append((fn.servershare.name, fn.path, fn.sfile.filename, mzsfl.id, mzmlfilename))
         if not nf_raws:
             return
         # FIXME last file filetype decides mzml input filetype, we should enforce
@@ -286,7 +286,7 @@ class DeleteDatasetMzml(DatasetJob):
     def process(self, **kwargs):
         for fn in self.getfiles_query(**kwargs).filter(deleted=True, purged=False, checked=True,
                 mzmlfile__pwiz_id=kwargs['pwiz_id']):
-            fullpath = os.path.join(fn.path, fn.filename)
+            fullpath = os.path.join(fn.path, fn.sfile.filename)
             print('Queueing deletion of mzML file {fullpath} from dataset {kwargs["dset_id"]}')
             self.run_tasks.append(((fn.servershare.name, fullpath, fn.id), {}))
 
@@ -314,9 +314,9 @@ class BackupPDCDataset(DatasetJob):
     task = filetasks.pdc_archive
     
     def process(self, **kwargs):
-        for fn in self.getfiles_query(**kwargs).exclude(mzmlfile__isnull=False).exclude(
-                pdcbackedupfile__success=True, pdcbackedupfile__deleted=False).filter(
-                        rawfile__datasetrawfile__dataset_id=kwargs['dset_id']):
+        for fn in self.getfiles_query(**kwargs).exclude(sfile__mzmlfile__isnull=False).exclude(
+                sfile__pdcbackedupfile__success=True, sfile__pdcbackedupfile__deleted=False).filter(
+                        sfile__rawfile__datasetrawfile__dataset_id=kwargs['dset_id']):
             isdir = hasattr(fn.sfile.rawfile.producer, 'msinstrument') and fn.sfile.filetype.is_folder
             self.run_tasks.append((rsjobs.upload_file_pdc_runtask(fn, isdir=isdir), {}))
 
@@ -329,16 +329,15 @@ class ReactivateDeletedDataset(DatasetJob):
         '''Reactivation will only be relevant for old datasets that will not just happen to get
         some new files, or old files removed. For this job to be retryable, fetch all files regardless
         of their servershare (which may change in server migrations).'''
-        # FIXME need to be able to lock a a dataset so noone accidentally adds files
-        return StoredFile.objects.filter(rawfile__datasetrawfile__dataset=kwargs['dset_id'])
+        return StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=kwargs['dset_id'])
 
     def process(self, **kwargs):
-        for sfile in self.getfiles_query(**kwargs).exclude(mzmlfile__isnull=False).filter(
-                purged=True, pdcbackedupfile__isnull=False):
-            self.run_tasks.append((rsjobs.restore_file_pdc_runtask(sfile), {}))
+        for sfloc in self.getfiles_query(**kwargs).exclude(sfile__mzmlfile__isnull=False).filter(
+                purged=True, sfile__pdcbackedupfile__isnull=False):
+            self.run_tasks.append((rsjobs.restore_file_pdc_runtask(sfloc), {}))
         # Also set archived/archivable files which are already active (purged=False) to not deleted in UI
-        self.getfiles_query(**kwargs).filter(purged=False, deleted=True, pdcbackedupfile__isnull=False
-                ).update(deleted=False)
+        self.getfiles_query(**kwargs).filter(purged=False, deleted=True,
+                sfile__pdcbackedupfile__isnull=False).update(deleted=False)
         Dataset.objects.filter(pk=kwargs['dset_id']).update(
                 storageshare=ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME))
 
@@ -355,15 +354,18 @@ def get_or_create_mzmlentry(fn, pwiz, refined, servershare_id, path, mzmlfilenam
     new_md5 = f'mzml_{fn.rawfile.source_md5[5:]}'
     mzsf, cr = StoredFile.objects.get_or_create(mzmlfile__pwiz=pwiz, mzmlfile__refined=refined,
             rawfile_id=fn.rawfile_id, filetype_id=fn.filetype_id, defaults={'md5': new_md5,
-                'servershare_id': servershare_id, 'filename': mzmlfilename, 'path': path})
+                'filename': mzmlfilename})
+    sfl, _ = StoredFileLoc.objects.get_or_create(sfile=mzsf, defaults={'servershare_id': servershare_id, 'path': path})
     if cr:
         MzmlFile.objects.create(sfile=mzsf, pwiz=pwiz, refined=refined)
-    elif mzsf.purged or not mzsf.checked:
+    elif sfl.purged or not mzsf.checked:
         # Any previous mzML files which are deleted or otherwise odd need resetting
-        mzsf.purged = False
+        # Only update in case of purged/non-checked, so cannot use update_or_create
+        sfl.purged = False
+        sfl.mzsf.servershare_id = servershare_id
+        sfl.mzsf.path = path
+        sfl.save()
         mzsf.checked = False
-        mzsf.servershare_id = servershare_id
-        mzsf.path = path
         mzsf.md5 = new_md5
         mzsf.save()
-    return mzsf
+    return mzsf, sfl

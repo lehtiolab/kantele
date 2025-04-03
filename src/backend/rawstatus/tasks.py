@@ -348,7 +348,7 @@ def pdc_archive(self, md5, yearmonth, servershare, filepath, fn_id, isdir):
 
 
 @shared_task(bind=True, queue=settings.QUEUE_BACKUP)
-def pdc_restore(self, servershare, filepath, pdcpath, fn_id, isdir):
+def pdc_restore(self, servershare, filepath, pdcpath, sfloc_id, isdir):
     print('Restoring file {} from PDC tape'.format(filepath))
     basedir = settings.SHAREMAP[servershare]
     fileloc = os.path.join(basedir, filepath)
@@ -383,7 +383,7 @@ def pdc_restore(self, servershare, filepath, pdcpath, fn_id, isdir):
         except Exception:
             taskfail_update_db(self.request.id, msg='File {} to retrieve from backup is directory '
             'type, it is retrieved to {} but errored when moving from there'.format(fileloc, pdcpath))
-    postdata = {'sfid': fn_id, 'task': self.request.id, 'client_id': settings.APIKEY,
+    postdata = {'sflocid': sfloc_id, 'task': self.request.id, 'client_id': settings.APIKEY,
             'serversharename': servershare}
     url = urljoin(settings.KANTELEHOST, reverse('jobs:restoredpdcarchive'))
     msg = ('Restore from archive could not update database with for fn {} with PDC path {} :'

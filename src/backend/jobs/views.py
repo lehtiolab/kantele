@@ -292,8 +292,7 @@ def restored_archive_file(request):
     if 'client_id' not in data or not taskclient_authorized(
             data['client_id'], [settings.STORAGECLIENT_APIKEY]):
         return HttpResponseForbidden()
-    sfile = StoredFile.objects.filter(pk=data['sfid'])
-    sfile.update(deleted=False, purged=False,
+    StoredFileLoc.objects.filter(pk=data['sflocid']).update(deleted=False, purged=False,
             servershare_id=ServerShare.objects.get(name=data['serversharename']))
     if 'task' in request.POST:
         set_task_done(request.POST['task'])
@@ -325,13 +324,16 @@ def mzml_convert_or_refine_file_done(request):
     if ('client_id' not in data or
             data['client_id'] != settings.ANALYSISCLIENT_APIKEY):
         return HttpResponseForbidden()
-    sfile = StoredFile.objects.select_related('rawfile__datasetrawfile__dataset').get(pk=data['fn_id'])
-    sfile.md5 = data['md5']
-    sfile.checked = True
-    sfile.deleted = False
-    sfile.save()
-    create_job('move_single_file', sf_id=sfile.id, dstsharename=settings.PRIMARY_STORAGESHARENAME,
-            dst_path=sfile.rawfile.datasetrawfile.dataset.storage_loc) 
+    sfloc = StoredFileLoc.objects.select_related('sfile__rawfile__datasetrawfile__dataset').get(pk=data['fn_id'])
+    sfloc.sfile.md5 = data['md5']
+    sfloc.sfile.checked = True
+    sfloc.sfile.save()
+    sfloc.deleted = False
+    # FIXME buggy - if you remove fns from dataset, they will not have a datasetrawfile!
+    # do not use that here! instead, direct pass the storage loc from the job!
+    sfloc.save()
+    create_job('move_single_file', sfloc_id=sfloc.id, dstsharename=settings.PRIMARY_STORAGESHARENAME,
+            dst_path=sfloc.sfile.rawfile.datasetrawfile.dataset.storage_loc)
     return HttpResponse()
 
 

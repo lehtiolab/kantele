@@ -218,7 +218,7 @@ def refine_mzmls(self, run, params, mzmls, stagefiles, profiles, nf_version):
         os.makedirs(infile_target_dir, exist_ok=True)
     with open(os.path.join(rundir, 'mzmldef.txt'), 'w') as fp:
         for fn in mzmls:
-            fntarget = os.path.join(infile_target_dir, f'{fn["sfid"]}___{fn["fn"]}')
+            fntarget = os.path.join(infile_target_dir, f'{fn["mzsflocid"]}___{fn["fn"]}')
             fp.write(f'{fntarget}\n')
             # Create link or staged mzML:
             if infiledir_or_nostage:
@@ -255,10 +255,9 @@ def refine_mzmls(self, run, params, mzmls, stagefiles, profiles, nf_version):
     token = False
     for fn in outfiles:
         token = check_in_transfer_client(self.request.id, token, settings.ANALYSIS_FT_NAME)
-        sf_id, newname = os.path.basename(fn).split('___')
-        fdata = {'file_id': sf_id, 'newname': newname, 'md5': calc_md5(fn)}
+        mzsfloc_id, newname = os.path.basename(fn).split('___')
         transfer_resultfile(outfullpath, run['runname'], fn, run['dstsharename'], fileurl, token,
-                self.request.id, fdata['file_id'], fdata['md5'], fdata['newname'])
+                self.request.id, mzsfloc_id, calc_md5(fn), newname)
     reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:analysisdone'))
     postdata = {'client_id': settings.APIKEY, 'analysis_id': run['analysis_id'],
             'task': self.request.id, 'name': run['runname'], 'user': run['user'], 'state': 'ok'}
@@ -478,7 +477,6 @@ def check_in_transfer_client(task_id, token, filetype):
         'task_id': task_id, 'ftype': filetype})
     resp.raise_for_status()
     response = resp.json()
-    print(response)
     if response.get('newtoken', False):
         return response['newtoken']
     else:

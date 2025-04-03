@@ -67,8 +67,8 @@ class RestoreFromPDC(SingleFileJob):
     def process(self, **kwargs):
         '''Path must come from storedfile itself, not its dataset, since it
         can be a file without a dataset'''
-        sfile = self.getfiles_query(**kwargs)
-        self.run_tasks.append((restore_file_pdc_runtask(sfile), {}))
+        sfloc = self.getfiles_query(**kwargs)
+        self.run_tasks.append((restore_file_pdc_runtask(sfloc), {}))
         print('PDC restore task queued')
 
 
@@ -216,12 +216,12 @@ class RegisterExternalFile(MultiFileJob):
     """
 
     def getfiles_query(self, **kwargs):
-        return super().getfiles_query(**kwargs).filter(checked=False).values('path', 'filename', 'pk', 'rawfile_id')
+        return super().getfiles_query(**kwargs).filter(checked=False).values('path', 'sfile__filename', 'sfile_id', 'sfile__rawfile_id')
     
     def process(self, **kwargs):
         for fn in self.getfiles_query(**kwargs):
-            self.run_tasks.append(((os.path.join(fn['path'], fn['filename']), fn['pk'],
-                fn['rawfile_id'], kwargs['sharename'], kwargs['dset_id']), {}))
+            self.run_tasks.append(((os.path.join(fn['path'], fn['sfile__filename']), fn['sfile_id'],
+                fn['sfile__rawfile_id'], kwargs['sharename'], kwargs['dset_id']), {}))
 
 
 class DownloadPXProject(DatasetJob):
@@ -235,14 +235,14 @@ class DownloadPXProject(DatasetJob):
     def get_sf_ids_jobrunner(self, **kwargs):
         """This is run before running job, to define files used by
         the job (so it cant run if if files are in use by other job)"""
-        return [x.pk for x in self.getfiles_query(**kwargs)]
+        return [x.sfile_id for x in self.getfiles_query(**kwargs)]
 
     def getfiles_query(self, **kwargs):
-        return models.StoredFile.objects.filter(rawfile_id__in=kwargs['shasums'], 
+        return models.StoredFileLoc.objects.filter(sfile__rawfile_id__in=kwargs['shasums'], 
             checked=False).select_related('rawfile')
     
     def process(self, **kwargs):
-        px_stored = {x.filename: x for x in self.getfiles_query(**kwargs)}
+        px_stored = {x.sfile.filename: x.sfile for x in self.getfiles_query(**kwargs)}
         for fn in call_proteomexchange(kwargs['pxacc']):
             ftpurl = urlsplit(fn['downloadLink'])
             filename = os.path.split(ftpurl.path)[1]
@@ -272,11 +272,11 @@ def upload_file_pdc_runtask(sfloc, isdir):
     return (sfloc.sfile.md5, yearmonth, sfloc.servershare.name, fnpath, sfloc.sfile.id, isdir)
 
 
-def restore_file_pdc_runtask(sfile):
-    backupfile = models.PDCBackedupFile.objects.get(storedfile=sfile)
-    fnpath = os.path.join(sfile.path, sfile.filename)
-    yearmonth = datetime.strftime(sfile.regdate, '%Y%m')
-    return (settings.PRIMARY_STORAGESHARENAME, fnpath, backupfile.pdcpath, sfile.id, backupfile.is_dir)
+def restore_file_pdc_runtask(sfloc):
+    backupfile = models.PDCBackedupFile.objects.get(storedfile=sfloc.sfile)
+    fnpath = os.path.join(sfloc.path, sfloc.sfile.filename)
+    yearmonth = datetime.strftime(sfloc.sfile.regdate, '%Y%m')
+    return (settings.PRIMARY_STORAGESHARENAME, fnpath, backupfile.pdcpath, sfloc.id, backupfile.is_dir)
 
 
 def call_proteomexchange(pxacc):

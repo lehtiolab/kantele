@@ -118,8 +118,8 @@ class StoredFileLoc(models.Model):
         # Include the deleted field to allow for multi-version of a file 
         # as can be the case in mzML (though only one existing)
         # Only one copy of each file per server
-        constraints = [models.UniqueConstraint(fields=['servershare', 'sfile', 'deleted'],
-            name='uni_storedfile', condition=Q(deleted=False))]
+        constraints = [models.UniqueConstraint(fields=['servershare', 'sfile'],
+            name='uni_storedfile')]
 
 
 class MSFileData(models.Model):
