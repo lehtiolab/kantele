@@ -235,35 +235,35 @@ class BaseIntegrationTest(LiveServerTestCase):
         sleep(self.jobrun_timeout)
 
 
-class TestMultiStorageServers(BaseIntegrationTest):
-    # FIXME add test for moving servershare fail on check_error!
-
-    def test_add_newtmp_files_to_old_dset(self):
-        # Fresh start in case multiple tests
-        url = '/datasets/save/files/'
-        postdata = {'dataset_id': self.oldds.pk, 'added_files': {'fn2': {'id': self.tmpraw.pk}}, 'removed_files': {}}
-        resp = self.cl.post(url, content_type='application/json', data=postdata)
-        self.assertEqual(resp.status_code, 200)
-        self.assertTrue(os.path.exists(self.oldfpath))
-        newdsr = dm.DatasetRawFile.objects.filter(dataset=self.oldds, rawfile=self.tmpraw)
-        self.assertEqual(newdsr.count(), 1)
-        self.tmpraw.refresh_from_db()
-        self.assertTrue(self.tmpraw.claimed)
-        # call job runner to run rsync
-        self.run_job()
-        newdspath = os.path.join(settings.SHAREMAP[self.ssnewstore.name], self.oldstorloc)
-        self.assertTrue(os.path.exists(os.path.join(newdspath, self.oldsf.filename)))
-        self.oldsss.refresh_from_db()
-        self.assertEqual(self.oldsss.servershare_id, self.ssnewstore.pk)
-        self.oldds.refresh_from_db()
-        self.assertEqual(self.oldds.storageshare_id, self.ssnewstore.pk)
-        # Check if move file tmp to newstorage has waited for the rsync job
-        self.assertFalse(os.path.exists(os.path.join(newdspath, self.tmpsf.filename)))
-        self.tmpsss.refresh_from_db()
-        self.assertEqual(self.tmpsss.path, '')
-        self.assertEqual(self.tmpsss.servershare_id, self.sstmp.pk)
-        self.run_job()
-        self.assertTrue(os.path.exists(os.path.join(newdspath, self.tmpsf.filename)))
-        self.tmpsss.refresh_from_db()
-        self.assertEqual(self.tmpsss.servershare_id, self.ssnewstore.pk)
-        self.assertEqual(self.tmpsss.path, self.oldds.storage_loc)
+#class TestMultiStorageServers(BaseIntegrationTest):
+#    # TODO revive this test and edit it maybe when we start with multiple servers
+#
+#    def test_add_newtmp_files_to_old_dset(self):
+#        # Fresh start in case multiple tests
+#        url = '/datasets/save/files/'
+#        postdata = {'dataset_id': self.oldds.pk, 'added_files': {'fn2': {'id': self.tmpraw.pk}}, 'removed_files': {}}
+#        resp = self.cl.post(url, content_type='application/json', data=postdata)
+#        self.assertEqual(resp.status_code, 200)
+#        self.assertTrue(os.path.exists(self.oldfpath))
+#        newdsr = dm.DatasetRawFile.objects.filter(dataset=self.oldds, rawfile=self.tmpraw)
+#        self.assertEqual(newdsr.count(), 1)
+#        self.tmpraw.refresh_from_db()
+#        self.assertTrue(self.tmpraw.claimed)
+#        # call job runner to run rsync
+#        self.run_job()
+#        newdspath = os.path.join(settings.SHAREMAP[self.ssnewstore.name], self.oldstorloc)
+#        self.assertTrue(os.path.exists(os.path.join(newdspath, self.oldsf.filename)))
+#        self.oldsss.refresh_from_db()
+#        self.assertEqual(self.oldsss.servershare_id, self.ssnewstore.pk)
+#        self.oldds.refresh_from_db()
+#        self.assertEqual(self.oldds.storageshare_id, self.ssnewstore.pk)
+#        # Check if move file tmp to newstorage has waited for the rsync job
+#        self.assertFalse(os.path.exists(os.path.join(newdspath, self.tmpsf.filename)))
+#        self.tmpsss.refresh_from_db()
+#        self.assertEqual(self.tmpsss.path, '')
+#        self.assertEqual(self.tmpsss.servershare_id, self.sstmp.pk)
+#        self.run_job()
+#        self.assertTrue(os.path.exists(os.path.join(newdspath, self.tmpsf.filename)))
+#        self.tmpsss.refresh_from_db()
+#        self.assertEqual(self.tmpsss.servershare_id, self.ssnewstore.pk)
+#        self.assertEqual(self.tmpsss.path, self.oldds.storage_loc)

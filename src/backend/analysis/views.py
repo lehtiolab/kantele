@@ -18,7 +18,6 @@ from kantele import settings
 from analysis import models as am
 from analysis import jobs as aj
 from datasets import models as dm
-from datasets.views import move_dset_project_servershare
 from rawstatus import models as rm
 from rawstatus.views import create_upload_token
 from home import views as hv
@@ -256,7 +255,10 @@ def get_analysis(request, anid):
             'external_results': False,
             'base_analysis': {},
             }
-    dsets = {x.dataset_id: format_dset_tag(x.dataset) for x in ana.datasetanalysis_set.select_related('dataset').all()}
+    dsets, dslocks = {}, {}
+    for x in ana.datasetanalysis_set.select_related('dataset').all():
+        dsets[x.dataset_id] = format_dset_tag(x.dataset) 
+        dslocks[x.dataset_id] = x.dataset.locked
     prev_resultfiles_ids = get_prev_resultfiles(dsets.keys(), only_ids=True)
     if hasattr(ana, 'nextflowsearch'):
         analysis.update({
@@ -343,7 +345,8 @@ def get_analysis(request, anid):
             'external_results': True})
 
     context = {
-            'dsets': dsets,
+            'dsets': {'names': dsets, 'locks': dslocks},
+            'ds_errors': [],
             'analysis': analysis,
             'wfs': get_allwfs()
             }
@@ -822,14 +825,6 @@ def store_analysis(request):
         if dsfiles[dsid].count() < nrrawfiles:
             response_errors.append(f'Files of type {req["picked_ftypes"][dsid]} are fewer than '
                     f'raw files, please fix - for dataset {dsname}')
-
-    # Already here, queue migration servershare job
-    primary_share = rm.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
-    for dset in dsets.values():
-        if dset.storageshare.server != primary_share.server:
-            if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
-                    settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
-                return JsonResponse({'error': error}, status=403)
 
     for dsid in req['dsids']:
         if req['upload_external'] and not req['wfid']:

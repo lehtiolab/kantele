@@ -18,7 +18,7 @@ from analysis import models as anmodels
 from analysis import views as av
 from analysis import jobs as aj
 from datasets import jobs as dsjobs
-from datasets.views import check_ownership, get_dset_storestate, move_dset_project_servershare, fill_sampleprepparam, populate_proj
+from datasets.views import check_ownership, get_dset_storestate, fill_sampleprepparam, populate_proj
 from rawstatus import models as filemodels
 from rawstatus import views as rv
 from jobs import jobs as jj
@@ -914,15 +914,8 @@ def create_mzmls(request):
         return JsonResponse({'error': 'This dataset already has existing mzML files of that '
             'proteowizard version'}, status=403)
 
-    # Saving starts here, except for the move_dset_project_servershare which checks errors
-    # before saving, allowing to return a 403 here.
-    # Move entire project if not on same file server
+    # Saving starts here
     res_share = filemodels.ServerShare.objects.get(name=settings.MZMLINSHARENAME)
-    primary_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
-    if dset.storageshare.server != primary_share.server:
-        if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
-                settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
-            return JsonResponse({'error': error}, status=403)
     # Remove other pwiz mzMLs
     other_pwiz_mz = mzmls_exist.exclude(mzmlfile__pwiz=pwiz)
     if other_pwiz_mz.count():
@@ -986,11 +979,6 @@ def refine_mzmls(request):
     # Move entire project if not on same file server (403 is checked before saving anything
     # or queueing jobs)
     res_share = filemodels.ServerShare.objects.get(name=settings.MZMLINSHARENAME)
-    primary_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
-    if dset.storageshare.server != primary_share.server:
-        if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
-                settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
-            return JsonResponse({'error': error}, status=403)
     # FIXME get analysis if it does exist, in case someone reruns?
     analysis = anmodels.Analysis.objects.create(user=request.user, name=f'refine_dataset_{dset.pk}', editable=False)
     job = create_job('refine_mzmls', dset_id=dset.pk, analysis_id=analysis.id, wfv_id=data['wfid'],

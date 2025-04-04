@@ -413,12 +413,6 @@ def update_dataset(data, user_id):
             f'{new_storage_loc}'}, status=403)
     elif (new_storage_loc != dset.storage_loc and 
             models.DatasetRawFile.objects.filter(dataset_id=dset.id).count()):
-        # Update storage loc, first check if dataset needs moving
-        if dset.storageshare != prim_share:
-            # Last error in method, after this we can save
-            if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
-                    settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
-                return JsonResponse({'error': error}, status=403)
         # Finishing this job will update storage location in DB, so dont set it here in view
         job = create_job('rename_dset_storage_loc', dset_id=dset.id, dstpath=new_storage_loc)
         if job['error']: 
@@ -785,7 +779,6 @@ def merge_projects(request):
             'project(s) you have passed exist in the system, possibly project ' 
             'input is out of date?'}, status=400)
 
-    prim_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
     for proj in projs[1:]:
         # Refresh oldexps with every merged project
         oldexps = {x.name: x for x in projs[0].experiment_set.all()}
@@ -819,10 +812,6 @@ def merge_projects(request):
                 prefrac = pfds.prefractionation if pfds else False
                 hrrange_id = pfds.hiriefdataset.hirief_id if hasattr(pfds, 'hiriefdataset') else False
                 new_storage_loc = set_storage_location(projs[0], exp, runname, dset.datatype, prefrac, hrrange_id)
-                if dset.storageshare_id != prim_share.pk:
-                    if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
-                            settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
-                        return JsonResponse({'error': error}, status=403)
                 job = create_job('rename_dset_storage_loc', dset_id=dset.id,
                         dstpath=new_storage_loc)
                 if job['error']:
@@ -861,12 +850,6 @@ def rename_project(request):
         if not check_ownership(request.user, proj.ptype_id, dset['deleted'], dsown_ids):
             return JsonResponse({'error': f'You do not have the rights to change all datasets in this project'}, status=403)
     # queue jobs to rename project, update project name after that since it is needed in job for path
-    prim_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
-    if dsets.exists() and storageshare_id != prim_share.pk:
-        # Take leftover dset from loop
-        if error := move_dset_project_servershare(dset['pk'], dset['storageshare__name'],
-                settings.PRIMARY_STORAGESHARENAME, dset['runname__experiment__project_id']):
-            return JsonResponse({'error': error}, status=403)
     job = create_job('rename_top_lvl_projectdir', newname=data['newname'], proj_id=data['projid'])
     if job['error']:
         return JsonResponse({'error': job['error']}, status=403)
@@ -967,7 +950,6 @@ def get_dset_storestate(dset_id, dsfiles=False):
 def archive_dataset(dset):
     # FIXME dataset reactivating and archiving reports error when ok and vv? I mean, if you click archive and reactivate quickly, you will get error (still in active storage), and also in this func, storestate is not updated at same time as DB (it is result of jobs)
     storestate, _ = get_dset_storestate(dset.pk)
-    prim_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
     backing_up = False
     if storestate == 'purged':
         return {'state': 'error', 'error': 'Cannot archive dataset, already purged'}
@@ -978,14 +960,11 @@ def archive_dataset(dset):
     elif storestate == 'unknown':
         return {'state': 'error', 'error': 'Cannot archive dataset with unknown storage state'}
     elif storestate == 'active-only':
-        if dset.storageshare_id != prim_share.pk:
-            if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
-                    settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
-                return {'state': 'error', 'error': error}
         backing_up = True
         create_job('backup_dataset', dset_id=dset.id)
 
     # If you reach this point, the dataset is either backed up or has a job queued for that, so queue delete job
+    prim_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
     if storestate != 'empty' and (backing_up or dset.storageshare_id == prim_share.pk):
         create_job('delete_active_dataset', dset_id=dset.id)
         create_job('delete_empty_directory', sf_ids=[x.id for x in filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=dset)])
@@ -1407,30 +1386,31 @@ def find_files(request):
                          for x in newfiles}})
 
 
-def move_dset_project_servershare(dset_id, storagesharename, dstsharename, projid):
-    '''Takes a dataset and moves its entire project to a new
-    servershare'''
-    kwargs = []
-    kw = {'dset_id': dset_id, 'srcsharename': storagesharename, 'dstsharename': dstsharename}
-    if not jm.Job.objects.filter(funcname='move_dset_servershare',
-            kwargs__dset_id=dset_id, kwargs__srcsharename=storagesharename,
-            kwargs__dstsharename=dstsharename).exclude(state__in=jj.JOBSTATES_DONE).exists():
-        if error := check_job_error('move_dset_servershare', **kw):
-            return error
-        kwargs = [kw]
-    for other_ds in models.Dataset.objects.filter(deleted=False, purged=False,
-            runname__experiment__project_id=projid).exclude(pk=dset_id):
-        kw = {'dset_id': other_ds.pk, 'srcsharename': other_ds.storageshare.name,
-                'dstsharename': dstsharename}
-        jobs_in_progress = jm.Job.objects.filter(funcname='move_dset_servershare',
-                kwargs__dset_id=kw['dset_id'], kwargs__srcsharename=kw['srcsharename'],
-                kwargs__dstsharename=dstsharename).exclude(state__in=jj.JOBSTATES_DONE)
-        if not jobs_in_progress.exists():
-            if error := check_job_error('move_dset_servershare', **kw):
-                return error
-            kwargs.append(kw)
-    [create_job_without_check('move_dset_servershare', **kw) for kw in kwargs]
-    return False
+# TODO maybe revive this when doing multi-storage etc
+#def move_dset_project_servershare(dset_id, storagesharename, dstsharename, projid):
+#    '''Takes a dataset and moves its entire project to a new
+#    servershare'''
+#    kwargs = []
+#    kw = {'dset_id': dset_id, 'srcsharename': storagesharename, 'dstsharename': dstsharename}
+#    if not jm.Job.objects.filter(funcname='move_dset_servershare',
+#            kwargs__dset_id=dset_id, kwargs__srcsharename=storagesharename,
+#            kwargs__dstsharename=dstsharename).exclude(state__in=jj.JOBSTATES_DONE).exists():
+#        if error := check_job_error('move_dset_servershare', **kw):
+#            return error
+#        kwargs = [kw]
+#    for other_ds in models.Dataset.objects.filter(deleted=False, purged=False,
+#            runname__experiment__project_id=projid).exclude(pk=dset_id):
+#        kw = {'dset_id': other_ds.pk, 'srcsharename': other_ds.storageshare.name,
+#                'dstsharename': dstsharename}
+#        jobs_in_progress = jm.Job.objects.filter(funcname='move_dset_servershare',
+#                kwargs__dset_id=kw['dset_id'], kwargs__srcsharename=kw['srcsharename'],
+#                kwargs__dstsharename=dstsharename).exclude(state__in=jj.JOBSTATES_DONE)
+#        if not jobs_in_progress.exists():
+#            if error := check_job_error('move_dset_servershare', **kw):
+#                return error
+#            kwargs.append(kw)
+#    [create_job_without_check('move_dset_servershare', **kw) for kw in kwargs]
+#    return False
 
 
 def save_or_update_files(data, user_id):
@@ -1442,7 +1422,6 @@ def save_or_update_files(data, user_id):
     dset = models.Dataset.objects.select_related('runname__experiment', 'storageshare').get(pk=dset_id)
     tmpshare = filemodels.ServerShare.objects.get(name=settings.TMPSHARENAME)
     dsrawfn_ids = filemodels.RawFile.objects.filter(datasetrawfile__dataset=dset)
-    switch_fileserver = dset.storageshare.server != tmpshare.server
     mvjobs = []
     # First error check and collect jobs:
     if added_fnids:
@@ -1457,13 +1436,6 @@ def save_or_update_files(data, user_id):
     # Job error checking for moving the files (files already in tmp or in dset dir)
     for mvjob in mvjobs:
         if error := check_job_error(mvjob[0], **mvjob[1]):
-            return {'error': error}, 403
-    # Now move servershare if needed (dset is old and not on primary server)
-    # All tmp files will be on primary server, so if we move server first, there is no
-    # issue with them not being ok anymore
-    if switch_fileserver:
-        if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
-                settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
             return {'error': error}, 403
 
     # Errors checked, now store DB records and queue move jobs

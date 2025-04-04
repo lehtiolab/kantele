@@ -103,7 +103,7 @@ class TestCreateMzmls(MzmlTests):
         self.qesf.refresh_from_db()
         self.qesss.refresh_from_db()
         self.assertTrue(self.qesss.deleted)
-        self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare', kwargs__dset_id=self.ds.pk).count(), 0)
+        #self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare', kwargs__dset_id=self.ds.pk).count(), 0)
         exist_mzml.delete()
 
     def test_create_mzml_qe(self):
@@ -116,8 +116,8 @@ class TestCreateMzmls(MzmlTests):
                 'dset_id': self.ds.pk, 'pwiz_id': self.pw.pk}
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
-        self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
-            kwargs__dset_id=self.ds.pk).count(), 0)
+        #self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
+        #    kwargs__dset_id=self.ds.pk).count(), 0)
 
     def test_create_mzml_tims(self):
         self.qeraw.producer = self.prodtims
@@ -131,42 +131,43 @@ class TestCreateMzmls(MzmlTests):
                 'dstshare_id': self.ssmzml.pk, 'dset_id': self.ds.pk, 'pwiz_id': self.pw.pk}
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
-        self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
-            kwargs__dset_id=self.ds.pk).count(), 0)
+        #self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
+        #    kwargs__dset_id=self.ds.pk).count(), 0)
 
-    def test_with_filemove(self):
-        # Create new dataset on old storage proj that can be mock-"moved"
-        ds = self.ds
-        ds.pk = None
-        moverun = dm.RunName.objects.create(name=self.id(), experiment=self.oldexp)
-        ds.storageshare = self.ssoldstorage
-        ds.runname = moverun
-        ds.storage_loc = 'test_with_filemove'
-        ds.save()
-        # Add file to mzML
-        qeraw = self.qeraw
-        qeraw.pk, qeraw.source_md5 = None, 'test_with_filemove_bcd1234'
-        qeraw.save()
-        dm.DatasetRawFile.objects.update_or_create(rawfile=qeraw, defaults={'dataset': ds})
-        qesf = self.qesf
-        qesf.pk, qesf.md5, qeraw.source_md5
-        qesf.path, qesf.servershare_id = ds.storage_loc, ds.storageshare_id
-        qesf.rawfile, qesf.filename = qeraw, qeraw.name
-        qesf.save()
-        postdata = {'pwiz_id': self.pw.pk, 'dsid': ds.pk}
-        resp = self.cl.post(self.url, content_type='application/json', data=postdata)
-        self.assertEqual(resp.status_code, 200)
-        j = jm.Job.objects.last()
-        self.assertEqual(j.funcname, 'convert_dataset_mzml')
-        exp_kw  = {'options': [], 'filters': ['"peakPicking true 2"', '"precursorRefine"'], 
-                'dstshare_id': self.ssmzml.pk, 'dset_id': ds.pk, 'pwiz_id': self.pw.pk}
-        for k, val in exp_kw.items():
-            self.assertEqual(j.kwargs[k], val)
-        self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
-            kwargs__dset_id=ds.pk).count(), 1)
-        # cleanup, this should also remove dset
-        # FIXME why?
-        #moverun.delete()
+# FIXME maybe revive this test when testing multi-storage
+#    def test_with_filemove(self):
+#        # Create new dataset on old storage proj that can be mock-"moved"
+#        ds = self.ds
+#        ds.pk = None
+#        moverun = dm.RunName.objects.create(name=self.id(), experiment=self.oldexp)
+#        ds.storageshare = self.ssoldstorage
+#        ds.runname = moverun
+#        ds.storage_loc = 'test_with_filemove'
+#        ds.save()
+#        # Add file to mzML
+#        qeraw = self.qeraw
+#        qeraw.pk, qeraw.source_md5 = None, 'test_with_filemove_bcd1234'
+#        qeraw.save()
+#        dm.DatasetRawFile.objects.update_or_create(rawfile=qeraw, defaults={'dataset': ds})
+#        qesf = self.qesf
+#        qesf.pk, qesf.md5, qeraw.source_md5
+#        qesf.path, qesf.servershare_id = ds.storage_loc, ds.storageshare_id
+#        qesf.rawfile, qesf.filename = qeraw, qeraw.name
+#        qesf.save()
+#        postdata = {'pwiz_id': self.pw.pk, 'dsid': ds.pk}
+#        resp = self.cl.post(self.url, content_type='application/json', data=postdata)
+#        self.assertEqual(resp.status_code, 200)
+#        j = jm.Job.objects.last()
+#        self.assertEqual(j.funcname, 'convert_dataset_mzml')
+#        exp_kw  = {'options': [], 'filters': ['"peakPicking true 2"', '"precursorRefine"'], 
+#                'dstshare_id': self.ssmzml.pk, 'dset_id': ds.pk, 'pwiz_id': self.pw.pk}
+#        for k, val in exp_kw.items():
+#            self.assertEqual(j.kwargs[k], val)
+#        self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
+#            kwargs__dset_id=ds.pk).count(), 1)
+#        # cleanup, this should also remove dset
+#        # FIXME why?
+#        #moverun.delete()
 
 
 class TestRefineMzmls(MzmlTests):
@@ -243,30 +244,30 @@ class TestRefineMzmls(MzmlTests):
         move on the current dataset, unlike the test_with_filemove (old data to new share)'''
         am.MzmlFile.objects.create(sfile=self.qesf, pwiz=self.pw)
         self.do_refine(self.ds)
-        self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
-            kwargs__dset_id=self.ds.pk).count(), 0)
+#        self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
+#            kwargs__dset_id=self.ds.pk).count(), 0)
 
-    def test_with_filemove(self):
-        # Create new dataset on old storage proj that can be mock-"moved"
-        moverun = dm.RunName.objects.create(name='test_with_filemove_loc', experiment=self.oldexp)
-        ds = self.ds
-        ds.storage_loc = moverun.name
-        ds.pk = None
-        ds.storageshare = self.ssoldstorage
-        ds.runname = moverun
-        ds.save()
-        dm.QuantDataset.objects.get_or_create(dataset=ds, quanttype=self.qt)
-        # Add raw files (pk=None, save -> copy original object)
-        qeraw = self.qeraw
-        qeraw.pk, qeraw.source_md5 = None, 'refine_test_with_filemove'
-        qeraw.save()
-        dm.DatasetRawFile.objects.create(rawfile=qeraw, dataset=ds)
-        qesf = self.qesf
-        qesf.pk, qesf.md5 = None, qeraw.source_md5
-        qesf.rawfile, qesf.filename = qeraw, qeraw.name
-        qesf.save()
-        rm.StoredFileLoc.objects.create(sfile=qesf, path=ds.storage_loc, servershare=ds.storageshare)
-        am.MzmlFile.objects.create(sfile=qesf, pwiz=self.pw)
-        self.do_refine(ds)
-        self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
-            kwargs__dset_id=ds.pk).count(), 1)
+#    def test_with_filemove(self):
+#        # Create new dataset on old storage proj that can be mock-"moved"
+#        moverun = dm.RunName.objects.create(name='test_with_filemove_loc', experiment=self.oldexp)
+#        ds = self.ds
+#        ds.storage_loc = moverun.name
+#        ds.pk = None
+#        ds.storageshare = self.ssoldstorage
+#        ds.runname = moverun
+#        ds.save()
+#        dm.QuantDataset.objects.get_or_create(dataset=ds, quanttype=self.qt)
+#        # Add raw files (pk=None, save -> copy original object)
+#        qeraw = self.qeraw
+#        qeraw.pk, qeraw.source_md5 = None, 'refine_test_with_filemove'
+#        qeraw.save()
+#        dm.DatasetRawFile.objects.create(rawfile=qeraw, dataset=ds)
+#        qesf = self.qesf
+#        qesf.pk, qesf.md5 = None, qeraw.source_md5
+#        qesf.rawfile, qesf.filename = qeraw, qeraw.name
+#        qesf.save()
+#        rm.StoredFileLoc.objects.create(sfile=qesf, path=ds.storage_loc, servershare=ds.storageshare)
+#        am.MzmlFile.objects.create(sfile=qesf, pwiz=self.pw)
+#        self.do_refine(ds)
+#        self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
+#            kwargs__dset_id=ds.pk).count(), 1)
