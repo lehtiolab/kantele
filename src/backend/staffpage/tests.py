@@ -69,7 +69,7 @@ class RerunSingleQCTest(BaseQCFileTest):
     def setUp(self):
         super().setUp()
         self.bup_jobs = jm.Job.objects.filter(funcname='restore_from_pdc_archive',
-                kwargs__sf_id=self.oldsf.pk)
+                kwargs__sfloc_id=self.oldsss.pk)
         self.qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow',
                 kwargs__sfloc_id=self.oldsss.pk)
         ana = am.Analysis.objects.create(name='previousrun', user=self.user, storage_dir='blbala')

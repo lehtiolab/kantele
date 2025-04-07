@@ -364,10 +364,11 @@ def get_or_create_mzmlentry(fn, pwiz, refined, servershare_id, path, mzmlfilenam
         # Any previous mzML files which are deleted or otherwise odd need resetting
         # Only update in case of purged/non-checked, so cannot use update_or_create
         sfl.purged = False
-        sfl.mzsf.servershare_id = servershare_id
-        sfl.mzsf.path = path
+        sfl.servershare_id = servershare_id
+        sfl.path = path
         sfl.save()
         mzsf.checked = False
+        mzsf.deleted = False
         mzsf.md5 = new_md5
         mzsf.save()
     return mzsf, sfl

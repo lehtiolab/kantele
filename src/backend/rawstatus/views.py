@@ -198,8 +198,9 @@ def browser_userupload(request):
             'or user type'}, status=403)
 
     dstshare = ServerShare.objects.get(name=dstsharename)
-    if upload.uploadtype == UploadFileType.RAWFILE and StoredFile.objects.filter(filename=fname, path=dstpath,
-            servershare=dstshare, deleted=False).exclude(rawfile__source_md5=raw.source_md5).exists():
+    if upload.uploadtype == UploadFileType.RAWFILE and StoredFileLoc.objects.filter(
+            sfile__filename=fname, path=dstpath, servershare=dstshare, sfile__deleted=False).exclude(
+                    sfile__rawfile__source_md5=raw.source_md5).exists():
         return JsonResponse({'error': 'Another file in the system has the same name '
             f'and is stored in the same path ({dstshare.name} - {dstpath}/{fname}). '
             'Please investigate, possibly change the file name or location of this or the other '
@@ -679,10 +680,9 @@ def transfer_file(request):
 
     #####
     dstshare = ServerShare.objects.get(name=dstsharename)
-    if check_dup and StoredFile.objects.filter(filename=nonzip_fname,
-            storedfileloc__deleted=False, storedfileloc__path=dstpath,
-            storedfileloc__servershare=dstshare).exclude(
-            rawfile__source_md5=rawfn.source_md5).exists():
+    if check_dup and StoredFileLoc.objects.filter(sfile__filename=nonzip_fname, purged=False,
+            path=dstpath, servershare=dstshare).exclude(
+                    sfile__rawfile__source_md5=rawfn.source_md5).exists():
         return JsonResponse({'error': 'Another file in the system has the same name '
             f'and is stored in the same path ({dstshare.name} - {dstpath}/{nonzip_fname}). '
             'Please investigate, possibly change the file name or location of this or the other '
@@ -891,7 +891,7 @@ def cleanup_old_files(request):
         queue_job = data['queue_job']
     except KeyError as error:
         return HttpResponseForbidden()
-    mzmls = StoredFile.objects.filter(mzmlfile__isnull=False, purged=False)
+    mzmls = StoredFileLoc.objects.filter(sfile__mzmlfile__isnull=False, purged=False)
     maxtime_nonint = timezone.now() - timedelta(settings.MAX_MZML_STORAGE_TIME_POST_ANALYSIS)
     # Filtering gotchas here:
     # filter multiple excludes so they get done in serie, and exclude date__gt rather than
@@ -899,18 +899,18 @@ def cleanup_old_files(request):
     # if there are ALSO joins where date is gt...
     # old normal mzmls from searches
     old_searched_mzmls = mzmls.exclude(
-            rawfile__datasetrawfile__dataset__datatype_id__in=settings.LC_DTYPE_IDS).exclude(
-            rawfile__datasetrawfile__dataset__datasetanalysis__isnull=True).exclude(
-            rawfile__datasetrawfile__dataset__datasetanalysis__analysis__date__gt=maxtime_nonint)
+            sfile__rawfile__datasetrawfile__dataset__datatype_id__in=settings.LC_DTYPE_IDS).exclude(
+            sfile__rawfile__datasetrawfile__dataset__datasetanalysis__isnull=True).exclude(
+            sfile__rawfile__datasetrawfile__dataset__datasetanalysis__analysis__date__gt=maxtime_nonint)
     # old LC mzmls
     lcmzmls = mzmls.filter(
-            rawfile__datasetrawfile__dataset__datatype_id__in=settings.LC_DTYPE_IDS,
-            rawfile__datasetrawfile__dataset__datasetanalysis__isnull=False).exclude(
-            rawfile__datasetrawfile__dataset__datasetanalysis__analysis__date__gt=timezone.now() - timedelta(settings.MAX_MZML_LC_STORAGE_TIME))
+            sfile__rawfile__datasetrawfile__dataset__datatype_id__in=settings.LC_DTYPE_IDS,
+            sfile__rawfile__datasetrawfile__dataset__datasetanalysis__isnull=False).exclude(
+            sfile__rawfile__datasetrawfile__dataset__datasetanalysis__analysis__date__gt=timezone.now() - timedelta(settings.MAX_MZML_LC_STORAGE_TIME))
     # old mzmls without searches
     old_nonsearched_mzml = mzmls.filter(
-            rawfile__datasetrawfile__dataset__datasetanalysis__isnull=True,
-            regdate__lt=maxtime_nonint)
+            sfile__rawfile__datasetrawfile__dataset__datasetanalysis__isnull=True,
+            sfile__regdate__lt=maxtime_nonint)
     all_old_mzmls = old_searched_mzmls.union(lcmzmls, old_nonsearched_mzml)
     # TODO auto remove QC raw files of certain age? make sure you can get them back when needed though.
 
@@ -928,11 +928,12 @@ def cleanup_old_files(request):
 
     if queue_job:
         for chunk in chunk_iter(all_old_mzmls, 500):
+            StoredFile.objects.filter(pk__in={x.sfile_id for x in chunk}).update(deleted=True)
             create_job('purge_files', sfloc_ids=[x.id for x in chunk])
         return JsonResponse({'ok': True})
     else:
         # cannot aggregate Sum on UNION
-        totalsize_raw = getxbytes(sum((x['rawfile__size'] for x in all_old_mzmls.values('rawfile__size'))))
+        totalsize_raw = getxbytes(sum((x['sfile__rawfile__size'] for x in all_old_mzmls.values('sfile__rawfile__size'))))
         return JsonResponse({'ok': True, 'mzml_cleanupsize_raws': totalsize_raw})
 
 
@@ -1004,7 +1005,9 @@ def restore_file_from_cold(request):
     elif hasattr(sfile, 'mzmlfile'):
         return JsonResponse({'error': 'mzML derived files are not archived, please regenerate it from RAW data'}, status=403)
     # File is set to deleted, purged = False, False in the post-job-view
-    create_job('restore_from_pdc_archive', sf_id=sfile.pk)
+    # FIXME future: always restore to same share, i.e. PRIMARY, not whichever
+    sfloc = sfile.storedfileloc_set.get(servershare=settings.PRIMARY_STORAGESHARENAME)
+    create_job('restore_from_pdc_archive', sfloc_id=sfloc.pk)
     return JsonResponse({'state': 'ok'})
 
 
