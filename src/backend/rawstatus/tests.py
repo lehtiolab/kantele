@@ -1072,7 +1072,7 @@ class TestArchiveFile(BaseFilesTest):
     def test_wrong_id(self):
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': -1})
         self.assertEqual(resp.status_code, 404)
-        self.assertEqual(resp.json()['error'], 'File does not exist')
+        self.assertEqual(resp.json()['error'], 'File does not exist, maybe it is deleted?')
 
     def test_claimed_file(self):
         resp = self.cl.post(self.url, content_type='application/json',
@@ -1088,22 +1088,21 @@ class TestArchiveFile(BaseFilesTest):
 
     def test_deleted_file(self):
         sfile1 = rm.StoredFile.objects.create(rawfile=self.registered_raw,
-                filename=self.registered_raw.name, md5='deletedmd5', filetype_id=self.ft.id)
-        rm.StoredFileLoc.objects.create(sfile=sfile1, servershare_id=self.sstmp.id, path='', deleted=True)
+                filename=self.registered_raw.name, md5='deletedmd5', filetype_id=self.ft.id, deleted=True)
+        rm.StoredFileLoc.objects.create(sfile=sfile1, servershare_id=self.sstmp.id, path='')
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': sfile1.pk})
-        self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json()['error'], 'File is possibly deleted, can not archive')
-        # purged file to also test the check for it. Unrealistic to have it deleted but
-        # not purged obviously, as jobrunner shouldnt trigger that - except for when there is a delete job
-        # which is deleted before running (no post-job purge set), which is bad!
-        sfile2 = rm.StoredFile.objects.create(rawfile=self.registered_raw,
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()['error'], 'File does not exist, maybe it is deleted?')
+        # purged file to also test the check for it. Unrealistic to have it purged but
+        # not deleted obviously
+        sfile2 = rm.StoredFile.objects.create(rawfile=self.registered_raw, deleted=False, 
                 filename=f'{self.registered_raw.name}_purged', 
                 md5='deletedmd5_2', filetype_id=self.ft.id)
-        rm.StoredFileLoc.objects.create(sfile=sfile2, deleted=False, purged=True,
-                servershare_id=self.sstmp.id, path='')
+        rm.StoredFileLoc.objects.create(sfile=sfile2, purged=True, servershare_id=self.sstmp.id, path='')
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': sfile2.pk})
         self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json()['error'], 'File is possibly deleted, can not archive')
+        self.assertEqual(resp.json()['error'], 'File is possibly deleted, but not marked as such, '
+                'please inform admin -- can not archive')
 
     def test_mzmlfile(self):
         am.MzmlFile.objects.create(sfile=self.sfile, pwiz=self.pwiz)
@@ -1346,7 +1345,6 @@ class TestDeleteFile(BaseIntegrationTest):
         self.assertEqual(task.state, states.SUCCESS)
         self.assertFalse(os.path.exists(file_path))
         self.f3sss.refresh_from_db()
-        self.assertTrue(self.f3sss.deleted)
         self.assertTrue(self.f3sss.purged)
 
     def test_file(self):
@@ -1369,7 +1367,6 @@ class TestDeleteFile(BaseIntegrationTest):
         self.assertEqual(task.state, states.SUCCESS)
         self.assertFalse(os.path.exists(file_path))
         self.f3sss.refresh_from_db()
-        self.assertTrue(self.f3sss.deleted)
         self.assertTrue(self.f3sss.purged)
 
 
@@ -1394,7 +1391,6 @@ class TestDeleteFile(BaseIntegrationTest):
         self.run_job()
         self.assertEqual(job.task_set.get().state, states.SUCCESS)
         badloc.refresh_from_db()
-        self.assertTrue(badloc.deleted)
         self.assertTrue(badloc.purged)
 
     def test_fail_expect_file(self):
@@ -1413,7 +1409,6 @@ class TestDeleteFile(BaseIntegrationTest):
         self.assertEqual(task.taskerror.message, msg)
         self.assertTrue(os.path.exists(full_path))
         self.f3sss.refresh_from_db()
-        self.assertFalse(self.f3sss.deleted)
         self.assertFalse(self.f3sss.purged)
 
     def test_fail_expect_dir(self):
@@ -1437,7 +1432,6 @@ class TestDeleteFile(BaseIntegrationTest):
         self.assertEqual(task.taskerror.message, msg)
         self.assertTrue(os.path.exists(file_path))
         self.f3sss.refresh_from_db()
-        self.assertFalse(self.f3sss.deleted)
         self.assertFalse(self.f3sss.purged)
 
 

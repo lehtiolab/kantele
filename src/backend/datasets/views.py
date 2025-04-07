@@ -972,7 +972,9 @@ def archive_dataset(dset):
         # Mark files as purged since they are in secondary storage
         # This is very much temporary code and should be removed once we have consolidated all storage
         fakejob = jobmap['delete_active_dataset'](False)
-        fakejob.getfiles_query(dset_id=dset.pk).update(deleted=True, purged=True)
+        fakejob_sfloc = fakejob.getfiles_query(dset_id=dset.pk)
+        fakejob_sfloc.update(purged=True)
+        filemodels.StoredFile.objects.filter(pk__in=fakejob_sfloc.values('sfile_id')).update(purged=True)
     dset.deleted, dset.purged = True, False
     dset.save()
     return {'state': 'ok', 'error': 'Dataset queued for archival'}

@@ -206,7 +206,7 @@ def purge_storedfile(request):
     if 'client_id' not in data or not taskclient_authorized(
             data['client_id'], [settings.STORAGECLIENT_APIKEY]):
         return HttpResponseForbidden()
-    sfile = StoredFileLoc.objects.filter(pk=data['sfloc_id']).update(deleted=True, purged=True)
+    sfile = StoredFileLoc.objects.filter(pk=data['sfloc_id']).update(purged=True)
     if 'task' in data:
         set_task_done(data['task'])
     return HttpResponse()
@@ -292,7 +292,7 @@ def restored_archive_file(request):
     if 'client_id' not in data or not taskclient_authorized(
             data['client_id'], [settings.STORAGECLIENT_APIKEY]):
         return HttpResponseForbidden()
-    StoredFileLoc.objects.filter(pk=data['sflocid']).update(deleted=False, purged=False,
+    StoredFileLoc.objects.filter(pk=data['sflocid']).update(purged=False,
             servershare_id=ServerShare.objects.get(name=data['serversharename']))
     if 'task' in request.POST:
         set_task_done(request.POST['task'])
@@ -328,7 +328,6 @@ def mzml_convert_or_refine_file_done(request):
     sfloc.sfile.md5 = data['md5']
     sfloc.sfile.checked = True
     sfloc.sfile.save()
-    sfloc.deleted = False
     # FIXME buggy - if you remove fns from dataset, they will not have a datasetrawfile!
     # do not use that here! instead, direct pass the storage loc from the job!
     sfloc.save()

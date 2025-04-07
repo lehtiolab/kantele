@@ -767,7 +767,7 @@ def rename_file(request):
         return JsonResponse({'error': 'Must use POST'}, status=405)
     data =  json.loads(request.body.decode('utf-8'))
     try:
-        sfile = StoredFile.objects.filter(pk=data['sf_id']).select_related(
+        sfile = StoredFile.objects.filter(pk=data['sf_id'], deleted=False).select_related(
             'rawfile', 'mzmlfile').get()
         newfilename = os.path.splitext(data['newname'])[0]
         #mv_mzml = data['mvmzml']  # TODO optional mzml renaming too? Now it is default
@@ -780,7 +780,7 @@ def rename_file(request):
         return JsonResponse({'error': 'Files of this type cannot be renamed'}, status=403)
     elif re.match('^[a-zA-Z_0-9\-]*$', newfilename) is None:
         return JsonResponse({'error': 'Illegal characteres in new file name'}, status=403)
-    for sfloc in sfile.storedfileloc_set.filter(deleted=False, purged=False):
+    for sfloc in sfile.storedfileloc_set.filter(purged=False):
         job = create_job('rename_file', sfloc_id=sfloc.id, newname=newfilename)
     if job['error']:
         return JsonResponse({'error': job['error']}, status=403)
@@ -993,7 +993,7 @@ def restore_file_from_cold(request):
         sfile = StoredFile.objects.select_related('rawfile__datasetrawfile', 'mzmlfile', 'pdcbackedupfile').get(pk=data['item_id'])
     except StoredFile.DoesNotExist:
         return JsonResponse({'error': 'File does not exist'}, status=403)
-    if not sfile.purged or not sfile.deleted:
+    if not sfile.deleted:
         return JsonResponse({'error': 'File is not currently marked as deleted, will not undelete'}, status=403)
     elif hasattr(sfile.rawfile, 'datasetrawfile'):
         return JsonResponse({'error': 'File is in a dataset, please restore entire set'}, status=403)
@@ -1015,14 +1015,15 @@ def archive_file(request):
     e.g. on tmp storage only'''
     data = json.loads(request.body.decode('utf-8'))
     try:
-        sfile = StoredFile.objects.select_related('rawfile__datasetrawfile', 'filetype', 'rawfile__producer').get(pk=data['item_id'])
+        sfile = StoredFile.objects.select_related('rawfile__datasetrawfile', 'filetype', 'rawfile__producer').get(pk=data['item_id'], deleted=False)
     except StoredFile.DoesNotExist:
-        return JsonResponse({'error': 'File does not exist'}, status=404)
+        return JsonResponse({'error': 'File does not exist, maybe it is deleted?'}, status=404)
     except KeyError:
         return JsonResponse({'error': 'Bad request'}, status=400)
-    sfloc_q = StoredFileLoc.objects.filter(sfile=sfile, deleted=False, purged=False)
+    sfloc_q = StoredFileLoc.objects.filter(sfile=sfile, purged=False)
     if not sfloc_q.exists():
-        return JsonResponse({'error': 'File is possibly deleted, can not archive'}, status=403)
+        return JsonResponse({'error': 'File is possibly deleted, but not marked as such, please '
+            'inform admin -- can not archive'}, status=403)
     elif sfile.rawfile.claimed or hasattr(sfile.rawfile, 'datasetrawfile'):
         return JsonResponse({'error': 'File is in a dataset, please archive entire set or remove it from dataset first'}, status=403)
     elif hasattr(sfile, 'pdcbackedupfile') and sfile.pdcbackedupfile.success == True and sfile.pdcbackedupfile.deleted == False:
@@ -1031,7 +1032,9 @@ def archive_file(request):
         return JsonResponse({'error': 'Derived mzML files are not archived, they can be regenerated from RAW data'}, status=403)
     sfloc = sfloc_q.first()
     create_job('create_pdc_archive', sfloc_id=sfloc.pk, isdir=sfile.filetype.is_folder)
-    # File is set to deleted,purged=True,True in the post-job-view for purge
+    # sfloc is set to purged=True in the post-job-view for purge
+    sfile.deleted = True
+    sfile.save()
     create_job('purge_files', sfloc_ids=[sfloc.pk], need_archive=True)
     return JsonResponse({'state': 'ok'})
 

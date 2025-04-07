@@ -26,7 +26,7 @@ class RenameProject(ProjectJob):
         those confirmed to be in correct location'''
         dsets = Dataset.objects.filter(runname__experiment__project_id=kwargs['proj_id'],
                 deleted=False, purged=False)
-        return StoredFileLoc.objects.filter(deleted=False, purged=False,
+        return StoredFileLoc.objects.filter(sfile__deleted=False, purged=False,
                 servershare__in=[x.storageshare for x in dsets.distinct('storageshare')],
                 path__in=[x.storage_loc for x in dsets.distinct('storage_loc')])
 
@@ -123,7 +123,7 @@ class MoveDatasetServershare(DatasetJob):
         if sfs.count() == 0:
             # Do not error on empty dataset, just skip
             return
-        rsync_sf = sfs.filter(deleted=False, purged=False, sfile__checked=True)
+        rsync_sf = sfs.filter(sfile__deleted=False, purged=False, sfile__checked=True)
         firstsf = sfs.first()
         sharename = firstsf['servershare__name']
         src_controller_url = firstsf['servershare__server__fqdn']
@@ -284,7 +284,7 @@ class DeleteDatasetMzml(DatasetJob):
     task = filetasks.delete_file
 
     def process(self, **kwargs):
-        for fn in self.getfiles_query(**kwargs).filter(deleted=True, purged=False, checked=True,
+        for fn in self.getfiles_query(**kwargs).filter(sfile__deleted=True, purged=False, checked=True,
                 mzmlfile__pwiz_id=kwargs['pwiz_id']):
             fullpath = os.path.join(fn.path, fn.sfile.filename)
             print('Queueing deletion of mzML file {fullpath} from dataset {kwargs["dset_id"]}')
@@ -336,8 +336,10 @@ class ReactivateDeletedDataset(DatasetJob):
                 purged=True, sfile__pdcbackedupfile__isnull=False):
             self.run_tasks.append((rsjobs.restore_file_pdc_runtask(sfloc), {}))
         # Also set archived/archivable files which are already active (purged=False) to not deleted in UI
-        self.getfiles_query(**kwargs).filter(purged=False, deleted=True,
-                sfile__pdcbackedupfile__isnull=False).update(deleted=False)
+        # FIXME deleted=False should be done in view probably, higher up
+        sfs = self.getfiles_query(**kwargs).filter(purged=False, sfile__deleted=True,
+                sfile__pdcbackedupfile__isnull=False).values('sfile_id')
+        StoredFile.objects.filter(pk__in=sfs).update(deleted=False)
         Dataset.objects.filter(pk=kwargs['dset_id']).update(
                 storageshare=ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME))
 

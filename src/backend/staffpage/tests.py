@@ -100,7 +100,8 @@ class RerunSingleQCTest(BaseQCFileTest):
         self.assertEqual(self.qc_jobs.count(), 2)
 
     def test_run_with_archived_file(self):
-        self.oldsss.deleted, self.oldsss.purged = True, True
+        self.oldsf.deleted, self.oldsss.purged = True, True
+        self.oldsf.save()
         self.oldsss.save()
         rm.PDCBackedupFile.objects.create(storedfile=self.oldsf, pdcpath='testpath', success=True)
         resp = self.cl.post(self.url, content_type='application/json', data={'sfid': self.oldsf.pk})
@@ -111,7 +112,8 @@ class RerunSingleQCTest(BaseQCFileTest):
         self.assertEqual(self.qc_jobs.count(), 1)
 
     def test_not_find_archive(self):
-        self.oldsss.deleted, self.oldsss.purged = True, True
+        self.oldsf.deleted, self.oldsss.purged = True, True
+        self.oldsf.save()
         self.oldsss.save()
         # No backup
         resp = self.cl.post(self.url, content_type='application/json', data={'sfid': self.oldsf.pk})
@@ -249,10 +251,10 @@ class RerunManyQCsTest(BaseQCFileTest):
 
         # Rerun with backed up files asks for confirm
         rm.PDCBackedupFile.objects.create(storedfile=self.tmpsf, success=True, deleted=False)
-        self.f3sss.deleted = True
-        self.f3sss.save()
-        self.tmpsss.deleted = True
-        self.tmpsss.save()
+        self.f3sf.deleted = True
+        self.f3sf.save()
+        self.tmpsf.deleted = True
+        self.tmpsf.save()
         resp = self.cl.post(self.url, content_type='application/json', data={
             'instruments': [self.prod.pk, prod2.pk], 'days': days_back, 'confirm': False,
             'ignore_obsolete': False, 'retrieve_archive': False})

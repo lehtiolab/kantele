@@ -130,11 +130,11 @@ def rerun_singleqc(request):
         sf = sfs.get()
         # FIXME first call prob not right
         sfloc = sf.storedfileloc_set.first()
-
-        if sfloc.deleted:
+        if sf.deleted:
             # retrieve if needed
             if hasattr(sf, 'pdcbackedupfile') and sf.pdcbackedupfile.success and not sf.pdcbackedupfile.deleted:
-                create_job('restore_from_pdc_archive', sf_id=sf.pk)
+                sfs.update(deleted=False)
+                create_job('restore_from_pdc_archive', sfloc_id=sfloc.pk)
                 run_singlefile_qc(sf.rawfile, sfloc, user_op,
                         dm.AcquisistionMode(sf.rawfile.qcrun.runtype))
                 msg = f'Queued {sf.filename} QC raw for retrieval from archive and rerun'
@@ -184,14 +184,14 @@ def rerun_qcs(request):
     qcjobs = [x.kwargs['sfloc_id'] for x in jm.Job.objects.filter(funcname='run_longit_qc_workflow',
         state__in=jj.JOBSTATES_WAIT, kwargs__sfloc_id__in=[x.storedfileloc_set.first().pk for x in sfs])]
     duprun_q = Q(rawfile__qcrun__analysis__nextflowsearch__nfwfversionparamset=latest_qcwf)
-    retrieve_q = Q(storedfileloc__deleted=True, pdcbackedupfile__success=True, pdcbackedupfile__deleted=False)
+    retrieve_q = Q(deleted=True, pdcbackedupfile__success=True, pdcbackedupfile__deleted=False)
 
     if confirm_ok:
         user_op = get_operator_user()
         if not ignore_dups:
             sfs = sfs.exclude(storedfileloc__pk__in=qcjobs).exclude(duprun_q)
-        deleted_files = sfs.filter(storedfileloc__deleted=True)
-        sfs = sfs.filter(storedfileloc__deleted=False)
+        deleted_files = sfs.filter(deleted=True)
+        sfs = sfs.filter(deleted=False)
         retr_msg = ''
         if retrieve_archive:
             retrieve_files = deleted_files.filter(retrieve_q)
@@ -208,7 +208,7 @@ def rerun_qcs(request):
         state = 'ok'
     else:
         without_duplicates = sfs.exclude(storedfileloc__pk__in=qcjobs).exclude(duprun_q)
-        not_deleted_files = sfs.filter(storedfileloc__deleted=False)
+        not_deleted_files = sfs.filter(deleted=False)
         archived = sfs.filter(retrieve_q)
         msg = f'You have selected {sfs.count()} QC raw files.'
         if nr_duplicates := sfs.count() - without_duplicates.count():

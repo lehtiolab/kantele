@@ -100,18 +100,19 @@ class StoredFile(models.Model):
     regdate = models.DateTimeField(auto_now_add=True)
     md5 = models.CharField(max_length=32, unique=True)
     checked = models.BooleanField(default=False)
+    # marked for deletion by user, only UI, but it will be indicative
+    # of file being deleted on ALL storages, so if True - file needs restoreing
+    # from archive for any operations
+    deleted = models.BooleanField(default=False)
 
     def __str__(self):
         return self.rawfile.name
 
 
 class StoredFileLoc(models.Model):
-    # FIXME write nice migration for these
-    # Then fix in code!
     sfile = models.ForeignKey(StoredFile, on_delete=models.CASCADE)
     servershare = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
     path = models.TextField()
-    deleted = models.BooleanField(default=False) # marked for deletion by user, only UI
     purged = models.BooleanField(default=False) # deleted from active storage filesystems
 
     class Meta:

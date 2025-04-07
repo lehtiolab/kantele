@@ -190,7 +190,7 @@ class ProjectJob(BaseJob):
 
     def get_sf_ids_jobrunner(self, **kwargs):
         """Get all sf ids in project to mark them as not using pre-this-job"""
-        projfiles = StoredFile.objects.filter(storedfileloc__deleted=False, storedfileloc__purged=False,
+        projfiles = StoredFile.objects.filter(deleted=False, storedfileloc__purged=False,
                 rawfile__datasetrawfile__dataset__runname__experiment__project_id=kwargs['proj_id'])
         dsets = dm.Dataset.objects.filter(runname__experiment__project_id=kwargs['proj_id'])
         allfiles = StoredFile.objects.filter(storedfileloc__servershare__in=[x.storageshare for x in dsets.distinct('storageshare')],

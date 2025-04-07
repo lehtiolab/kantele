@@ -202,7 +202,7 @@ def find_files(request):
         query &= subquery
     dbfns = filemodels.StoredFile.objects.filter(query)
     if request.GET['deleted'] == 'false':
-        dbfns = dbfns.filter(deleted=False, purged=False)
+        dbfns = dbfns.filter(deleted=False)
     return populate_files(dbfns)
 
 
@@ -244,7 +244,6 @@ def populate_files(dbfns):
               'jobstate': [],
               'job_ids': [],
               'deleted': fn.deleted,
-              'purged': fn.purged,
               'smallstatus': [],
              }
         # TODO make unified backup model?
@@ -909,7 +908,7 @@ def create_mzmls(request):
     mzmls_exist_any_deleted_state = filemodels.StoredFile.objects.filter(
             rawfile__datasetrawfile__dataset=dset, storedfileloc__purged=False, checked=True,
             mzmlfile__isnull=False)
-    mzmls_exist = mzmls_exist_any_deleted_state.filter(storedfileloc__deleted=False)
+    mzmls_exist = mzmls_exist_any_deleted_state.filter(deleted=False)
     if num_rawfns == mzmls_exist.filter(mzmlfile__pwiz=pwiz).count():
         return JsonResponse({'error': 'This dataset already has existing mzML files of that '
             'proteowizard version'}, status=403)
@@ -919,10 +918,9 @@ def create_mzmls(request):
     # Remove other pwiz mzMLs
     other_pwiz_mz = mzmls_exist.exclude(mzmlfile__pwiz=pwiz)
     if other_pwiz_mz.count():
-        filemodels.StoredFileLoc.objects.filter(sfile__in=other_pwiz_mz).update(deleted=True)
+        filemodels.StoredFile.objects.filter(pk__in=other_pwiz_mz).update(deleted=True)
         # redefine query since now all the mzmls to deleted are marked deleted=T
-        del_pwiz_q = mzmls_exist_any_deleted_state.exclude(mzmlfile__pwiz=pwiz).filter(
-                storedfileloc__deleted=True)
+        del_pwiz_q = mzmls_exist_any_deleted_state.exclude(mzmlfile__pwiz=pwiz).filter(deleted=True)
         for sf in del_pwiz_q.distinct('mzmlfile__pwiz_id').values('mzmlfile__pwiz_id'):
             create_job('delete_mzmls_dataset', dset_id=dset.pk, pwiz_id=sf['mzmlfile__pwiz_id'])
     create_job('convert_dataset_mzml', options=options, filters=filters,
@@ -954,10 +952,10 @@ def refine_mzmls(request):
     # due to age, its just the number we need, but refined mzMLs should not be)
     mzmls = filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=dset, 
             mzmlfile__isnull=False, checked=True)
-    nr_refined = mzmls.filter(mzmlfile__refined=True, storedfileloc__deleted=False).count()
+    nr_refined = mzmls.filter(mzmlfile__refined=True, deleted=False).count()
     normal_mzml = mzmls.filter(mzmlfile__refined=False)
     nr_mzml = normal_mzml.count()
-    nr_exist_mzml = normal_mzml.filter(storedfileloc__deleted=False, storedfileloc__purged=False).count()
+    nr_exist_mzml = normal_mzml.filter(deleted=False, storedfileloc__purged=False).count()
     nr_dsrs = dset.datasetrawfile_set.count()
     if nr_mzml and nr_mzml == nr_refined:
         return JsonResponse({'error': 'Refined data already exists'}, status=403)

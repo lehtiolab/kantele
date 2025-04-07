@@ -181,7 +181,7 @@ def load_base_analysis(request, wfversion_id, baseanid):
     for dsid in dsets:
         # FIXME
         dssfiles = rm.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dsid,
-                storedfileloc__deleted=False, storedfileloc__purged=False, checked=True)
+                deleted=False, storedfileloc__purged=False, checked=True)
         dsrawfiles = dssfiles.filter(mzmlfile__isnull=True)
         dset_ftype = dsrawfiles.distinct('filetype')
         rawftype = dset_ftype.get().filetype.name
@@ -486,7 +486,7 @@ def get_datasets(request, wfversion_id):
 
         # Get dataset files
         dssfiles = rm.StoredFile.objects.select_related('rawfile__producer', 'filetype').filter(
-                rawfile__datasetrawfile__dataset=dset, storedfileloc__deleted=False,
+                rawfile__datasetrawfile__dataset=dset, deleted=False,
                 storedfileloc__purged=False, checked=True)
         dsrawfiles = dssfiles.filter(mzmlfile__isnull=True)
 
@@ -800,7 +800,7 @@ def store_analysis(request):
                     'sample annotations, please edit the dataset first')
         dsregfiles = rm.RawFile.objects.filter(datasetrawfile__dataset_id=dsid)
         dssfiles = rm.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dsid,
-                        storedfileloc__deleted=False, storedfileloc__purged=False, checked=True)
+                        deleted=False, storedfileloc__purged=False, checked=True)
         dsrawfiles = dssfiles.filter(mzmlfile__isnull=True)
         nrrawfiles = dsrawfiles.count()
         if nrrawfiles < dsregfiles.count():

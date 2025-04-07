@@ -122,7 +122,7 @@ async function fetchCleanup() {
 <a class="button is-small" title="PERMANENTLY delete files from active and cold storage (admins only)" disabled>Purge files</a>
 {/if}
   
-<Table tab="Files" bind:treatItems={treatItems} bind:notif={notif} bind:selected={selectedFiles} fetchUrl="/show/files" findUrl="/find/files" getdetails={getFileDetails} fields={tablefields} inactive={['deleted', 'purged']} on:detailview={showDetails} />
+<Table tab="Files" bind:treatItems={treatItems} bind:notif={notif} bind:selected={selectedFiles} fetchUrl="/show/files" findUrl="/find/files" getdetails={getFileDetails} fields={tablefields} inactive={['deleted']} on:detailview={showDetails} />
 
 {#if detailsVisible}
 <Details closeWindow={() => {detailsVisible = false}} fnIds={detailsVisible} />

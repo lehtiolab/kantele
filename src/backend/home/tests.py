@@ -101,8 +101,7 @@ class TestCreateMzmls(MzmlTests):
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
         self.qesf.refresh_from_db()
-        self.qesss.refresh_from_db()
-        self.assertTrue(self.qesss.deleted)
+        self.assertTrue(self.qesf.deleted)
         #self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare', kwargs__dset_id=self.ds.pk).count(), 0)
         exist_mzml.delete()
 

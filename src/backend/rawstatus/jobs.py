@@ -140,7 +140,7 @@ class MoveSingleFile(SingleFileJob):
         newfn = kwargs.get('newname', src_sfloc.sfile.filename)
         fullnewpath = os.path.join(kwargs['dst_path'], newfn)
         if models.StoredFileLoc.objects.filter(sfile__filename=newfn, path=kwargs['dst_path'],
-                servershare=sshare, deleted=False, purged=False).exists():
+                servershare=sshare, sfile__deleted=False, purged=False).exists():
             return (f'A file in path {kwargs["dst_path"]} with name {src_sfloc.sfile.filename} '
                     'already exists. Please choose another name.')
         elif dm.Dataset.objects.filter(storage_loc=fullnewpath, storageshare=sshare,

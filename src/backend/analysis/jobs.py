@@ -44,8 +44,8 @@ class RefineMzmls(DatasetJob):
         nfwf = models.NextflowWfVersionParamset.objects.get(pk=kwargs['wfv_id'])
         dbfn = rm.StoredFileLoc.objects.get(sfile_id=kwargs['dbfn_id']).values('servershare__name', 'path', 'sfile__filename')
         stagefiles = {'--tdb': [(dbfn['servershare__name'], dbfn['path'], dbfn['sfile__filename'])]}
-        mzmlfiles = self.getfiles_query(**kwargs).filter(checked=True, deleted=False, purged=False,
-                sfile__mzmlfile__isnull=False)
+        mzmlfiles = self.getfiles_query(**kwargs).filter(checked=True, sfile__deleted=False,
+                purged=False, sfile__mzmlfile__isnull=False)
         existing_refined = mzmlfiles.filter(sfile__mzmlfile__refined=True)
         mzml_nonrefined = mzmlfiles.exclude(sfile__rawfile__storedfile__in=existing_refined).select_related('sfile__mzmlfile__pwiz')
         dstshare = rm.ServerShare.objects.get(pk=kwargs['dstshare_id'])
