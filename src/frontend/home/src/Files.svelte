@@ -39,7 +39,9 @@ async function getFileDetails(fnId) {
 	const resp = await getJSON(`/show/file/${fnId}`);
   return `
     <p><span class="has-text-weight-bold">Producer:</span> ${resp.producer}</p>
-    <p><span class="has-text-weight-bold">Storage location:</span> <span class="has-text-primary">${resp.server}</span> / ${resp.path}</p>
+    <p><div class="has-text-weight-bold">Storage locations</div>
+    ${resp.servers.map(x => `<div class="has-text-primary">${x[0]} / ${x[1]} </div>`)}
+    </p>
     ${resp.description ? `<p><span class="has-text-weight-bold">Description:</span> ${resp.description}</p>` : ''}
     `;
 }

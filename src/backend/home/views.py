@@ -589,15 +589,12 @@ def get_analysis_invocation(ana):
 def get_analysis_info(request, anid):
     ana = anmodels.Analysis.objects.filter(pk=anid).select_related('nextflowsearch__job',
         'nextflowsearch__workflow', 'nextflowsearch__nfwfversionparamset').get()
-    storeloc = filemodels.StoredFile.objects.select_related('servershare__server').filter(
-            analysisresultfile__analysis=ana)
     dsets = {x.dataset for x in ana.datasetanalysis_set.all()}
     #projs = {x.runname.experiment.project for x in dsets}
     if not ana.log:
         logentry = ['Analysis without logging or not yet queued']
     else:
         logentry = [x for y in ana.log for x in y.split('\n') if x][-3:]
-    linkedfiles = [(x.id, x.sfile.filename) for x in av.get_servable_files(ana.analysisresultfile_set.select_related('sfile'))]
     errors = []
     if hasattr(ana, 'nextflowsearch'):
         try:
@@ -625,10 +622,15 @@ def get_analysis_info(request, anid):
         nfs_info = {'name': ana.name, 'addToResults': False, 'wf': False}
     dsicount = anmodels.AnalysisDSInputFile.objects.filter(analysisset__analysis=ana).count()
     afscount = ana.analysisfilevalue_set.count()
+    storeloc = filemodels.StoredFileLoc.objects.select_related('servershare__server').filter(
+            sfile__analysisresultfile__analysis=ana).values('servershare__server__uri',
+                    'servershare__name', 'path')
+    linkedfiles = [(x.id, x.sfile.filename) for x in av.get_servable_files(
+        ana.analysisresultfile_set.select_related('sfile'))]
     resp = {'nrdsets': len(dsets),
             'nrfiles': dsicount + afscount,
-            'storage_locs': [{'server': x.servershare.server.uri, 'share': x.servershare.name, 'path': x.path}
-                for x in storeloc],
+            'storage_locs': [{'server': x['servershare__server__uri'],
+                'share': x['servershare__name'], 'path': x['path']} for x in storeloc],
             'log': logentry, 
             'base_analysis': {'nfsid': False, 'name': False},
             'servedfiles': linkedfiles,
@@ -710,15 +712,18 @@ def get_dset_info(request, dataset_id):
 @login_required
 def get_file_info(request, file_id):
     sfile = filemodels.StoredFile.objects.filter(pk=file_id).select_related(
-        'rawfile__datasetrawfile', 'mzmlfile', 'servershare',
+        'rawfile__datasetrawfile', 'mzmlfile', 
         'rawfile__producer__msinstrument', 'analysisresultfile__analysis', 
         'libraryfile', 'userfile').get()
     is_mzml = hasattr(sfile, 'mzmlfile')
-    info = {'server': sfile.servershare.name, 'path': sfile.path, 'analyses': [],
+    info = {'analyses': [], 'servers': [],
             'producer': sfile.rawfile.producer.name,
             'filename': sfile.filename,
             'renameable': False if is_mzml else True,
             }
+    for x in sfile.storedfileloc_set.all().distinct('servershare__name', 'path').values('servershare__name', 'path'):
+        info['servers'].append((x['servershare__name'], x['path']))
+
     if hasattr(sfile, 'libraryfile'):
         desc = sfile.libraryfile.description
     elif hasattr(sfile, 'userfile'):
@@ -776,9 +781,9 @@ def fetch_dset_details(dset):
     # FIXME Hardcoded microscopy!
     nonms_dtypes = {x.id: x.name for x in dsmodels.Datatype.objects.all()
                     if x.name in ['microscopy']}
-    files = filemodels.StoredFile.objects.select_related('rawfile__producer', 'servershare', 'filetype').filter(
+    files = filemodels.StoredFile.objects.select_related('rawfile__producer', 'filetype').filter(
         rawfile__datasetrawfile__dataset_id=dset.id)
-    servers = [x[0] for x in files.distinct('servershare').values_list('servershare__server__uri')]
+    servers = [x[0] for x in files.distinct('storedfileloc__servershare').values_list('storedfileloc__servershare__server__uri')]
     info['storage_loc'] = '{} - {}'.format(';'.join(servers), dset.storage_loc)
     info['instruments'] = list(set([x.rawfile.producer.name for x in files]))
     info['instrument_types'] = list(set([x.rawfile.producer.shortname for x in files]))

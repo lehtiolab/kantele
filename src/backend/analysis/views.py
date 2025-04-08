@@ -1372,14 +1372,18 @@ def unfreeze_analysis(request):
 
 
 @login_required
-def serve_analysis_file(request, file_id):
+def serve_analysis_file(request, arf_id):
+    # FIXME this will possibly have multiple files on get() call -> error 500
+    # since we moved to storedfileloc
+    # THERE IS NO ACTUAL STOREDFILELOC YET FOR WEB SERVED FILES!
     try:
-        sf = get_servable_files(am.AnalysisResultFile.objects.select_related(
-            'sfile__servershare')).get(pk=file_id)
+        arf = get_servable_files(am.AnalysisResultFile.objects.filter(pk=arf_id,
+            sfile__deleted=False)).values('sfile__storedfileloc__path',
+                    'sfile__filename').get()
     except am.AnalysisResultFile.DoesNotExist:
         return HttpResponseForbidden()
     resp = HttpResponse()
-    resp['X-Accel-Redirect'] = os.path.join(settings.NGINX_ANALYSIS_REDIRECT, sf.sfile.path, sf.sfile.filename)
+    resp['X-Accel-Redirect'] = os.path.join(settings.NGINX_ANALYSIS_REDIRECT, arf['sfile__storedfileloc__path'], arf['sfile__filename'])
     return resp
 
 
@@ -1407,8 +1411,8 @@ def find_datasets(request):
     return JsonResponse(dsets)
     
 
-def get_servable_files(resultfiles):
-    return resultfiles.filter(sfile__filename__in=settings.SERVABLE_FILENAMES)
+def get_servable_files(ana_resultfiles):
+    return ana_resultfiles.filter(sfile__filename__in=settings.SERVABLE_FILENAMES)
 
 
 def write_analysis_log(logline, analysis_id):

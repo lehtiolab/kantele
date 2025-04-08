@@ -29,11 +29,11 @@ def get_dset_context(proj_id):
     proj = models.Project.objects.values('name', 'pi__name', 'ptype__name', 'ptype_id').get(pk=proj_id)
     return {'dataset_id': 'false', 'is_owner': 'true', 'initdata': {'name': proj['name'],
         'proj_id': proj_id, 'pi_name': proj['pi__name'], 'ptype': proj['ptype__name'],
-        'secclass': max(models.DatasetSecurityClass),
+        'secclass': max(models.DataSecurityClass),
         'isExternal': proj['ptype_id'] != settings.LOCAL_PTYPE_ID,
         'datasettypes': [{'name': x.name, 'id': x.id} for x in
             models.Datatype.objects.filter(public=True)],
-        'securityclasses': [{'id': x[0], 'name': x[1]} for x in models.DatasetSecurityClass.choices],
+        'securityclasses': [{'id': x[0], 'name': x[1]} for x in models.DataSecurityClass.choices],
         'all_projects': {x.id: {'name': x.name, 'id': x.id} for x in models.Project.objects.filter(active=True)},
         }
         }
@@ -731,7 +731,7 @@ def move_project_cold(request):
     # TODO close_project this should be called
     data = json.loads(request.body.decode('utf-8'))
     if 'item_id' not in data or not data['item_id']:
-        return JsonResponse({'state': 'error', 'error': 'No project specified for retiring'}, status=400)
+        return JsonResponse({'state': 'error', 'error': 'No project specified for closing'}, status=400)
     projquery = models.Project.objects.filter(pk=data['item_id'], active=True)
     if not projquery:
         return JsonResponse({'state': 'error', 'error': 'Project is retired, purged or never existed'}, status=400)
@@ -883,10 +883,10 @@ def move_project_active(request):
             # if ANY dataset gets reactivated, project is active
             projquery.update(active=True)
     if result['errormsgs']:
-        result['error'] = '{} Errors: {}'.format(result['error'], '; '.join(result.pop('errormsgs')))
+        result['error'] = f'{result["error"]} Errors: {"; ".join(result.pop("errormsgs"))}'
         return JsonResponse(result, status=500)
     else:
-        models.ProjectLog.objects.create(project=data['item_id'], level=models.ProjLogLevels.INFO,
+        models.ProjectLog.objects.create(project_id=data['item_id'], level=models.ProjLogLevels.INFO,
                 message=f'User {request.user.id} reopened project')
         return JsonResponse({})
 
@@ -915,7 +915,7 @@ def purge_project(request):
         return JsonResponse(result, status=500)
     else:
         projquery.update(active=False)
-        models.ProjectLog.objects.create(project=data['item_id'], level=models.ProjLogLevels.INFO,
+        models.ProjectLog.objects.create(project_id=data['item_id'], level=models.ProjLogLevels.INFO,
                 message=f'User {request.user.id} purged project')
         return JsonResponse({})
 
@@ -935,7 +935,7 @@ def get_dset_storestate(dset_id, dsfiles=False):
         storestate = 'active-only'
     elif coldfiles.count() == dsfc:
         storestate = 'cold'
-    elif dsfiles.filter(purged=True).count() == dsfc and dsfiles.filter(pdcbackedupfile__deleted=True).count() == dsfiles.filter(pdcbackedupfile__isnull=False).count():
+    elif dsfiles.filter(deleted=True).count() == dsfc and dsfiles.filter(pdcbackedupfile__deleted=True).count() == dsfiles.filter(pdcbackedupfile__isnull=False).count():
         # FIXME this is incorrect backup count?
         storestate = 'purged'
     elif dsfiles.filter(pdcbackedupfile__deleted=True).exists():
@@ -996,7 +996,7 @@ def reactivate_dataset(dset):
     if storestate == 'purged':
         return {'state': 'error', 'error': 'Cannot reactivate purged dataset'}
     elif storestate == 'broken':
-        return {'state': 'error', 'error': 'Cannot reactivate dataset, files missing on active storage'}
+        return {'state': 'error', 'error': 'Cannot reactivate dataset, files missing in backup storage'}
     elif storestate == 'new':
         return {'state': 'error', 'error': 'Cannot reactivate new dataset'}
     elif storestate == 'unknown':
@@ -1020,7 +1020,7 @@ def reactivate_dataset(dset):
 def move_dataset_cold(request):
     data = json.loads(request.body.decode('utf-8'))
     try:
-        dset = models.Dataset.objects.select_related('runname__experiment__project__ptype_id').get(pk=data['item_id'])
+        dset = models.Dataset.objects.select_related('runname__experiment__project').get(pk=data['item_id'])
     except models.Dataset.DoesNotExist:
         return JsonResponse({'error': 'Dataset does not exist'}, status=403)
     dsownq = models.DatasetOwner.objects.filter(dataset_id=dset.pk)
@@ -1041,7 +1041,7 @@ def move_dataset_cold(request):
 def move_dataset_active(request):
     data = json.loads(request.body.decode('utf-8'))
     try:
-        dset = models.Dataset.objects.select_related('runname__experiment__project__ptype_id').get(pk=data['item_id'])
+        dset = models.Dataset.objects.select_related('runname__experiment__project').get(pk=data['item_id'])
     except models.Dataset.DoesNotExist:
         return JsonResponse({'error': 'Dataset does not exist'}, status=403)
     # check_ownership without deleted demand:

@@ -67,7 +67,13 @@ onMount(async() => {
 <DetailBox notif={notif} closeWindow={closeWindow}>
   {#each Object.entries(items) as [fnid, fn]}
   <p><span class="has-text-weight-bold">Producer</span> {fn.producer}</p>
-  <p><span class="has-text-weight-bold">Storage location:</span> <span class="has-text-primary">{fn.server}</span> / {fn.path}</p>
+  <div class="has-text-weight-bold">Storage locations:</div>
+  {#each fn.servers as [server, path]}
+  <div>
+    <span class="has-text-primary">{server}</span> / {path}
+  </div>
+  {/each}
+
   {#if fn.description}
   <p><span class="has-text-weight-bold">Description:</span>{fn.description}</p>
   {/if}

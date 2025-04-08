@@ -1118,3 +1118,153 @@ class TestLockDataset(BaseTest):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.ProjectLog.objects.last().message,
                 f'User {self.user.pk} locked dataset {self.ds.pk}')
+
+
+class TestArchiveDataset(BaseTest):
+    url = '/datasets/archive/dataset/'
+
+    def test_fail(self):
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': False})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'Dataset does not exist')
+
+        # Wrong user
+        run = dm.RunName.objects.create(name='someoneelsesrun', experiment=self.exp1)
+        ds = dm.Dataset.objects.create(date=self.p1.registered, runname=run,
+                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore,
+                securityclass=max(rm.DataSecurityClass))
+        ds.save()
+        otheruser = User.objects.create(username='test', password='test')
+        dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': ds.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'Cannot archive dataset, no permission for user')
+
+    def test_ok(self):
+        dsfiles = rm.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=self.ds)
+        dsfiles.update(deleted=True)
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.json()['error'], 'Cannot archive dataset, already purged')
+
+        dsfiles.update(deleted=False)
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} deactivated dataset {self.ds.pk}')
+
+
+
+class TestReactivateDataset(BaseTest):
+    url = '/datasets/undelete/dataset/'
+
+    def test_fail(self):
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': False})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'Dataset does not exist')
+
+        # Wrong user
+        run = dm.RunName.objects.create(name='someoneelsesrun', experiment=self.exp1)
+        ds = dm.Dataset.objects.create(date=self.p1.registered, runname=run,
+                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore,
+                securityclass=max(rm.DataSecurityClass))
+        ds.save()
+        otheruser = User.objects.create(username='test', password='test')
+        dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': ds.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'Cannot reactivate dataset, no permission for user')
+
+        # Already active
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.json()['error'], 'Dataset already in active storage')
+
+    def test_ok(self):
+        dsfiles = rm.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=self.ds)
+        dsfiles.update(deleted=True)
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.json()['error'], 'Cannot reactivate purged dataset')
+        rm.PDCBackedupFile.objects.bulk_create([rm.PDCBackedupFile(storedfile=sf, pdcpath=sf.md5,
+            success=True) for sf in dsfiles])
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} reactivated dataset {self.ds.pk}')
+
+
+class TestArchiveProject(BaseTest):
+    url = '/datasets/archive/project/'
+
+    def test_fail(self):
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': False})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'No project specified for closing')
+
+        # Wrong user
+        run = dm.RunName.objects.create(name='someoneelsesrun', experiment=self.exp1)
+        ds = dm.Dataset.objects.create(date=self.p1.registered, runname=run,
+                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore,
+                securityclass=max(rm.DataSecurityClass))
+        ds.save()
+        otheruser = User.objects.create(username='test', password='test')
+        dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.p1.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'User has no permission to retire this project, does not own all datasets in project')
+
+    def test_ok(self):
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.p1.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} closed project')
+
+
+class TestReactivateProject(BaseTest):
+    url = '/datasets/undelete/project/'
+
+    def setUp(self):
+        super().setUp()
+        self.p1.active = False
+        self.p1.save()
+
+    def test_fail(self):
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': False})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'No project specified for reactivating')
+
+        # Wrong user
+        run = dm.RunName.objects.create(name='someoneelsesrun', experiment=self.exp1)
+        ds = dm.Dataset.objects.create(date=self.p1.registered, runname=run,
+                datatype=self.dtype, storage_loc='test', storageshare=self.ssnewstore,
+                securityclass=max(rm.DataSecurityClass))
+        ds.save()
+        otheruser = User.objects.create(username='test', password='test')
+        dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.p1.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'User has no permission to reactivate this project, does not own all datasets in project')
+
+    def test_ok(self):
+        dsfiles = rm.StoredFile.objects.filter(rawfile__datasetrawfile__dataset__runname__experiment__project=self.p1)
+        dsfiles.update(deleted=True)
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.p1.pk})
+        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.json()['error'], 'Not all project datasets could be reactivated. Errors: Cannot reactivate purged dataset')
+
+        rm.PDCBackedupFile.objects.bulk_create([rm.PDCBackedupFile(storedfile=sf, pdcpath=sf.md5,
+            success=True) for sf in dsfiles])
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.p1.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} reopened project')
+
