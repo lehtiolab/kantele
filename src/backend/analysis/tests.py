@@ -772,7 +772,7 @@ class TestStoreExistingIsoAnalysis(AnalysisTest):
           'filesamples': {self.f3sfmz.pk: 'setA'},
           'fullname': fullname,
           'infiles': {self.f3sfmz.pk: 1},
-          'sf_ids': [self.f3sfmz.pk],
+          'sfloc_ids': [self.f3mzsss.pk],
           'inputs': {'components': {c_ch.INPUTDEF.name: self.inputdef.value,
               c_ch.PREFRAC.name: '.*fr([0-9]+).*mzML$', c_ch.ISOQUANT.name: {},
               c_ch.ISOQUANT_SAMPLETABLE.name: [[self.qch.name, 'setA', 'samplename', 'groupname']],
