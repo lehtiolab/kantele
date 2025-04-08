@@ -597,7 +597,7 @@ def change_owners(request):
     data = json.loads(request.body.decode('utf-8'))
     try:
         dset = models.Dataset.objects.filter(pk=data['dataset_id']).values('pk', 'deleted',
-                'runname__experiment__project__ptype_id').get()
+                'runname__experiment__project_id', 'runname__experiment__project__ptype_id').get()
     except models.Dataset.DoesNotExist:
         print('change_owners could not find dataset with that ID {}'.format(data['dataset_id']))
         return JsonResponse({'error': 'Something went wrong trying to change ownership for that dataset'}, status=403)
@@ -609,13 +609,13 @@ def change_owners(request):
     is_already_owner = is_already_ownerq.exists()
     if data['op'] == 'add' and not is_already_owner:
         newowner = models.DatasetOwner.objects.create(dataset_id=dset['pk'], user_id=data['owner'])
-        models.ProjectLog.objects.create(project=dset.runname.experiment.project,
+        models.ProjectLog.objects.create(project_id=dset['runname__experiment__project_id'],
                 level=models.ProjLogLevels.SECURITY,
                 message=f'User {request.user.id} made {data["owner"]} an owner of dset {dset.pk}')
         return JsonResponse({'result': 'ok'})
     elif data['op'] == 'del' and is_already_owner and dsownq.count() > 1:
         is_already_ownerq.delete()
-        models.ProjectLog.objects.create(project=dset.runname.experiment.project,
+        models.ProjectLog.objects.create(project_id=dset['runname__experiment__project_id'],
                 level=models.ProjLogLevels.SECURITY,
                 message=f'User {request.user.id} deleted owner {data["owner"]} from dataset {dset.pk}')
         return JsonResponse({'result': 'ok'})

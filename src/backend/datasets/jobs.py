@@ -237,8 +237,8 @@ class ConvertDatasetMzml(DatasetJob):
 
     def getfiles_query(self, **kwargs):
         '''Return raw files only (from dset path)'''
-        return super().getfiles_query(**kwargs).exclude(mzmlfile__isnull=False).select_related(
-                'servershare', 'rawfile__datasetrawfile__dataset', 'sfile__filetype')
+        return super().getfiles_query(**kwargs).exclude(sfile__mzmlfile__isnull=False).select_related(
+                'servershare', 'sfile__rawfile__datasetrawfile__dataset', 'sfile__filetype')
 
     def process(self, **kwargs):
         dset = Dataset.objects.get(pk=kwargs['dset_id'])

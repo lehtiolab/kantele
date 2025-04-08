@@ -193,12 +193,12 @@ def find_files(request):
     query = Q(filename__icontains=searchterms[0])
     query |= Q(rawfile__name__icontains=searchterms[0])
     query |= Q(rawfile__producer__name__icontains=searchterms[0])
-    query |= Q(path__icontains=searchterms[0])
+    query |= Q(storedfileloc__path__icontains=searchterms[0])
     for term in searchterms[1:]:
         subquery = Q(filename__icontains=term)
         subquery |= Q(rawfile__name__icontains=term)
         subquery |= Q(rawfile__producer__name__icontains=term)
-        subquery |= Q(path__icontains=term)
+        subquery |= Q(storedfileloc__path__icontains=term)
         query &= subquery
     dbfns = filemodels.StoredFile.objects.filter(query)
     if request.GET['deleted'] == 'false':

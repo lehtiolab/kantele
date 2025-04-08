@@ -971,8 +971,10 @@ def store_analysis(request):
 
     in_components = {k: v for k, v in req['components'].items() if v}
     jobinputs = {'components': wf_components, 'singlefiles': {}, 'multifiles': {}, 'params': {}}
+    sflocs = rm.StoredFileLoc.objects.filter(sfile_id__in=[int(x) for x in req['infiles'].keys()],
+            servershare__name=settings.PRIMARY_STORAGESHARENAME).values('pk')
     data_args = {'filesamples': {}, 'platenames': {}, 'filefields': defaultdict(dict),
-            'infiles': req['infiles'], 'sf_ids': [int(x) for x in req['infiles'].keys()]}
+            'infiles': req['infiles'], 'sfloc_ids': [x['pk'] for x in sflocs]}
 
     # Input file definition
     if 'INPUTDEF' in wf_components:
