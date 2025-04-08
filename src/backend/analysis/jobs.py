@@ -210,14 +210,14 @@ class RunNextflowWorkflow(MultiFileJob):
         nfwf = models.NextflowWfVersionParamset.objects.select_related('nfworkflow').get(
             pk=kwargs['wfv_id'])
         stagefiles = {}
-        for flag, sf_id in kwargs['inputs']['singlefiles'].items():
-            sf = rm.StoredFile.objects.select_related('servershare').get(pk=sf_id)
-            stagefiles[flag] = [(sf.servershare.name, sf.path, sf.filename)]
-        for flag, sf_ids in kwargs['inputs']['multifiles'].items():
+        for flag, sfloc_id in kwargs['inputs']['singlefiles'].items():
+            sfl = rm.StoredFileLoc.objects.select_related('servershare', 'sfile').get(pk=sfloc_id)
+            stagefiles[flag] = [(sfl.servershare.name, sfl.path, sfl.sfile.filename)]
+        for flag, sfloc_ids in kwargs['inputs']['multifiles'].items():
             stagefiles[flag] = []
-            for sf_id in sf_ids:
-                sf = rm.StoredFile.objects.select_related('servershare').get(pk=sf_id)
-                stagefiles[flag].append((sf.servershare.name, sf.path, sf.filename)) 
+            for sfloc_id in sfloc_ids:
+                sfl = rm.StoredFileLoc.objects.select_related('servershare', 'sfile').get(pk=sfloc_id)
+                stagefiles[flag].append((sfl.servershare.name, sfl.path, sfl.sfile.filename)) 
         # re-filter dset input files in case files are removed or added to dataset
         # between a stop/error and rerun of job
         sflocs_passed = self.getfiles_query(**kwargs)

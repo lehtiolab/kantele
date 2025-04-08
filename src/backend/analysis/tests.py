@@ -26,7 +26,7 @@ class AnalysisTest(BaseTest):
                 source_md5='usrfmd5', size=100, claimed=True, date=timezone.now())
         self.sfusr = rm.StoredFile.objects.create(rawfile=self.usrfraw, md5=self.usrfraw.source_md5,
                 filetype=self.uft, filename=self.usrfraw.name, checked=True)
-        rm.StoredFileLoc.objects.create(sfile=self.sfusr, servershare=self.sstmp, path='')
+        rm.StoredFileLoc.objects.create(sfile=self.sfusr, servershare=self.ssnewstore, path='')
         self.usedtoken = rm.UploadToken.objects.create(user=self.user, token='usrffailtoken',
                 expired=False, producer=self.prod, filetype=self.uft,
                 uploadtype=rm.UploadFileType.USERFILE, expires=timezone.now() + timedelta(1))

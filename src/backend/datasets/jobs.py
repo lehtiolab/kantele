@@ -353,9 +353,9 @@ class DeleteDatasetPDCBackup(DatasetJob):
 
 def get_or_create_mzmlentry(fn, pwiz, refined, servershare_id, path, mzmlfilename):
     '''This also resets the path of the mzML file in case it's deleted'''
-    new_md5 = f'mzml_{fn.rawfile.source_md5[5:]}'
+    new_md5 = f'mzml_{fn.sfile.rawfile.source_md5[5:]}'
     mzsf, cr = StoredFile.objects.get_or_create(mzmlfile__pwiz=pwiz, mzmlfile__refined=refined,
-            rawfile_id=fn.rawfile_id, filetype_id=fn.filetype_id, defaults={'md5': new_md5,
+            rawfile_id=fn.rawfile_id, filetype_id=fn.sfile.filetype_id, defaults={'md5': new_md5,
                 'filename': mzmlfilename})
     sfl, _ = StoredFileLoc.objects.get_or_create(sfile=mzsf, defaults={'servershare_id': servershare_id, 'path': path})
     if cr:

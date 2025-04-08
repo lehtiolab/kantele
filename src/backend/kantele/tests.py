@@ -182,7 +182,7 @@ class BaseTest(TestCase):
 
         self.sflib = rm.StoredFile.objects.create(rawfile=self.libraw, md5=self.libraw.source_md5,
         filetype=self.ft, checked=True, filename=self.libraw.name)
-        rm.StoredFileLoc.objects.create(sfile=self.sflib, servershare=self.sstmp, path='')
+        rm.StoredFileLoc.objects.create(sfile=self.sflib, servershare=self.ssnewstore, path='')
         self.lf = am.LibraryFile.objects.create(sfile=self.sflib, description='This is a libfile')
 
 #        # User files for input

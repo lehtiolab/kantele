@@ -1052,17 +1052,21 @@ def store_analysis(request):
             param_id__in=req['singlefiles']).delete()
     for pid, sfid in req['singlefiles'].items():
         afp, created = am.AnalysisFileParam.objects.update_or_create(defaults={'sfile_id': sfid}, analysis=analysis, param_id=pid)
-        jobinputs['singlefiles'][afp.param.nfparam] = sfid
+        sfloc = rm.StoredFileLoc.objects.get(sfile_id=sfid,
+                servershare__name=settings.PRIMARY_STORAGESHARENAME)
+        jobinputs['singlefiles'][afp.param.nfparam] = sfloc.pk
     # Re-create multifiles, they cannot be updated since all files map to analysis/param_id
     # resulting in only a single row in DB
     for pid, sfids in req['multifiles'].items():
         for sfid in sfids:
             afp = am.AnalysisFileParam.objects.create(sfile_id=sfid,
                     analysis=analysis, param_id=pid)
+            sfloc = rm.StoredFileLoc.objects.get(sfile_id=sfid,
+                    servershare__name=settings.PRIMARY_STORAGESHARENAME)
             try:
-                jobinputs['multifiles'][afp.param.nfparam].append(sfid)
+                jobinputs['multifiles'][afp.param.nfparam].append(sfloc.pk)
             except KeyError:
-                jobinputs['multifiles'][afp.param.nfparam] = [sfid]
+                jobinputs['multifiles'][afp.param.nfparam] = [sfloc.pk]
 
     # Base analysis
     if req['base_analysis']['selected']:
