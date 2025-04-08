@@ -18,7 +18,6 @@ from kantele import settings
 from analysis import models as am
 from analysis import jobs as aj
 from datasets import models as dm
-from datasets.views import move_dset_project_servershare
 from rawstatus import models as rm
 from rawstatus.views import create_upload_token
 from home import views as hv
@@ -180,8 +179,9 @@ def load_base_analysis(request, wfversion_id, baseanid):
 
     # Select files (raw, mzml, refined) used in base analysis
     for dsid in dsets:
+        # FIXME
         dssfiles = rm.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dsid,
-                deleted=False, purged=False, checked=True)
+                deleted=False, storedfileloc__purged=False, checked=True)
         dsrawfiles = dssfiles.filter(mzmlfile__isnull=True)
         dset_ftype = dsrawfiles.distinct('filetype')
         rawftype = dset_ftype.get().filetype.name
@@ -485,9 +485,9 @@ def get_datasets(request, wfversion_id):
                     dataset=dset).exclude(field__startswith='__')})
 
         # Get dataset files
-        dssfiles = rm.StoredFile.objects.select_related('rawfile__producer', 'servershare',
-                'filetype').filter(rawfile__datasetrawfile__dataset=dset,
-                        deleted=False, purged=False, checked=True)
+        dssfiles = rm.StoredFile.objects.select_related('rawfile__producer', 'filetype').filter(
+                rawfile__datasetrawfile__dataset=dset, deleted=False,
+                storedfileloc__purged=False, checked=True)
         dsrawfiles = dssfiles.filter(mzmlfile__isnull=True)
 
         # For reporting in interface and checking
@@ -800,7 +800,7 @@ def store_analysis(request):
                     'sample annotations, please edit the dataset first')
         dsregfiles = rm.RawFile.objects.filter(datasetrawfile__dataset_id=dsid)
         dssfiles = rm.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dsid,
-                        deleted=False, purged=False, checked=True)
+                        deleted=False, storedfileloc__purged=False, checked=True)
         dsrawfiles = dssfiles.filter(mzmlfile__isnull=True)
         nrrawfiles = dsrawfiles.count()
         if nrrawfiles < dsregfiles.count():
@@ -825,14 +825,6 @@ def store_analysis(request):
         if dsfiles[dsid].count() < nrrawfiles:
             response_errors.append(f'Files of type {req["picked_ftypes"][dsid]} are fewer than '
                     f'raw files, please fix - for dataset {dsname}')
-
-    # Already here, queue migration servershare job
-    primary_share = rm.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
-    for dset in dsets.values():
-        if dset.storageshare.server != primary_share.server:
-            if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
-                    settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
-                return JsonResponse({'error': error}, status=403)
 
     for dsid in req['dsids']:
         if req['upload_external'] and not req['wfid']:
@@ -959,7 +951,7 @@ def store_analysis(request):
             upl_ft = rm.StoredFileType.objects.get(filetype=settings.ANALYSIS_FT_NAME)
             ana_prod = rm.Producer.objects.get(client_id=settings.ANALYSISCLIENT_APIKEY)
             upl_token = create_upload_token(upl_ft.pk, request.user.pk, ana_prod,
-                    rm.UploadToken.UploadFileType.ANALYSIS)
+                    rm.UploadFileType.ANALYSIS)
             exta = am.ExternalAnalysis.objects.create(analysis=analysis,
                     description=req['external_description'], last_token=upl_token)
         else:
@@ -1212,7 +1204,7 @@ def renew_token(request):
     analysis.externalanalysis.last_token.invalidate()
     new_token = create_upload_token(analysis.externalanalysis.last_token.filetype.pk,
             request.user.pk, analysis.externalanalysis.last_token.producer, 
-            rm.UploadToken.UploadFileType.ANALYSIS)
+            rm.UploadFileType.ANALYSIS)
     analysis.externalanalysis.last_token = new_token
     analysis.externalanalysis.save()
     host = settings.KANTELEHOST or request.build_absolute_uri('/')
@@ -1282,7 +1274,8 @@ def purge_analysis(request):
     analysis.save()
     webshare = rm.ServerShare.objects.get(name=settings.WEBSHARENAME)
     # Delete files on web share here since the job tasks run on storage cannot do that
-    for webfile in rm.StoredFile.objects.filter(analysisresultfile__analysis__id=analysis.pk, servershare_id=webshare.pk):
+    for webfile in rm.StoredFile.objects.filter(analysisresultfile__analysis__id=analysis.pk,
+            storedfileloc__servershare_id=webshare.pk):
         fpath = os.path.join(settings.WEBSHARE, webfile.path, webfile.filename)
         os.unlink(fpath)
     sfiles = rm.StoredFile.objects.filter(analysisresultfile__analysis__id=analysis.pk)
@@ -1379,14 +1372,18 @@ def unfreeze_analysis(request):
 
 
 @login_required
-def serve_analysis_file(request, file_id):
+def serve_analysis_file(request, arf_id):
+    # FIXME this will possibly have multiple files on get() call -> error 500
+    # since we moved to storedfileloc
+    # THERE IS NO ACTUAL STOREDFILELOC YET FOR WEB SERVED FILES!
     try:
-        sf = get_servable_files(am.AnalysisResultFile.objects.select_related(
-            'sfile__servershare')).get(pk=file_id)
+        arf = get_servable_files(am.AnalysisResultFile.objects.filter(pk=arf_id,
+            sfile__deleted=False)).values('sfile__storedfileloc__path',
+                    'sfile__filename').get()
     except am.AnalysisResultFile.DoesNotExist:
         return HttpResponseForbidden()
     resp = HttpResponse()
-    resp['X-Accel-Redirect'] = os.path.join(settings.NGINX_ANALYSIS_REDIRECT, sf.sfile.path, sf.sfile.filename)
+    resp['X-Accel-Redirect'] = os.path.join(settings.NGINX_ANALYSIS_REDIRECT, arf['sfile__storedfileloc__path'], arf['sfile__filename'])
     return resp
 
 
@@ -1414,8 +1411,8 @@ def find_datasets(request):
     return JsonResponse(dsets)
     
 
-def get_servable_files(resultfiles):
-    return resultfiles.filter(sfile__filename__in=settings.SERVABLE_FILENAMES)
+def get_servable_files(ana_resultfiles):
+    return ana_resultfiles.filter(sfile__filename__in=settings.SERVABLE_FILENAMES)
 
 
 def write_analysis_log(logline, analysis_id):

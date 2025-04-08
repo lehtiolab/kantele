@@ -39,7 +39,9 @@ async function getFileDetails(fnId) {
 	const resp = await getJSON(`/show/file/${fnId}`);
   return `
     <p><span class="has-text-weight-bold">Producer:</span> ${resp.producer}</p>
-    <p><span class="has-text-weight-bold">Storage location:</span> <span class="has-text-primary">${resp.server}</span> / ${resp.path}</p>
+    <p><div class="has-text-weight-bold">Storage locations</div>
+    ${resp.servers.map(x => `<div class="has-text-primary">${x[0]} / ${x[1]} </div>`)}
+    </p>
     ${resp.description ? `<p><span class="has-text-weight-bold">Description:</span> ${resp.description}</p>` : ''}
     `;
 }
@@ -122,7 +124,7 @@ async function fetchCleanup() {
 <a class="button is-small" title="PERMANENTLY delete files from active and cold storage (admins only)" disabled>Purge files</a>
 {/if}
   
-<Table tab="Files" bind:treatItems={treatItems} bind:notif={notif} bind:selected={selectedFiles} fetchUrl="/show/files" findUrl="/find/files" getdetails={getFileDetails} fields={tablefields} inactive={['deleted', 'purged']} on:detailview={showDetails} />
+<Table tab="Files" bind:treatItems={treatItems} bind:notif={notif} bind:selected={selectedFiles} fetchUrl="/show/files" findUrl="/find/files" getdetails={getFileDetails} fields={tablefields} inactive={['deleted']} on:detailview={showDetails} />
 
 {#if detailsVisible}
 <Details closeWindow={() => {detailsVisible = false}} fnIds={detailsVisible} />

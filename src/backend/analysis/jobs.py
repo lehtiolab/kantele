@@ -42,12 +42,12 @@ class RefineMzmls(DatasetJob):
         analysis.nextflowsearch.token = f'nf-{uuid4()}'
         analysis.nextflowsearch.save()
         nfwf = models.NextflowWfVersionParamset.objects.get(pk=kwargs['wfv_id'])
-        dbfn = rm.StoredFile.objects.get(pk=kwargs['dbfn_id'])
-        stagefiles = {'--tdb': [(dbfn.servershare.name, dbfn.path, dbfn.filename)]}
-        mzmlfiles = self.getfiles_query(**kwargs).filter(checked=True, deleted=False, purged=False,
-                mzmlfile__isnull=False)
-        existing_refined = mzmlfiles.filter(mzmlfile__refined=True)
-        mzml_nonrefined = mzmlfiles.exclude(rawfile__storedfile__in=existing_refined).select_related('mzmlfile__pwiz')
+        dbfn = rm.StoredFileLoc.objects.get(sfile_id=kwargs['dbfn_id']).values('servershare__name', 'path', 'sfile__filename')
+        stagefiles = {'--tdb': [(dbfn['servershare__name'], dbfn['path'], dbfn['sfile__filename'])]}
+        mzmlfiles = self.getfiles_query(**kwargs).filter(checked=True, sfile__deleted=False,
+                purged=False, sfile__mzmlfile__isnull=False)
+        existing_refined = mzmlfiles.filter(sfile__mzmlfile__refined=True)
+        mzml_nonrefined = mzmlfiles.exclude(sfile__rawfile__storedfile__in=existing_refined).select_related('sfile__mzmlfile__pwiz')
         dstshare = rm.ServerShare.objects.get(pk=kwargs['dstshare_id'])
         timestamp = datetime.strftime(analysis.date, '%Y%m%d_%H.%M')
         runpath = re.sub('[^a-zA-Z0-9\.\-_]', '_', f'{analysis.id}_{analysis.name}_{timestamp}')
@@ -55,11 +55,11 @@ class RefineMzmls(DatasetJob):
         for x in mzml_nonrefined:
             # FIXME In task: ln -s {dbid}___{fn}_refined.mzML name as input, leave out that part
             # from NF pipeline, process that name in task also, keep out of job and NF
-            ref_mzml_fname = f'{os.path.splitext(x.filename)[0]}_refined.mzML'
-            ref_sf = get_or_create_mzmlentry(x, x.mzmlfile.pwiz, refined=True,
+            ref_mzml_fname = f'{os.path.splitext(x.sfile.filename)[0]}_refined.mzML'
+            refi_sf, refi_sfloc = get_or_create_mzmlentry(x, x.sfile.mzmlfile.pwiz, refined=True,
                     servershare_id=dstshare.pk, path=runpath, mzmlfilename=ref_mzml_fname)
-            mzmls.append({'servershare': x.servershare.name, 'path': x.path, 'fn': x.filename,
-                'sfid': ref_sf.id})
+            mzmls.append({'servershare': x.servershare.name, 'path': x.path, 'fn': x.sfile.filename,
+                'mzsflocid': refi_sfloc.id})
         if not mzmls:
             return
         mzml_ins = mzmlfiles.distinct('rawfile__producer__msinstrument__instrumenttype__name').get()
@@ -94,11 +94,11 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
     def process(self, **kwargs):
         """Assumes one file, one analysis"""
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
-        raw = rm.StoredFile.objects.select_related('rawfile__producer', 'filetype').get(pk=kwargs['sf_id'])
+        sfloc = rm.StoredFileLoc.objects.select_related('sfile__rawfile__producer', 'sfile__filetype').get(pk=kwargs['sfloc_id'])
         wf = models.UserWorkflow.objects.filter(wftype=models.UserWorkflow.WFTypeChoices.QC).last()
         nfwf = wf.nfwfversionparamsets.last()
         params = kwargs.get('params', [])
-        stagefiles = {'--raw': [(raw.servershare.name, raw.path, raw.filename)]}
+        stagefiles = {'--raw': [(sfloc.servershare.name, sfloc.path, sfloc.sfile.filename)]}
         timestamp = datetime.strftime(analysis.date, '%Y%m%d_%H.%M')
         models.NextflowSearch.objects.update_or_create(defaults={'nfwfversionparamset_id': nfwf.id, 
             'job_id': self.job_id, 'workflow_id': wf.id, 'token': f'nf-{uuid4()}'},
@@ -110,7 +110,7 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
                'wf_commit': nfwf.commit,
                'nxf_wf_fn': nfwf.filename,
                'repo': nfwf.nfworkflow.repo,
-               'runname': f'{analysis.id}_longqc_{raw.rawfile.producer.name}_rawfile{raw.rawfile_id}_{timestamp}',
+               'runname': f'{analysis.id}_longqc_{sfloc.sfile.rawfile.producer.name}_rawfile{sfloc.sfile.rawfile_id}_{timestamp}',
                }
         if kwargs['trackpeptides']:
             params.extend(['--trackedpeptides', ';'.join([f'{pep}_{ch}'
@@ -193,10 +193,10 @@ class RunNextflowWorkflow(MultiFileJob):
     """
 
     def getfiles_query(self, **kwargs):
-        return super().getfiles_query(**kwargs).values('servershare__name', 'path', 'filename', 'pk',
-                'rawfile__producer__msinstrument__instrumenttype__name',
-                'rawfile__datasetrawfile__dataset_id',
-                'rawfile__datasetrawfile__quantfilechannel__channel__channel__name')
+        return super().getfiles_query(**kwargs).values('servershare__name', 'path', 'sfile__filename', 'sfile_id',
+                'sfile__rawfile__producer__msinstrument__instrumenttype__name',
+                'sfile__rawfile__datasetrawfile__dataset_id',
+                'sfile__rawfile__datasetrawfile__quantfilechannel__channel__channel__name')
 
     def set_error(self, job, *, errmsg):
         super().set_error(job, errmsg=errmsg)
@@ -220,8 +220,8 @@ class RunNextflowWorkflow(MultiFileJob):
                 stagefiles[flag].append((sf.servershare.name, sf.path, sf.filename)) 
         # re-filter dset input files in case files are removed or added to dataset
         # between a stop/error and rerun of job
-        sfiles_passed = self.getfiles_query(**kwargs)
-        is_msdata = sfiles_passed.distinct('rawfile__producer__msinstrument').count()
+        sflocs_passed = self.getfiles_query(**kwargs)
+        is_msdata = sflocs_passed.distinct('sfile__rawfile__producer__msinstrument').count()
         job = analysis.nextflowsearch.job
         dsa = analysis.datasetanalysis_set.all()
         if dsa.filter(dataset__locked=False).exists():
@@ -246,14 +246,14 @@ class RunNextflowWorkflow(MultiFileJob):
                     'save, and re-queue the job')
 
         # Now remove obsolete deleted-from-dataset files from job (e.g. corrupt, empty, etc)
-        obsolete = sfiles_passed.exclude(rawfile__datasetrawfile__dataset__datasetanalysis__in=dsa).values('pk')
+        obsolete = sflocs_passed.exclude(sfile__rawfile__datasetrawfile__dataset__datasetanalysis__in=dsa).values('sfile_id')
         models.AnalysisDSInputFile.objects.filter(analysisset__analysis=analysis, sfile__in=obsolete).delete()
         analysis.analysisfilevalue_set.filter(sfile__in=obsolete).delete()
         rm.FileJob.objects.filter(job_id=job.pk, storedfile__in=obsolete).delete()
         for del_sf in obsolete:
             # FIXME setnames/frac is specific
-            kwargs['setnames'].pop(str(del_sf['pk']))
-            kwargs['infiles'].pop(str(del_sf['pk']))
+            kwargs['setnames'].pop(str(del_sf['sfile_id']))
+            kwargs['infiles'].pop(str(del_sf['sfile_id']))
         if obsolete.exists():
             job.kwargs = kwargs
             job = job.save()
@@ -278,27 +278,27 @@ class RunNextflowWorkflow(MultiFileJob):
         infiles = []
         # INPUTDEF is either False or [fn, set, fraction, etc]
         if inputdef_fields := run['components']['INPUTDEF']:
-            for fn in sfiles_passed:
+            for fn in sflocs_passed:
                 infile = {'servershare': fn['servershare__name'], 'path': fn['path'],
-                    'fn': fn['filename']}
+                    'fn': fn['sfile__filename']}
                 if 'setname' in inputdef_fields:
-                    infile['setname'] = kwargs['filesamples'].get(str(fn['pk']), '')
+                    infile['setname'] = kwargs['filesamples'].get(str(fn['sfile_id']), '')
                 if 'plate' in inputdef_fields:
-                    infile['plate'] = kwargs['platenames'].get(str(fn['rawfile__datasetrawfile__dataset_id']), '')
+                    infile['plate'] = kwargs['platenames'].get(str(fn['sfile__rawfile__datasetrawfile__dataset_id']), '')
                 if 'sampleID' in inputdef_fields:
                     # sampleID is for pgt / dbgenerator
                     # No fallback, is required if in header
-                    infile['sampleID'] = kwargs['filesamples'][str(fn['pk'])]
+                    infile['sampleID'] = kwargs['filesamples'][str(fn['sfile_id'])]
                 if 'fraction' in inputdef_fields:
-                    infile['fraction'] = kwargs['infiles'].get(str(fn['pk']), {}).get('fr') 
+                    infile['fraction'] = kwargs['infiles'].get(str(fn['sfile_id']), {}).get('fr') 
                 if 'instrument' in inputdef_fields:
                     # No fallback, instrument in header cannot be ''
-                    infile['instrument'] = fn['rawfile__producer__msinstrument__instrumenttype__name'] 
+                    infile['instrument'] = fn['sfile__rawfile__producer__msinstrument__instrumenttype__name'] 
                 if 'channel' in inputdef_fields:
                     # For non-pooled labelcheck, cannot be ''
-                    infile['channel'] = fn['rawfile__datasetrawfile__quantfilechannel__channel__channel__name']
+                    infile['channel'] = fn['sfile__rawfile__datasetrawfile__quantfilechannel__channel__channel__name']
                 # Dynamic fields
-                infile.update(kwargs['filefields'].get(str(fn['pk']), {}))
+                infile.update(kwargs['filefields'].get(str(fn['sfile_id']), {}))
                 infiles.append(infile)
         # FIXME bigrun not hardcode, probably need to remove when new infra
         shortname = models.UserWorkflow.WFTypeChoices(analysis.nextflowsearch.workflow.wftype).name
@@ -345,13 +345,14 @@ class PurgeAnalysis(MultiFileJob):
     job for directory removal"""
 
     def getfiles_query(self, **kwargs):
-        return super().getfiles_query(**kwargs).values('path', 'filename', 'servershare', 'servershare__name', 'pk')
+        return super().getfiles_query(**kwargs).values('path', 'sfile__filename', 'servershare',
+                'servershare__name', 'sfile_id')
 
     def process(self, **kwargs):
         webshare = rm.ServerShare.objects.get(name=settings.WEBSHARENAME)
         for fn in self.getfiles_query(**kwargs):
-            fullpath = os.path.join(fn['path'], fn['filename'])
-            print('Purging {} from analysis {}'.format(fullpath, kwargs['analysis_id']))
+            fullpath = os.path.join(fn['path'], fn['sfile__filename'])
+            print(f'Purging {fullpath} from analysis {kwargs["analysis_id"]}')
             if fn['servershare'] != webshare.pk:
                 # Files on web share live locally, deleted by the purge view itself
-                self.run_tasks.append(((fn['servershare__name'], fullpath, fn['pk']), {}))
+                self.run_tasks.append(((fn['servershare__name'], fullpath, fn['sfile_id']), {}))

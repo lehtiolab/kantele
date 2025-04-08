@@ -15,7 +15,7 @@ from django.db.models import F
 
 from jobs import models
 
-from rawstatus.models import (RawFile, StoredFile, ServerShare, StoredFileType,
+from rawstatus.models import (RawFile, StoredFile, StoredFileLoc, ServerShare, StoredFileType,
         SwestoreBackedupFile, PDCBackedupFile, Producer, UploadToken)
 from rawstatus import jobs as rj
 from analysis import models as am
@@ -81,17 +81,20 @@ def update_storagepath_file(request):
             data['client_id'], [settings.STORAGECLIENT_APIKEY, settings.ANALYSISCLIENT_APIKEY]):
         return HttpResponseForbidden()
     print('Updating storage task finished')
-    if 'fn_id' in data:
-        sfile = StoredFile.objects.get(pk=data['fn_id'])
-        sfile.servershare = ServerShare.objects.get(name=data['servershare'])
-        sfile.path = data['dst_path']
+    print(data)
+    if 'sfloc_id' in data:
+        sfloc = StoredFileLoc.objects.get(pk=data['sfloc_id'])
+        print(sfloc)
+        sfloc.servershare = ServerShare.objects.get(name=data['servershare'])
+        sfloc.path = data['dst_path']
         if 'newname' in data:
-            sfile.filename = data['newname']
-            sfile.rawfile.name = data['newname']
-            sfile.rawfile.save()
-        sfile.save()
-    elif 'fn_ids' in data:
-        sfns = StoredFile.objects.filter(pk__in=[int(x) for x in data['fn_ids']])
+            sfloc.sfile.filename = data['newname']
+            sfloc.sfile.rawfile.name = data['newname']
+            sfloc.sfile.rawfile.save()
+        sfloc.sfile.save()
+        sfloc.save()
+    elif 'sfloc_ids' in data:
+        sfns = StoredFileLoc.objects.filter(pk__in=[int(x) for x in data['sfloc_ids']])
         sfns.update(path=data['dst_path'])
         if 'servershare' in data:
             sshare = ServerShare.objects.get(name=data['servershare'])
@@ -113,12 +116,12 @@ def renamed_project(request):
             data['client_id'], [settings.STORAGECLIENT_APIKEY, settings.ANALYSISCLIENT_APIKEY]):
         return HttpResponseForbidden()
     # this updates also deleted files. Good in case restoring backup etc
-    proj_sfiles = StoredFile.objects.filter(pk__in=data['sf_ids'])
+    proj_sfiles = StoredFileLoc.objects.filter(pk__in=data['sfloc_ids'])
     for dset in Dataset.objects.filter(runname__experiment__project_id=data['proj_id']):
         newstorloc = dsviews.rename_storage_loc_toplvl(data['newname'], dset.storage_loc)
         dset.storage_loc = newstorloc
         dset.save()
-        proj_sfiles.filter(rawfile__datasetrawfile__dataset=dset).update(path=newstorloc)
+        proj_sfiles.filter(sfile__rawfile__datasetrawfile__dataset=dset).update(path=newstorloc)
     set_task_done(data['task'])
     return HttpResponse()
 
@@ -203,8 +206,7 @@ def purge_storedfile(request):
     if 'client_id' not in data or not taskclient_authorized(
             data['client_id'], [settings.STORAGECLIENT_APIKEY]):
         return HttpResponseForbidden()
-    sfile = StoredFile.objects.filter(pk=data['sfid']).select_related('filetype').update(
-            deleted=True, purged=True)
+    sfile = StoredFileLoc.objects.filter(pk=data['sfloc_id']).update(purged=True)
     if 'task' in data:
         set_task_done(data['task'])
     return HttpResponse()
@@ -290,8 +292,7 @@ def restored_archive_file(request):
     if 'client_id' not in data or not taskclient_authorized(
             data['client_id'], [settings.STORAGECLIENT_APIKEY]):
         return HttpResponseForbidden()
-    sfile = StoredFile.objects.filter(pk=data['sfid'])
-    sfile.update(deleted=False, purged=False,
+    StoredFileLoc.objects.filter(pk=data['sflocid']).update(purged=False,
             servershare_id=ServerShare.objects.get(name=data['serversharename']))
     if 'task' in request.POST:
         set_task_done(request.POST['task'])
@@ -323,13 +324,15 @@ def mzml_convert_or_refine_file_done(request):
     if ('client_id' not in data or
             data['client_id'] != settings.ANALYSISCLIENT_APIKEY):
         return HttpResponseForbidden()
-    sfile = StoredFile.objects.select_related('rawfile__datasetrawfile__dataset').get(pk=data['fn_id'])
-    sfile.md5 = data['md5']
-    sfile.checked = True
-    sfile.deleted = False
-    sfile.save()
-    create_job('move_single_file', sf_id=sfile.id, dstsharename=settings.PRIMARY_STORAGESHARENAME,
-            dst_path=sfile.rawfile.datasetrawfile.dataset.storage_loc) 
+    sfloc = StoredFileLoc.objects.select_related('sfile__rawfile__datasetrawfile__dataset').get(pk=data['fn_id'])
+    sfloc.sfile.md5 = data['md5']
+    sfloc.sfile.checked = True
+    sfloc.sfile.save()
+    # FIXME buggy - if you remove fns from dataset, they will not have a datasetrawfile!
+    # do not use that here! instead, direct pass the storage loc from the job!
+    sfloc.save()
+    create_job('move_single_file', sfloc_id=sfloc.id, dstsharename=settings.PRIMARY_STORAGESHARENAME,
+            dst_path=sfloc.sfile.rawfile.datasetrawfile.dataset.storage_loc)
     return HttpResponse()
 
 

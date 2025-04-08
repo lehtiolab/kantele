@@ -18,7 +18,7 @@ from analysis import models as anmodels
 from analysis import views as av
 from analysis import jobs as aj
 from datasets import jobs as dsjobs
-from datasets.views import check_ownership, get_dset_storestate, move_dset_project_servershare, fill_sampleprepparam, populate_proj
+from datasets.views import check_ownership, get_dset_storestate, fill_sampleprepparam, populate_proj
 from rawstatus import models as filemodels
 from rawstatus import views as rv
 from jobs import jobs as jj
@@ -202,7 +202,7 @@ def find_files(request):
         query &= subquery
     dbfns = filemodels.StoredFile.objects.filter(query)
     if request.GET['deleted'] == 'false':
-        dbfns = dbfns.filter(deleted=False, purged=False)
+        dbfns = dbfns.filter(deleted=False)
     return populate_files(dbfns)
 
 
@@ -244,7 +244,6 @@ def populate_files(dbfns):
               'jobstate': [],
               'job_ids': [],
               'deleted': fn.deleted,
-              'purged': fn.purged,
               'smallstatus': [],
              }
         # TODO make unified backup model?
@@ -590,15 +589,12 @@ def get_analysis_invocation(ana):
 def get_analysis_info(request, anid):
     ana = anmodels.Analysis.objects.filter(pk=anid).select_related('nextflowsearch__job',
         'nextflowsearch__workflow', 'nextflowsearch__nfwfversionparamset').get()
-    storeloc = filemodels.StoredFile.objects.select_related('servershare__server').filter(
-            analysisresultfile__analysis=ana)
     dsets = {x.dataset for x in ana.datasetanalysis_set.all()}
     #projs = {x.runname.experiment.project for x in dsets}
     if not ana.log:
         logentry = ['Analysis without logging or not yet queued']
     else:
         logentry = [x for y in ana.log for x in y.split('\n') if x][-3:]
-    linkedfiles = [(x.id, x.sfile.filename) for x in av.get_servable_files(ana.analysisresultfile_set.select_related('sfile'))]
     errors = []
     if hasattr(ana, 'nextflowsearch'):
         try:
@@ -626,10 +622,15 @@ def get_analysis_info(request, anid):
         nfs_info = {'name': ana.name, 'addToResults': False, 'wf': False}
     dsicount = anmodels.AnalysisDSInputFile.objects.filter(analysisset__analysis=ana).count()
     afscount = ana.analysisfilevalue_set.count()
+    storeloc = filemodels.StoredFileLoc.objects.select_related('servershare__server').filter(
+            sfile__analysisresultfile__analysis=ana).values('servershare__server__uri',
+                    'servershare__name', 'path')
+    linkedfiles = [(x.id, x.sfile.filename) for x in av.get_servable_files(
+        ana.analysisresultfile_set.select_related('sfile'))]
     resp = {'nrdsets': len(dsets),
             'nrfiles': dsicount + afscount,
-            'storage_locs': [{'server': x.servershare.server.uri, 'share': x.servershare.name, 'path': x.path}
-                for x in storeloc],
+            'storage_locs': [{'server': x['servershare__server__uri'],
+                'share': x['servershare__name'], 'path': x['path']} for x in storeloc],
             'log': logentry, 
             'base_analysis': {'nfsid': False, 'name': False},
             'servedfiles': linkedfiles,
@@ -711,15 +712,18 @@ def get_dset_info(request, dataset_id):
 @login_required
 def get_file_info(request, file_id):
     sfile = filemodels.StoredFile.objects.filter(pk=file_id).select_related(
-        'rawfile__datasetrawfile', 'mzmlfile', 'servershare',
+        'rawfile__datasetrawfile', 'mzmlfile', 
         'rawfile__producer__msinstrument', 'analysisresultfile__analysis', 
         'libraryfile', 'userfile').get()
     is_mzml = hasattr(sfile, 'mzmlfile')
-    info = {'server': sfile.servershare.name, 'path': sfile.path, 'analyses': [],
+    info = {'analyses': [], 'servers': [],
             'producer': sfile.rawfile.producer.name,
             'filename': sfile.filename,
             'renameable': False if is_mzml else True,
             }
+    for x in sfile.storedfileloc_set.all().distinct('servershare__name', 'path').values('servershare__name', 'path'):
+        info['servers'].append((x['servershare__name'], x['path']))
+
     if hasattr(sfile, 'libraryfile'):
         desc = sfile.libraryfile.description
     elif hasattr(sfile, 'userfile'):
@@ -777,9 +781,9 @@ def fetch_dset_details(dset):
     # FIXME Hardcoded microscopy!
     nonms_dtypes = {x.id: x.name for x in dsmodels.Datatype.objects.all()
                     if x.name in ['microscopy']}
-    files = filemodels.StoredFile.objects.select_related('rawfile__producer', 'servershare', 'filetype').filter(
+    files = filemodels.StoredFile.objects.select_related('rawfile__producer', 'filetype').filter(
         rawfile__datasetrawfile__dataset_id=dset.id)
-    servers = [x[0] for x in files.distinct('servershare').values_list('servershare__server__uri')]
+    servers = [x[0] for x in files.distinct('storedfileloc__servershare').values_list('storedfileloc__servershare__server__uri')]
     info['storage_loc'] = '{} - {}'.format(';'.join(servers), dset.storage_loc)
     info['instruments'] = list(set([x.rawfile.producer.name for x in files]))
     info['instrument_types'] = list(set([x.rawfile.producer.shortname for x in files]))
@@ -907,26 +911,19 @@ def create_mzmls(request):
         options.append('combineIonMobilitySpectra')
     num_rawfns = filemodels.RawFile.objects.filter(datasetrawfile__dataset_id=data['dsid']).count()
     mzmls_exist_any_deleted_state = filemodels.StoredFile.objects.filter(
-            rawfile__datasetrawfile__dataset=dset, purged=False, checked=True,
+            rawfile__datasetrawfile__dataset=dset, storedfileloc__purged=False, checked=True,
             mzmlfile__isnull=False)
     mzmls_exist = mzmls_exist_any_deleted_state.filter(deleted=False)
     if num_rawfns == mzmls_exist.filter(mzmlfile__pwiz=pwiz).count():
         return JsonResponse({'error': 'This dataset already has existing mzML files of that '
             'proteowizard version'}, status=403)
 
-    # Saving starts here, except for the move_dset_project_servershare which checks errors
-    # before saving, allowing to return a 403 here.
-    # Move entire project if not on same file server
+    # Saving starts here
     res_share = filemodels.ServerShare.objects.get(name=settings.MZMLINSHARENAME)
-    primary_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
-    if dset.storageshare.server != primary_share.server:
-        if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
-                settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
-            return JsonResponse({'error': error}, status=403)
     # Remove other pwiz mzMLs
     other_pwiz_mz = mzmls_exist.exclude(mzmlfile__pwiz=pwiz)
     if other_pwiz_mz.count():
-        other_pwiz_mz.update(deleted=True)
+        filemodels.StoredFile.objects.filter(pk__in=other_pwiz_mz).update(deleted=True)
         # redefine query since now all the mzmls to deleted are marked deleted=T
         del_pwiz_q = mzmls_exist_any_deleted_state.exclude(mzmlfile__pwiz=pwiz).filter(deleted=True)
         for sf in del_pwiz_q.distinct('mzmlfile__pwiz_id').values('mzmlfile__pwiz_id'):
@@ -963,7 +960,7 @@ def refine_mzmls(request):
     nr_refined = mzmls.filter(mzmlfile__refined=True, deleted=False).count()
     normal_mzml = mzmls.filter(mzmlfile__refined=False)
     nr_mzml = normal_mzml.count()
-    nr_exist_mzml = normal_mzml.filter(deleted=False, purged=False).count()
+    nr_exist_mzml = normal_mzml.filter(deleted=False, storedfileloc__purged=False).count()
     nr_dsrs = dset.datasetrawfile_set.count()
     if nr_mzml and nr_mzml == nr_refined:
         return JsonResponse({'error': 'Refined data already exists'}, status=403)
@@ -985,11 +982,6 @@ def refine_mzmls(request):
     # Move entire project if not on same file server (403 is checked before saving anything
     # or queueing jobs)
     res_share = filemodels.ServerShare.objects.get(name=settings.MZMLINSHARENAME)
-    primary_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
-    if dset.storageshare.server != primary_share.server:
-        if error := move_dset_project_servershare(dset.pk, dset.storageshare.name,
-                settings.PRIMARY_STORAGESHARENAME, dset.runname.experiment.project_id):
-            return JsonResponse({'error': error}, status=403)
     # FIXME get analysis if it does exist, in case someone reruns?
     analysis = anmodels.Analysis.objects.create(user=request.user, name=f'refine_dataset_{dset.pk}', editable=False)
     job = create_job('refine_mzmls', dset_id=dset.pk, analysis_id=analysis.id, wfv_id=data['wfid'],

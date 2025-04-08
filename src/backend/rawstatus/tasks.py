@@ -203,7 +203,7 @@ def rsync_transfer_file(self, sfid, srcpath, dstpath, dstsharename, do_unzip, st
 
 
 @shared_task(bind=True, queue=settings.QUEUE_STORAGE)
-def delete_file(self, servershare, filepath, fn_id, is_dir=False):
+def delete_file(self, servershare, filepath, sfloc_id, is_dir=False):
     print('Deleting file {} on {}'.format(filepath, servershare))
     fileloc = os.path.join(settings.SHAREMAP[servershare], filepath)
     try:
@@ -228,8 +228,8 @@ def delete_file(self, servershare, filepath, fn_id, is_dir=False):
         raise
     msg = f'after succesful deletion of fn {filepath}. {{}}'
     url = urljoin(settings.KANTELEHOST, reverse('jobs:deletefile'))
-    postdata = {'sfid': fn_id, 'task': self.request.id,
-                'client_id': settings.APIKEY}
+    postdata = {'sfloc_id': sfloc_id, 'task': self.request.id, 'client_id': settings.APIKEY}
+    print(postdata)
     try:
         update_db(url, postdata, msg)
     except RuntimeError:
@@ -348,7 +348,7 @@ def pdc_archive(self, md5, yearmonth, servershare, filepath, fn_id, isdir):
 
 
 @shared_task(bind=True, queue=settings.QUEUE_BACKUP)
-def pdc_restore(self, servershare, filepath, pdcpath, fn_id, isdir):
+def pdc_restore(self, servershare, filepath, pdcpath, sfloc_id, isdir):
     print('Restoring file {} from PDC tape'.format(filepath))
     basedir = settings.SHAREMAP[servershare]
     fileloc = os.path.join(basedir, filepath)
@@ -383,7 +383,7 @@ def pdc_restore(self, servershare, filepath, pdcpath, fn_id, isdir):
         except Exception:
             taskfail_update_db(self.request.id, msg='File {} to retrieve from backup is directory '
             'type, it is retrieved to {} but errored when moving from there'.format(fileloc, pdcpath))
-    postdata = {'sfid': fn_id, 'task': self.request.id, 'client_id': settings.APIKEY,
+    postdata = {'sflocid': sfloc_id, 'task': self.request.id, 'client_id': settings.APIKEY,
             'serversharename': servershare}
     url = urljoin(settings.KANTELEHOST, reverse('jobs:restoredpdcarchive'))
     msg = ('Restore from archive could not update database with for fn {} with PDC path {} :'

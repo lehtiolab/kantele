@@ -54,7 +54,7 @@ def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profile
 
 
 @shared_task(bind=True, queue=settings.QUEUE_STORAGE)
-def rename_top_level_project_storage_dir(self, projsharename, srcname, newname, proj_id, sf_ids):
+def rename_top_level_project_storage_dir(self, projsharename, srcname, newname, proj_id, sfloc_ids):
     """Renames a project, including the below experiments/datasets"""
     msg = False
     projectshare = settings.SHAREMAP[projsharename]
@@ -78,7 +78,7 @@ def rename_top_level_project_storage_dir(self, projsharename, srcname, newname, 
     except Exception:
         taskfail_update_db(self.request.id, msg='Failed renaming project for unknown reason')
         raise
-    postdata = {'proj_id': proj_id, 'newname': newname, 'sf_ids': sf_ids,
+    postdata = {'proj_id': proj_id, 'newname': newname, 'sfloc_ids': sfloc_ids,
             'task': self.request.id, 'client_id': settings.APIKEY}
     url = urljoin(settings.KANTELEHOST, reverse('jobs:renameproject'))
     update_db(url, json=postdata)
@@ -86,7 +86,7 @@ def rename_top_level_project_storage_dir(self, projsharename, srcname, newname, 
 
 @shared_task(bind=True, queue=settings.QUEUE_FILE_DOWNLOAD)
 def rsync_dset_servershare(self, dset_id, srcsharename, srcpath, srcserver_url,
-        srcshare_path_controller, dstserver_url, dstsharename, fns, upd_sf_ids):
+        srcshare_path_controller, dstserver_url, dstsharename, fns, upd_sfl_ids):
     '''Uses rsync to copy a dataset to other servershare. E.g in case of consolidating
     projects to a certain share, or when e.g. moving to new storage unit. Files are rsynced
     one at a time, to avoid rsyncing files removed from dset before running this job,
@@ -126,7 +126,7 @@ def rsync_dset_servershare(self, dset_id, srcsharename, srcpath, srcserver_url,
     # controller server
 
     # report finished
-    fnpostdata = {'fn_ids': upd_sf_ids, 'servershare': dstsharename,
+    fnpostdata = {'sfloc_ids': upd_sfl_ids, 'servershare': dstsharename,
             'dst_path': srcpath, 'client_id': settings.APIKEY, 'task': self.request.id}
     dspostdata = {'storage_loc': srcpath, 'dset_id': dset_id, 'newsharename': dstsharename,
             'task': self.request.id, 'client_id': settings.APIKEY}
@@ -137,7 +137,7 @@ def rsync_dset_servershare(self, dset_id, srcsharename, srcpath, srcserver_url,
 
 
 @shared_task(bind=True, queue=settings.QUEUE_STORAGE)
-def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, dset_id, sf_ids):
+def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, dset_id, sfloc_ids):
     """This expects one dataset per dir, as it will rename the whole dir"""
     print(f'Renaming dataset storage {srcpath} to {dstpath}')
     ds_share = settings.SHAREMAP[ds_sharename]
@@ -164,7 +164,7 @@ def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, dset_id, 
             except:
                 taskfail_update_db(self.request.id)
                 raise
-    fn_postdata = {'fn_ids': sf_ids, 'dst_path': dstpath, 
+    fn_postdata = {'sfloc_ids': sfloc_ids, 'dst_path': dstpath, 
             'client_id': settings.APIKEY}
     ds_postdata = {'storage_loc': dstpath, 'dset_id': dset_id, 'newsharename': False,
             'task': self.request.id, 'client_id': settings.APIKEY}
@@ -179,7 +179,7 @@ def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, dset_id, 
 
 
 @shared_task(bind=True, queue=settings.QUEUE_STORAGE)
-def move_file_storage(self, fn, srcshare, srcpath, dstpath, fn_id, dstsharename, newname=False):
+def move_file_storage(self, fn, srcshare, srcpath, dstpath, sfloc_id, dstsharename, newname=False):
     '''Moves file across server shares, dirs, or as rename'''
     src = os.path.join(settings.SHAREMAP[srcshare], srcpath, fn)
     dstfn = newname or fn
@@ -204,7 +204,7 @@ def move_file_storage(self, fn, srcshare, srcpath, dstpath, fn_id, dstsharename,
     except Exception as e:
         taskfail_update_db(self.request.id)
         raise RuntimeError('Could not move file tot storage:', e)
-    postdata = {'fn_id': fn_id, 'servershare': dstsharename, 'dst_path': dstpath,
+    postdata = {'sfloc_id': sfloc_id, 'servershare': dstsharename, 'dst_path': dstpath,
             'client_id': settings.APIKEY, 'task': self.request.id}
     if newname:
         postdata['newname'] = newname
@@ -213,20 +213,19 @@ def move_file_storage(self, fn, srcshare, srcpath, dstpath, fn_id, dstsharename,
     except RuntimeError:
         shutil.move(dst, src)
         raise
-    print('File {} moved to {}'.format(fn_id, dst))
 
 
 @shared_task(bind=True, queue=settings.QUEUE_STORAGE)
-def move_stored_file_tmp(self, sharename, fn, path, fn_id):
+def move_stored_file_tmp(self, sharename, fn, path, sfloc_id):
     src = os.path.join(settings.SHAREMAP[sharename], path, fn)
     dst = os.path.join(settings.TMPSHARE, fn)
-    print('Moving stored file {} to tmp'.format(fn_id))
+    print(f'Moving stored file {sfloc_id} to tmp')
     try:
         shutil.move(src, dst)
     except Exception:
         taskfail_update_db(self.request.id)
         raise
-    postdata = {'fn_id': fn_id, 'servershare': settings.TMPSHARENAME,
+    postdata = {'sfloc_id': sfloc_id, 'servershare': settings.TMPSHARENAME,
                 'dst_path': '', 'client_id': settings.APIKEY,
                 'task': self.request.id}
     url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
@@ -235,4 +234,3 @@ def move_stored_file_tmp(self, sharename, fn, path, fn_id):
     except RuntimeError:
         shutil.move(dst, src)
         raise
-    print('File {} moved to tmp and DB updated'.format(fn_id))

@@ -27,7 +27,7 @@ def query_all_qc_files():
     '''QC files are defined as not having a dataset, being claimed, and stored on the
     QC storage dir'''
     return rm.StoredFile.objects.filter(rawfile__datasetrawfile__isnull=True, rawfile__claimed=True,
-            path__startswith=settings.QC_STORAGE_DIR, rawfile__qcrun__isnull=False)
+            storedfileloc__path__startswith=settings.QC_STORAGE_DIR, rawfile__qcrun__isnull=False)
 
 
 @staff_member_required
@@ -93,12 +93,14 @@ def new_qcfile(request):
         tmpshare = rm.ServerShare.objects.get(name=settings.TMPSHARENAME)
         sfn = sfnq.get()
         rm.RawFile.objects.filter(storedfile__pk=data['sfid']).update(claimed=True)
-        if sfn.servershare == tmpshare:
-            create_job('move_single_file', sf_id=data['sfid'],
+        # FIXME first is probably not a good idea here!
+        sfloc = rm.StoredFileLoc.objects.filter(sfile=sfn).first()
+        if sfloc.servershare == tmpshare:
+            create_job('move_single_file', sfloc_id=sfloc.pk,
                     dstsharename=settings.PRIMARY_STORAGESHARENAME,
                     dst_path=os.path.join(settings.QC_STORAGE_DIR, sfn.rawfile.producer.name))
         user_op = get_operator_user()
-        run_singlefile_qc(sfn.rawfile, sfn, user_op, acqtype)
+        run_singlefile_qc(sfn.rawfile, sfloc, user_op, acqtype)
         msg = f'Queued file {sfn.filename} for QC run'
         state = 'ok'
     else:
@@ -126,12 +128,14 @@ def rerun_singleqc(request):
     if sfs.count() == 1:
         user_op = get_operator_user()
         sf = sfs.get()
-
+        # FIXME first call prob not right
+        sfloc = sf.storedfileloc_set.first()
         if sf.deleted:
             # retrieve if needed
             if hasattr(sf, 'pdcbackedupfile') and sf.pdcbackedupfile.success and not sf.pdcbackedupfile.deleted:
-                create_job('restore_from_pdc_archive', sf_id=sf.pk)
-                run_singlefile_qc(sf.rawfile, sf, user_op,
+                sfs.update(deleted=False)
+                create_job('restore_from_pdc_archive', sfloc_id=sfloc.pk)
+                run_singlefile_qc(sf.rawfile, sfloc, user_op,
                         dm.AcquisistionMode(sf.rawfile.qcrun.runtype))
                 msg = f'Queued {sf.filename} QC raw for retrieval from archive and rerun'
                 state = 'ok'
@@ -140,7 +144,7 @@ def rerun_singleqc(request):
                         'contact admin')
                 state = 'error'
         else:
-            run_singlefile_qc(sf.rawfile, sf, user_op,
+            run_singlefile_qc(sf.rawfile, sfloc, user_op,
                     dm.AcquisistionMode(sf.rawfile.qcrun.runtype))
             msg = f'Queued {sf.filename} QC raw for rerun'
             state = 'ok'
@@ -176,15 +180,16 @@ def rerun_qcs(request):
                 'rawfile__producer__msinstrument__instrumenttype')
     latest_qcwf = am.NextflowWfVersionParamset.objects.filter(
             userworkflow__wftype=am.UserWorkflow.WFTypeChoices.QC).last()
-    qcjobs = [x.kwargs['sf_id'] for x in jm.Job.objects.filter(funcname='run_longit_qc_workflow',
-        state__in=jj.JOBSTATES_WAIT, kwargs__sf_id__in=[x.pk for x in sfs])]
+    # FIXME Again, using first()
+    qcjobs = [x.kwargs['sfloc_id'] for x in jm.Job.objects.filter(funcname='run_longit_qc_workflow',
+        state__in=jj.JOBSTATES_WAIT, kwargs__sfloc_id__in=[x.storedfileloc_set.first().pk for x in sfs])]
     duprun_q = Q(rawfile__qcrun__analysis__nextflowsearch__nfwfversionparamset=latest_qcwf)
     retrieve_q = Q(deleted=True, pdcbackedupfile__success=True, pdcbackedupfile__deleted=False)
 
     if confirm_ok:
         user_op = get_operator_user()
         if not ignore_dups:
-            sfs = sfs.exclude(pk__in=qcjobs).exclude(duprun_q)
+            sfs = sfs.exclude(storedfileloc__pk__in=qcjobs).exclude(duprun_q)
         deleted_files = sfs.filter(deleted=True)
         sfs = sfs.filter(deleted=False)
         retr_msg = ''
@@ -196,11 +201,13 @@ def rerun_qcs(request):
             retr_msg = f' - Queued {retrieve_files.count()} QC raw files for retrieval from archive'
         msg = f'Queued {sfs.count()} QC raw files for running{retr_msg}'
         for sf in sfs:
-            run_singlefile_qc(sf.rawfile, sf, user_op,
+            # FIXME first call too random!
+            sfloc = sf.storedfileloc_set.first()
+            run_singlefile_qc(sf.rawfile, sfloc, user_op,
                     dm.AcquisistionMode(sf.rawfile.qcrun.runtype))
         state = 'ok'
     else:
-        without_duplicates = sfs.exclude(pk__in=qcjobs).exclude(duprun_q)
+        without_duplicates = sfs.exclude(storedfileloc__pk__in=qcjobs).exclude(duprun_q)
         not_deleted_files = sfs.filter(deleted=False)
         archived = sfs.filter(retrieve_q)
         msg = f'You have selected {sfs.count()} QC raw files.'

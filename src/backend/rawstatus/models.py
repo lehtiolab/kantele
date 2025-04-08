@@ -51,6 +51,13 @@ class MSInstrument(models.Model):
         return 'MS - {}/{}'.format(self.producer.name, self.filetype.name)
 
 
+class DataSecurityClass(models.IntegerChoices):
+    # Go from lowest to highest classification
+    NOSECURITY = 1, 'Not classified'
+    # FIXME when ready, also have personal data dsets
+    # PERSONAL = 2, 'Personal data'
+
+
 class FileServer(models.Model):
     name = models.TextField(unique=True)
     uri = models.TextField() # for users
@@ -64,9 +71,11 @@ class ServerShare(models.Model):
     name = models.TextField(unique=True)  # storage, tmp,
     server = models.ForeignKey(FileServer, on_delete=models.CASCADE)
     share = models.TextField()  # /home/disk1
+    max_security = models.IntegerField(choices=DataSecurityClass.choices)
 
     def __str__(self):
         return self.name
+
 
 class RawFile(models.Model):
     """Data (raw) files as reported by instrument"""
@@ -85,25 +94,33 @@ class RawFile(models.Model):
 class StoredFile(models.Model):
     """Files transferred from instrument to storage"""
     rawfile = models.ForeignKey(RawFile, on_delete=models.CASCADE)
+    # FIXME filetype to raw file, but some 2-3000 rawfiles have no storedfile!
+    filetype = models.ForeignKey(StoredFileType, on_delete=models.CASCADE)
     filename = models.TextField()
-    servershare = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
-    path = models.TextField()
     regdate = models.DateTimeField(auto_now_add=True)
     md5 = models.CharField(max_length=32, unique=True)
     checked = models.BooleanField(default=False)
-    # TODO put filetype on the RawFile instead of storedfile? Possible?
-    filetype = models.ForeignKey(StoredFileType, on_delete=models.CASCADE)
-    deleted = models.BooleanField(default=False) # marked for deletion by user, only UI
-    purged = models.BooleanField(default=False) # deleted from active storage filesystem
+    # marked for deletion by user, only UI, but it will be indicative
+    # of file being deleted on ALL storages, so if True - file needs restoreing
+    # from archive for any operations
+    deleted = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.rawfile.name
+
+
+class StoredFileLoc(models.Model):
+    sfile = models.ForeignKey(StoredFile, on_delete=models.CASCADE)
+    servershare = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
+    path = models.TextField()
+    purged = models.BooleanField(default=False) # deleted from active storage filesystems
 
     class Meta:
         # Include the deleted field to allow for multi-version of a file 
         # as can be the case in mzML (though only one existing)
-        constraints = [models.UniqueConstraint(fields=['servershare', 'path', 'filename', 'deleted'],
-            name='uni_storedfile', condition=Q(deleted=False))]
-
-    def __str__(self):
-        return self.rawfile.name
+        # Only one copy of each file per server
+        constraints = [models.UniqueConstraint(fields=['servershare', 'sfile'],
+            name='uni_storedfile')]
 
 
 class MSFileData(models.Model):
@@ -111,15 +128,17 @@ class MSFileData(models.Model):
     mstime = models.FloatField()
 
 
+class UploadFileType(models.IntegerChoices):
+    RAWFILE = 1, 'Raw file'
+    ANALYSIS = 2, 'Analysis result'
+    LIBRARY = 3, 'Shared file for all users'
+    USERFILE = 4, 'User upload'
+    # QC file for auto processing!? FIXME
+
+
+
 class UploadToken(models.Model):
     """A token to upload a specific file type for a specified time"""
-
-    class UploadFileType(models.IntegerChoices):
-        RAWFILE = 1, 'Raw file'
-        ANALYSIS = 2, 'Analysis result'
-        LIBRARY = 3, 'Shared file for all users'
-        USERFILE = 4, 'User upload'
-        # QC file for auto processing!? FIXME
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     token = models.CharField(max_length=36, unique=True) # UUID keys
@@ -149,8 +168,7 @@ class UploadToken(models.Model):
             return upload
 
     def parse_token_for_frontend(self, host):
-        ufts = self.UploadFileType
-        need_desc = int(self.uploadtype in [ufts.LIBRARY, ufts.USERFILE])
+        need_desc = int(self.uploadtype in [UploadFileType.LIBRARY, UploadFileType.USERFILE])
         user_token = b64encode(f'{self.token}|{host}|{need_desc}'.encode('utf-8'))
         return {'user_token': user_token.decode('utf-8'), 'expired': self.expired,
                 'expires': datetime.strftime(self.expires, '%Y-%m-%d, %H:%M')}

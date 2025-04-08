@@ -21,24 +21,28 @@ def get_host_upload_dst(web_dst):
 
 
 class RsyncFileTransfer(SingleFileJob):
+    # FIXME change name? All these are for web-to-storage, can maybe generalize that
+    # with the also-rsyncing move_dset_servershare, or with (later) any-mover like for analysis results
+    # Possibly dont generalize as this could check if 
     refname = 'rsync_transfer'
     task = tasks.rsync_transfer_file
 
     def check_error(self, **kwargs):
-        src_sf = self.getfiles_query(**kwargs)
-        if models.StoredFile.objects.exclude(pk=src_sf.pk).filter(filename=src_sf.filename,
-                path=src_sf.path, servershare_id=src_sf.servershare_id).exists():
-            return (f'Cannot rsync file {src_sf.pk} to location {src_sf.servershare.name} / '
-                    f'{src_sf.path} as another file with the same name is already there')
+        src_sfloc = self.getfiles_query(**kwargs)
+        if models.StoredFileLoc.objects.exclude(pk=src_sfloc.pk).filter(
+                sfile__filename=src_sfloc.sfile.filename, path=src_sfloc.path,
+                servershare=src_sfloc.servershare).exists():
+            return (f'Cannot rsync file {src_sfloc.pk} to location {src_sfloc.servershare.name} / '
+                    f'{src_sfloc.path} as another file with the same name is already there')
         else:
             return False
 
     def process(self, **kwargs):
-        sfile = self.getfiles_query(**kwargs)
-        dstpath = os.path.join(sfile.path, sfile.filename)
-        self.run_tasks.append(((sfile.id, get_host_upload_dst(kwargs['src_path']),
-            dstpath, sfile.servershare.name, sfile.filetype.is_folder,
-            sfile.filetype.stablefiles), {}))
+        sfloc = self.getfiles_query(**kwargs)
+        dstpath = os.path.join(sfloc.path, sfloc.sfile.filename)
+        self.run_tasks.append(((sfloc.sfile_id, get_host_upload_dst(kwargs['src_path']),
+            dstpath, sfloc.servershare.name, sfloc.sfile.filetype.is_folder,
+            sfloc.sfile.filetype.stablefiles), {}))
 
 
 class CreatePDCArchive(SingleFileJob):
@@ -63,8 +67,8 @@ class RestoreFromPDC(SingleFileJob):
     def process(self, **kwargs):
         '''Path must come from storedfile itself, not its dataset, since it
         can be a file without a dataset'''
-        sfile = self.getfiles_query(**kwargs)
-        self.run_tasks.append((restore_file_pdc_runtask(sfile), {}))
+        sfloc = self.getfiles_query(**kwargs)
+        self.run_tasks.append((restore_file_pdc_runtask(sfloc), {}))
         print('PDC restore task queued')
 
 
@@ -81,10 +85,10 @@ class RenameFile(SingleFileJob):
     def check_error(self, **kwargs):
         '''Check for file name collisions, also with directories'''
         src_sf = self.getfiles_query(**kwargs)
-        fn_ext = os.path.splitext(src_sf.filename)[1]
+        fn_ext = os.path.splitext(src_sf.sfile.filename)[1]
         fullnewname = f'{kwargs["newname"]}{fn_ext}'
         fullnewpath = os.path.join(src_sf.path, f'{kwargs["newname"]}{fn_ext}')
-        if models.StoredFile.objects.filter(filename=fullnewname, path=src_sf.path,
+        if models.StoredFileLoc.objects.filter(sfile__filename=fullnewname, path=src_sf.path,
                 servershare_id=src_sf.servershare_id).exists():
             return f'A file in path {src_sf.path} with name {fullnewname} already exists. Please choose another name.'
         elif dm.Dataset.objects.filter(storage_loc=fullnewpath,
@@ -94,16 +98,17 @@ class RenameFile(SingleFileJob):
             return False
         
     def process(self, **kwargs):
-        sfile = self.getfiles_query(**kwargs)
+        sfloc = self.getfiles_query(**kwargs)
         newname = kwargs['newname']
-        fn_ext = os.path.splitext(sfile.filename)[1]
-        sfile.rawfile.name = newname + fn_ext
-        sfile.rawfile.save()
-        for changefn in sfile.rawfile.storedfile_set.select_related('mzmlfile'):
-            oldname, ext = os.path.splitext(changefn.filename)
-            special_type = '_refined' if hasattr(changefn, 'mzmlfile') and changefn.mzmlfile.refined else ''
+        fn_ext = os.path.splitext(sfloc.sfile.filename)[1]
+        sfloc.sfile.rawfile.name = newname + fn_ext
+        sfloc.sfile.rawfile.save()
+        for changefn in models.StoredFileLoc.objects.filter(sfile__rawfile=sfloc.sfile.rawfile):
+            # FIXME deleted etc? Run the sfloc selection in view instead
+            oldname, ext = os.path.splitext(changefn.sfile.filename)
+            special_type = '_refined' if hasattr(changefn.sfile, 'mzmlfile') and changefn.sfile.mzmlfile.refined else ''
             self.run_tasks.append(((
-                changefn.filename, changefn.servershare.name,
+                changefn.sfile.filename, changefn.servershare.name,
                 changefn.path, changefn.path, changefn.id, changefn.servershare.name),
                 {'newname': '{}{}{}'.format(newname, special_type, ext)}))
 
@@ -113,9 +118,9 @@ class ClassifyMSRawFile(SingleFileJob):
     task = tasks.classify_msrawfile
 
     def process(self, **kwargs):
-        sfile = self.getfiles_query(**kwargs)
-        self.run_tasks.append(((kwargs['token'], sfile.id, sfile.filetype.name,
-            sfile.servershare.name, sfile.path, sfile.filename), {}))
+        sfloc = self.getfiles_query(**kwargs)
+        self.run_tasks.append(((kwargs['token'], sfloc.id, sfloc.sfile.filetype.name,
+            sfloc.servershare.name, sfloc.path, sfloc.sfile.filename), {}))
 
 
 class MoveSingleFile(SingleFileJob):
@@ -127,16 +132,17 @@ class MoveSingleFile(SingleFileJob):
 
     def check_error(self, **kwargs):
         '''Check for file name collisions'''
-        src_sf = self.getfiles_query(**kwargs)
+        src_sfloc = self.getfiles_query(**kwargs)
         if dstsharename := kwargs.get('dstsharename'):
             sshare = models.ServerShare.objects.filter(name=dstsharename).get()
         else:
-            sshare = src_sf.servershare
-        newfn = kwargs.get('newname', src_sf.filename)
+            sshare = src_sfloc.servershare
+        newfn = kwargs.get('newname', src_sfloc.sfile.filename)
         fullnewpath = os.path.join(kwargs['dst_path'], newfn)
-        if models.StoredFile.objects.filter(filename=newfn, path=kwargs['dst_path'],
-                servershare=sshare, deleted=False, purged=False).exists():
-            return f'A file in path {kwargs["dst_path"]} with name {src_sf.filename} already exists. Please choose another name.'
+        if models.StoredFileLoc.objects.filter(sfile__filename=newfn, path=kwargs['dst_path'],
+                servershare=sshare, sfile__deleted=False, purged=False).exists():
+            return (f'A file in path {kwargs["dst_path"]} with name {src_sfloc.sfile.filename} '
+                    'already exists. Please choose another name.')
         elif dm.Dataset.objects.filter(storage_loc=fullnewpath, storageshare=sshare,
                 deleted=False, purged=False).exists():
             return f'A dataset with the same directory name as your new file location {fullnewpath} already exists'
@@ -144,22 +150,23 @@ class MoveSingleFile(SingleFileJob):
             return False
 
     def process(self, **kwargs):
-        sfile = self.getfiles_query(**kwargs)
+        sfloc = self.getfiles_query(**kwargs)
         taskkwargs = {x: kwargs[x] for x in ['newname'] if x in kwargs}
-        dstsharename = kwargs.get('dstsharename') or sfile.servershare.name
+        dstsharename = kwargs.get('dstsharename') or sfloc.servershare.name
         self.run_tasks.append(((
-            sfile.filename, sfile.servershare.name,
-            sfile.path, kwargs['dst_path'], sfile.id, dstsharename), taskkwargs))
+            sfloc.sfile.filename, sfloc.servershare.name,
+            sfloc.path, kwargs['dst_path'], sfloc.pk, dstsharename), taskkwargs))
 
 
 class PurgeFiles(MultiFileJob):
     """Removes a number of files from active storage"""
     refname = 'purge_files'
     task = tasks.delete_file
+    # FIXME needs to happen for all storages?
 
     def getfiles_query(self, **kwargs):
-        return super().getfiles_query(**kwargs).values('mzmlfile', 'path', 'filename',
-                'filetype__is_folder', 'servershare__name', 'pk') 
+        return super().getfiles_query(**kwargs).values('sfile__mzmlfile', 'path', 'sfile__filename',
+                'sfile__filetype__is_folder', 'servershare__name', 'sfile_id', 'pk') 
 
     def process(self, **kwargs):
         # Safety check:
@@ -171,11 +178,11 @@ class PurgeFiles(MultiFileJob):
                         'to have occurred, cannot find records of archived files in DB')
         # Do the actual purge
         for fn in self.getfiles_query(**kwargs):
-            fullpath = os.path.join(fn['path'], fn['filename'])
-            if fn['mzmlfile'] is not None:
+            fullpath = os.path.join(fn['path'], fn['sfile__filename'])
+            if fn['sfile__mzmlfile'] is not None:
                 is_folder = False
             else:
-                is_folder = fn['filetype__is_folder']
+                is_folder = fn['sfile__filetype__is_folder']
             self.run_tasks.append(((fn['servershare__name'], fullpath, fn['pk'], is_folder), {}))
 
 
@@ -209,12 +216,12 @@ class RegisterExternalFile(MultiFileJob):
     """
 
     def getfiles_query(self, **kwargs):
-        return super().getfiles_query(**kwargs).filter(checked=False).values('path', 'filename', 'pk', 'rawfile_id')
+        return super().getfiles_query(**kwargs).filter(checked=False).values('path', 'sfile__filename', 'sfile_id', 'sfile__rawfile_id')
     
     def process(self, **kwargs):
         for fn in self.getfiles_query(**kwargs):
-            self.run_tasks.append(((os.path.join(fn['path'], fn['filename']), fn['pk'],
-                fn['rawfile_id'], kwargs['sharename'], kwargs['dset_id']), {}))
+            self.run_tasks.append(((os.path.join(fn['path'], fn['sfile__filename']), fn['sfile_id'],
+                fn['sfile__rawfile_id'], kwargs['sharename'], kwargs['dset_id']), {}))
 
 
 class DownloadPXProject(DatasetJob):
@@ -228,14 +235,14 @@ class DownloadPXProject(DatasetJob):
     def get_sf_ids_jobrunner(self, **kwargs):
         """This is run before running job, to define files used by
         the job (so it cant run if if files are in use by other job)"""
-        return [x.pk for x in self.getfiles_query(**kwargs)]
+        return [x.sfile_id for x in self.getfiles_query(**kwargs)]
 
     def getfiles_query(self, **kwargs):
-        return models.StoredFile.objects.filter(rawfile_id__in=kwargs['shasums'], 
+        return models.StoredFileLoc.objects.filter(sfile__rawfile_id__in=kwargs['shasums'], 
             checked=False).select_related('rawfile')
     
     def process(self, **kwargs):
-        px_stored = {x.filename: x for x in self.getfiles_query(**kwargs)}
+        px_stored = {x.sfile.filename: x.sfile for x in self.getfiles_query(**kwargs)}
         for fn in call_proteomexchange(kwargs['pxacc']):
             ftpurl = urlsplit(fn['downloadLink'])
             filename = os.path.split(ftpurl.path)[1]
@@ -248,28 +255,28 @@ class DownloadPXProject(DatasetJob):
                     fn['fileSize'], kwargs['sharename'], kwargs['dset_id']), {}))
 
 
-def upload_file_pdc_runtask(sfile, isdir):
+def upload_file_pdc_runtask(sfloc, isdir):
     """Generates the arguments for task to upload file to PDC. Reused in dataset jobs"""
-    yearmonth = datetime.strftime(sfile.regdate, '%Y%m')
+    yearmonth = datetime.strftime(sfloc.sfile.regdate, '%Y%m')
     try:
-        pdcfile = models.PDCBackedupFile.objects.get(storedfile=sfile, is_dir=isdir)
+        pdcfile = models.PDCBackedupFile.objects.get(storedfile=sfloc.sfile, is_dir=isdir)
     except models.PDCBackedupFile.DoesNotExist:
         # only create entry when not already exists
-        models.PDCBackedupFile.objects.create(storedfile=sfile, is_dir=isdir,
+        models.PDCBackedupFile.objects.create(storedfile=sfloc.sfile, is_dir=isdir,
                 pdcpath='', success=False)
     else:
         # Dont do more work than necessary, although this is probably too defensive
         if pdcfile.success and not pdcfile.deleted:
             return
-    fnpath = os.path.join(sfile.path, sfile.filename)
-    return (sfile.md5, yearmonth, sfile.servershare.name, fnpath, sfile.id, isdir)
+    fnpath = os.path.join(sfloc.path, sfloc.sfile.filename)
+    return (sfloc.sfile.md5, yearmonth, sfloc.servershare.name, fnpath, sfloc.sfile.id, isdir)
 
 
-def restore_file_pdc_runtask(sfile):
-    backupfile = models.PDCBackedupFile.objects.get(storedfile=sfile)
-    fnpath = os.path.join(sfile.path, sfile.filename)
-    yearmonth = datetime.strftime(sfile.regdate, '%Y%m')
-    return (settings.PRIMARY_STORAGESHARENAME, fnpath, backupfile.pdcpath, sfile.id, backupfile.is_dir)
+def restore_file_pdc_runtask(sfloc):
+    backupfile = models.PDCBackedupFile.objects.get(storedfile=sfloc.sfile)
+    fnpath = os.path.join(sfloc.path, sfloc.sfile.filename)
+    yearmonth = datetime.strftime(sfloc.sfile.regdate, '%Y%m')
+    return (settings.PRIMARY_STORAGESHARENAME, fnpath, backupfile.pdcpath, sfloc.id, backupfile.is_dir)
 
 
 def call_proteomexchange(pxacc):

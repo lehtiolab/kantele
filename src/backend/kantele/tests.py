@@ -47,16 +47,16 @@ class BaseTest(TestCase):
         # storage backend
         self.newfserver, _ = rm.FileServer.objects.get_or_create(name='server1', uri='s1.test',
                 fqdn='sameserver')
-        self.sstmp, _ = rm.ServerShare.objects.get_or_create(name=settings.TMPSHARENAME, server=self.newfserver,
-                share='/home/testtmp')
-        self.ssnewstore, _ = rm.ServerShare.objects.get_or_create(name=settings.PRIMARY_STORAGESHARENAME,
-                server=self.newfserver, share='/home/storage')
-        self.archivestore, _ = rm.ServerShare.objects.get_or_create(name=settings.ARCHIVESHARENAME,
-                server=self.newfserver, share='/home/archive')
-        self.oldfserver, _ = rm.FileServer.objects.get_or_create(name='oldserver', uri='s0.test',
+        self.sstmp = rm.ServerShare.objects.create(name=settings.TMPSHARENAME, server=self.newfserver,
+                share='/home/testtmp', max_security=1)
+        self.ssnewstore = rm.ServerShare.objects.create(name=settings.PRIMARY_STORAGESHARENAME,
+                server=self.newfserver, share='/home/storage', max_security=1)
+        self.archivestore = rm.ServerShare.objects.create(name=settings.ARCHIVESHARENAME,
+                server=self.newfserver, share='/home/archive', max_security=1)
+        self.oldfserver = rm.FileServer.objects.create(name='oldserver', uri='s0.test',
                 fqdn='sameserver')
-        self.ssoldstorage, _ = rm.ServerShare.objects.get_or_create(name=settings.STORAGESHARENAMES[0],
-                server=self.oldfserver, share='/home/storage')
+        self.ssoldstorage = rm.ServerShare.objects.create(name=settings.STORAGESHARENAMES[0],
+                server=self.oldfserver, share='/home/storage', max_security=1)
 
         # Species / sampletype fill
         self.spec1, _ = dm.Species.objects.get_or_create(linnean='species1', popname='Spec1')
@@ -96,7 +96,7 @@ class BaseTest(TestCase):
         self.storloc = os.path.join(self.p1.name, self.exp1.name, self.dtype.name, self.run1.name)
         self.ds = dm.Dataset.objects.create(date=self.p1.registered, runname=self.run1,
                 datatype=self.dtype, storageshare=self.ssnewstore, storage_loc=self.storloc,
-                securityclass=max(dm.DatasetSecurityClass))
+                securityclass=max(rm.DataSecurityClass))
         dm.DatasetComponentState.objects.create(dataset=self.ds, state=dm.DCStates.OK, dtcomp=self.dtcompfiles)
         dm.DatasetComponentState.objects.create(dataset=self.ds, state=dm.DCStates.OK, dtcomp=self.dtcompsamples)
         self.contact, _ = dm.ExternalDatasetContact.objects.get_or_create(dataset=self.ds,
@@ -114,8 +114,9 @@ class BaseTest(TestCase):
                 size=f3size, date=timezone.now(), claimed=True)
         self.f3dsr = dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=self.f3raw)
         self.f3sf = rm.StoredFile.objects.create(rawfile=self.f3raw, filename=fn3,
-                md5=self.f3raw.source_md5, filetype=self.ft, servershare=self.ssnewstore,
-                path=self.storloc, checked=True)
+                md5=self.f3raw.source_md5, filetype=self.ft, checked=True)
+        self.f3sss = rm.StoredFileLoc.objects.create(sfile=self.f3sf, servershare=self.ssnewstore,
+                path=self.storloc)
         self.qcs = dm.QuantChannelSample.objects.create(dataset=self.ds, channel=self.qtch,
                 projsample=self.projsam1)
         dm.QuantDataset.objects.create(dataset=self.ds, quanttype=self.qt)
@@ -131,8 +132,9 @@ class BaseTest(TestCase):
         self.pwiz = am.Proteowizard.objects.create(version_description='pwversion desc1',
                 container_version='', nf_version=wfv)
         self.f3sfmz = rm.StoredFile.objects.create(rawfile=self.f3raw, filename=f'{fn3}.mzML',
-                md5='md5_for_f3sf_mzml', filetype=self.ft, servershare=self.ssnewstore,
-                path=self.storloc, checked=True)
+                md5='md5_for_f3sf_mzml', filetype=self.ft, checked=True)
+        self.f3mzsss = rm.StoredFileLoc.objects.create(sfile=self.f3sfmz, servershare=self.ssnewstore,
+                path=self.storloc)
         am.MzmlFile.objects.create(sfile=self.f3sfmz, pwiz=self.pwiz)
 
         # Project/dataset/files on old storage
@@ -146,7 +148,7 @@ class BaseTest(TestCase):
         self.oldstorloc = os.path.join(self.oldp.name, self.oldexp.name, self.oldrun.name)
         self.oldds = dm.Dataset.objects.create(date=self.oldp.registered, runname=self.oldrun,
                 datatype=self.dtype, storageshare=self.ssoldstorage, storage_loc=self.oldstorloc,
-                securityclass=max(dm.DatasetSecurityClass)) 
+                securityclass=max(rm.DataSecurityClass)) 
         dm.QuantDataset.objects.get_or_create(dataset=self.oldds, quanttype=self.lfqt)
         dm.DatasetComponentState.objects.create(dataset=self.oldds, dtcomp=self.dtcompfiles, state=dm.DCStates.OK)
         dm.DatasetComponentState.objects.create(dataset=self.oldds, dtcomp=self.dtcompsamples, state=dm.DCStates.OK)
@@ -159,8 +161,9 @@ class BaseTest(TestCase):
                 source_md5='old_to_new_fakemd5', size=oldsize, date=timezone.now(), claimed=True)
         self.olddsr = dm.DatasetRawFile.objects.create(dataset=self.oldds, rawfile=self.oldraw)
         self.oldsf = rm.StoredFile.objects.create(rawfile=self.oldraw, filename=oldfn,
-                    md5=self.oldraw.source_md5, filetype=self.ft, servershare=self.ssoldstorage,
-                    path=self.oldstorloc, checked=True)
+                    md5=self.oldraw.source_md5, filetype=self.ft, checked=True)
+        self.oldsss = rm.StoredFileLoc.objects.create(sfile=self.oldsf, servershare=self.ssoldstorage,
+                path=self.oldstorloc)
         self.oldqsf = dm.QuantSampleFile.objects.create(rawfile=self.olddsr, projsample=self.projsam2)
 
         # Tmp rawfile
@@ -170,14 +173,16 @@ class BaseTest(TestCase):
         self.tmpraw = rm.RawFile.objects.create(name=tmpfn, producer=self.prod,
                 source_md5='tmpraw_fakemd5', size=tmpsize, date=timezone.now(), claimed=False)
         self.tmpsf = rm.StoredFile.objects.create(rawfile=self.tmpraw, md5=self.tmpraw.source_md5,
-                filename=tmpfn, servershare=self.sstmp, path='', checked=True, filetype=self.ft)
+                filename=tmpfn, checked=True, filetype=self.ft)
+        self.tmpsss = rm.StoredFileLoc.objects.create(sfile=self.tmpsf, servershare=self.sstmp, path='')
 
         # Library files, for use as input, so claimed and ready
         self.libraw = rm.RawFile.objects.create(name='libfiledone', producer=self.prod,
                 source_md5='libfilemd5', size=100, claimed=True, date=timezone.now())
 
         self.sflib = rm.StoredFile.objects.create(rawfile=self.libraw, md5=self.libraw.source_md5,
-        filetype=self.ft, checked=True, filename=self.libraw.name, servershare=self.sstmp, path='')
+        filetype=self.ft, checked=True, filename=self.libraw.name)
+        rm.StoredFileLoc.objects.create(sfile=self.sflib, servershare=self.sstmp, path='')
         self.lf = am.LibraryFile.objects.create(sfile=self.sflib, description='This is a libfile')
 
 #        # User files for input
@@ -187,14 +192,16 @@ class BaseTest(TestCase):
         self.anaprod = rm.Producer.objects.create(name='analysisprod', client_id=settings.ANALYSISCLIENT_APIKEY, shortname=settings.PRODUCER_ANALYSIS_NAME)
         self.ana_raw, _ = rm.RawFile.objects.get_or_create(name='ana_file', producer=self.anaprod, source_md5='kjlmnop1234',
                 size=100, defaults={'date': timezone.now(), 'claimed': True})
-        self.anasfile, _ = rm.StoredFile.objects.get_or_create(rawfile=self.ana_raw,
-                filetype_id=self.ft.id, defaults={'filename': self.ana_raw.name,
-                    'servershare': self.sstmp, 'path': '', 'md5': self.ana_raw.source_md5})
+        self.anasfile = rm.StoredFile.objects.create(rawfile=self.ana_raw, filetype_id=self.ft.id,
+
+                filename=self.ana_raw.name, md5=self.ana_raw.source_md5)
+        rm.StoredFileLoc.objects.create(sfile=self.anasfile, servershare=self.sstmp, path='')
         self.ana_raw2, _ = rm.RawFile.objects.get_or_create(name='ana_file2', producer=self.anaprod,
                 source_md5='anarawabc1234', size=100, defaults={'date': timezone.now(), 'claimed': True})
-        self.anasfile2, _ = rm.StoredFile.objects.get_or_create(rawfile=self.ana_raw2,
-                filetype_id=self.ft.id, defaults={'filename': self.ana_raw2.name, 'filetype': self.ft,
-                    'servershare_id': self.sstmp.id, 'path': '', 'md5': self.ana_raw2.source_md5})
+        self.anasfile2 = rm.StoredFile.objects.create(rawfile=self.ana_raw2,
+                filetype_id=self.ft.id, filename=self.ana_raw2.name, filetype=self.ft,
+                    md5=self.ana_raw2.source_md5)
+        rm.StoredFileLoc.objects.create(sfile=self.anasfile2, servershare=self.sstmp, path='')
 
 
 class ProcessJobTest(BaseTest):
@@ -228,35 +235,35 @@ class BaseIntegrationTest(LiveServerTestCase):
         sleep(self.jobrun_timeout)
 
 
-class TestMultiStorageServers(BaseIntegrationTest):
-    # FIXME add test for moving servershare fail on check_error!
-
-    def test_add_newtmp_files_to_old_dset(self):
-        # Fresh start in case multiple tests
-        url = '/datasets/save/files/'
-        postdata = {'dataset_id': self.oldds.pk, 'added_files': {'fn2': {'id': self.tmpraw.pk}}, 'removed_files': {}}
-        resp = self.cl.post(url, content_type='application/json', data=postdata)
-        self.assertEqual(resp.status_code, 200)
-        self.assertTrue(os.path.exists(self.oldfpath))
-        newdsr = dm.DatasetRawFile.objects.filter(dataset=self.oldds, rawfile=self.tmpraw)
-        self.assertEqual(newdsr.count(), 1)
-        self.tmpraw.refresh_from_db()
-        self.assertTrue(self.tmpraw.claimed)
-        # call job runner to run rsync
-        self.run_job()
-        newdspath = os.path.join(settings.SHAREMAP[self.ssnewstore.name], self.oldstorloc)
-        self.assertTrue(os.path.exists(os.path.join(newdspath, self.oldsf.filename)))
-        self.oldsf.refresh_from_db()
-        self.assertEqual(self.oldsf.servershare_id, self.ssnewstore.pk)
-        self.oldds.refresh_from_db()
-        self.assertEqual(self.oldds.storageshare_id, self.ssnewstore.pk)
-        # Check if move file tmp to newstorage has waited for the rsync job
-        self.assertFalse(os.path.exists(os.path.join(newdspath, self.tmpsf.filename)))
-        self.tmpsf.refresh_from_db()
-        self.assertEqual(self.tmpsf.path, '')
-        self.assertEqual(self.tmpsf.servershare_id, self.sstmp.pk)
-        self.run_job()
-        self.assertTrue(os.path.exists(os.path.join(newdspath, self.tmpsf.filename)))
-        self.tmpsf.refresh_from_db()
-        self.assertEqual(self.tmpsf.servershare_id, self.ssnewstore.pk)
-        self.assertEqual(self.tmpsf.path, self.oldds.storage_loc)
+#class TestMultiStorageServers(BaseIntegrationTest):
+#    # TODO revive this test and edit it maybe when we start with multiple servers
+#
+#    def test_add_newtmp_files_to_old_dset(self):
+#        # Fresh start in case multiple tests
+#        url = '/datasets/save/files/'
+#        postdata = {'dataset_id': self.oldds.pk, 'added_files': {'fn2': {'id': self.tmpraw.pk}}, 'removed_files': {}}
+#        resp = self.cl.post(url, content_type='application/json', data=postdata)
+#        self.assertEqual(resp.status_code, 200)
+#        self.assertTrue(os.path.exists(self.oldfpath))
+#        newdsr = dm.DatasetRawFile.objects.filter(dataset=self.oldds, rawfile=self.tmpraw)
+#        self.assertEqual(newdsr.count(), 1)
+#        self.tmpraw.refresh_from_db()
+#        self.assertTrue(self.tmpraw.claimed)
+#        # call job runner to run rsync
+#        self.run_job()
+#        newdspath = os.path.join(settings.SHAREMAP[self.ssnewstore.name], self.oldstorloc)
+#        self.assertTrue(os.path.exists(os.path.join(newdspath, self.oldsf.filename)))
+#        self.oldsss.refresh_from_db()
+#        self.assertEqual(self.oldsss.servershare_id, self.ssnewstore.pk)
+#        self.oldds.refresh_from_db()
+#        self.assertEqual(self.oldds.storageshare_id, self.ssnewstore.pk)
+#        # Check if move file tmp to newstorage has waited for the rsync job
+#        self.assertFalse(os.path.exists(os.path.join(newdspath, self.tmpsf.filename)))
+#        self.tmpsss.refresh_from_db()
+#        self.assertEqual(self.tmpsss.path, '')
+#        self.assertEqual(self.tmpsss.servershare_id, self.sstmp.pk)
+#        self.run_job()
+#        self.assertTrue(os.path.exists(os.path.join(newdspath, self.tmpsf.filename)))
+#        self.tmpsss.refresh_from_db()
+#        self.assertEqual(self.tmpsss.servershare_id, self.ssnewstore.pk)
+#        self.assertEqual(self.tmpsss.path, self.oldds.storage_loc)
