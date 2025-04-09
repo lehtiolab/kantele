@@ -611,13 +611,13 @@ def change_owners(request):
         newowner = models.DatasetOwner.objects.create(dataset_id=dset['pk'], user_id=data['owner'])
         models.ProjectLog.objects.create(project_id=dset['runname__experiment__project_id'],
                 level=models.ProjLogLevels.SECURITY,
-                message=f'User {request.user.id} made {data["owner"]} an owner of dset {dset.pk}')
+                message=f'User {request.user.id} made {data["owner"]} an owner of dset {dset["pk"]}')
         return JsonResponse({'result': 'ok'})
     elif data['op'] == 'del' and is_already_owner and dsownq.count() > 1:
         is_already_ownerq.delete()
         models.ProjectLog.objects.create(project_id=dset['runname__experiment__project_id'],
                 level=models.ProjLogLevels.SECURITY,
-                message=f'User {request.user.id} deleted owner {data["owner"]} from dataset {dset.pk}')
+                message=f'User {request.user.id} deleted owner {data["owner"]} from dataset {dset["pk"]}')
         return JsonResponse({'result': 'ok'})
     else:
         return JsonResponse({'result': 'error', 'message': 'Something went wrong trying to change ownership'}, status=500)
