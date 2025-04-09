@@ -362,10 +362,9 @@ def confirm_internal_file(request):
     dstshare = ServerShare.objects.get(name=data['dstsharename'])
 
     # Reruns lead to trying to store files multiple times, avoid that here:
-    sfile, created = StoredFile.objects.get_or_create(rawfile_id=data['fn_id'], 
-            md5=data['md5'],
-            defaults={'filetype_id': upload.filetype_id, 'servershare': dstshare, 
-                'path': data['outdir'], 'checked': True, 'filename': data['filename']})
+    sfile, created = StoredFile.objects.get_or_create(rawfile_id=data['fn_id'], md5=data['md5'],
+            defaults={'filetype_id': upload.filetype_id, 'checked': True, 'filename': data['filename']})
+    sfloc, _ = StoredFileLoc.objects.get_or_create(sfile=sfile, servershare=dstshare, path=data['outdir'])
     if data['analysis_id'] and created:
         am.AnalysisResultFile.objects.create(analysis_id=data['analysis_id'], sfile=sfile)
     elif data['is_fasta'] and created:
@@ -382,15 +381,11 @@ def confirm_internal_file(request):
 
     # Also store any potential servable file on share on web server
     if data['filename'] in settings.SERVABLE_FILENAMES and request.FILES:
-        webshare = ServerShare.objects.get(name=settings.WEBSHARENAME)
-        srvfile, srvcreated  = StoredFile.objects.get_or_create(rawfile_id=data['fn_id'], 
-                md5=data['md5'], defaults={'filetype': upload.filetype,
-                    'servershare': webshare, 'path': sfile.regdate.year,
-                    'checked': True, 'filename': f'{sfile.pk}_{data["filename"]}'})
-        if srvcreated:
-            am.AnalysisResultFile.objects.create(analysis_id=data['analysis_id'], sfile=srvfile)
-        srvpath = os.path.join(settings.WEBSHARE, srvfile.path)
-        srvdst = os.path.join(srvpath, srvfile.filename)
+        # FIXME web files are not currently tracked by an sfloc (or previously by an sf)
+        #webshare = ServerShare.objects.get(name=settings.WEBSHARENAME)
+        #srvfile, _cr = StoredFileLoc.objects.get_or_create(sfile=sfile, servershare=webshare, path=data['outdir'])
+        srvpath = os.path.join(settings.WEBSHARE, sfloc.path)
+        srvdst = os.path.join(srvpath, sfile.filename)
         try:
             os.makedirs(srvpath, exist_ok=True)
         except FileExistsError:
