@@ -345,6 +345,8 @@ class RunNextflowWorkflow(MultiFileJob):
 class PurgeAnalysis(MultiFileJob):
     refname = 'purge_analysis'
     task = filetasks.delete_file
+    queue = settings.QUEUE_STORAGE
+
     """Queues tasks for deleting files from analysis from disk, then queues 
     job for directory removal"""
 

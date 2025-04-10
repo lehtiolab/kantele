@@ -134,6 +134,7 @@ class MoveSingleFile(SingleFileJob):
     internally for moving files to a predestined path (i.e. incoming mzML, QC raw files, library etc'''
     refname = 'move_single_file'
     task = dstasks.move_file_storage
+    queue = settings.QUEUE_STORAGE
 
     def check_error(self, **kwargs):
         '''Check for file name collisions'''

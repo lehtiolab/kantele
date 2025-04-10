@@ -200,10 +200,12 @@ class MoveFilesToStorage(DatasetJob):
 
 
 class MoveFilesStorageTmp(DatasetJob):
-    """Moves file from a dataset back to a tmp/inbox-like share"""
+    """Moves file from a dataset back to a tmp/inbox-like share
+    Uses multiples queues, depending on task'
+    """
     refname = 'move_stored_files_tmp'
-# FIXME multiqueue, queue=settings.QUEUE_STORAGE)
     task = False
+    queue = False
 
     def getfiles_query(self, **kwargs):
         '''Select all files which are in dataset path, but not the purged ones, and
@@ -290,6 +292,7 @@ class DeleteDatasetMzml(DatasetJob):
     """Removes dataset mzml files from active storage"""
     refname = 'delete_mzmls_dataset'
     task = filetasks.delete_file
+    queue = settings.QUEUE_STORAGE
 
     def process(self, **kwargs):
         for fn in self.getfiles_query(**kwargs).filter(sfile__deleted=True, purged=False, checked=True,
@@ -304,6 +307,7 @@ class DeleteActiveDataset(DatasetJob):
     refname = 'delete_active_dataset'
     # FIXME need to be able to delete directories
     task = filetasks.delete_file
+    queue = settings.QUEUE_STORAGE
 
     def process(self, **kwargs):
         for fn in self.getfiles_query(**kwargs).select_related('sfile__filetype').filter(purged=False):
@@ -320,6 +324,7 @@ class BackupPDCDataset(DatasetJob):
     """Transfers all raw files in dataset to backup"""
     refname = 'backup_dataset'
     task = filetasks.pdc_archive
+    queue = settings.QUEUE_BACKUP
     
     def process(self, **kwargs):
         for fn in self.getfiles_query(**kwargs).exclude(sfile__mzmlfile__isnull=False).exclude(
@@ -332,6 +337,7 @@ class BackupPDCDataset(DatasetJob):
 class ReactivateDeletedDataset(DatasetJob):
     refname = 'reactivate_dataset'
     task = filetasks.pdc_restore
+    queue = settings.QUEUE_BACKUP
 
     def getfiles_query(self, **kwargs):
         '''Reactivation will only be relevant for old datasets that will not just happen to get
@@ -354,6 +360,8 @@ class ReactivateDeletedDataset(DatasetJob):
 
 class DeleteDatasetPDCBackup(DatasetJob):
     refname = 'delete_dataset_coldstorage'
+    queue = settings.QUEUE_BACKUP
+
     # TODO this job is not ready
     # should be agnostic of files in PDC, eg if no files found, loop length is zero
     # this for e.g empty or active-only dsets
