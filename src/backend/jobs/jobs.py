@@ -111,7 +111,7 @@ class BaseJob:
     def queue_tasks(self):
         for task in self.run_tasks:
             args, kwargs = task[0], task[1]
-            tid = self.task.delay(*args, **kwargs)
+            tid = self.task.apply_async(args=args, kwargs=kwargs, queue=self.queue)
             self.create_db_task(tid, *args, **kwargs)
     
     def create_db_task(self, task_id, *args, **kwargs):

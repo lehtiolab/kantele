@@ -3,6 +3,7 @@ import os
 
 from django.db.models import Q
 
+from kantele import settings
 from jobs.jobs import BaseJob
 from mstulos import models as m
 from mstulos import tasks as mt
@@ -17,6 +18,7 @@ from rawstatus import models as rm
 class ProcessAnalysis(BaseJob): 
     refname = 'ingest_search_results'
     task = mt.summarize_result_peptable
+    queue = settings.QUEUE_SEARCH_INBOX
 
     """
     kwargs = {

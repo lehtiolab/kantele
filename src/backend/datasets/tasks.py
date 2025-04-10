@@ -16,7 +16,7 @@ from rawstatus.tasks import calc_md5, delete_empty_dir
 # avoids setting up auth for DB
 
 
-@shared_task(bind=True, queue=settings.QUEUE_NXF)
+@shared_task(bind=True)
 def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profiles, **kwargs):
     postdata = {'client_id': settings.APIKEY, 'task': self.request.id}
     rundir = create_runname_dir(run)
@@ -53,7 +53,7 @@ def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profile
         shutil.rmtree(stagedir)
 
 
-@shared_task(bind=True, queue=settings.QUEUE_STORAGE)
+@shared_task(bind=True)
 def rename_top_level_project_storage_dir(self, projsharename, srcname, newname, proj_id, sfloc_ids):
     """Renames a project, including the below experiments/datasets"""
     msg = False
@@ -84,7 +84,7 @@ def rename_top_level_project_storage_dir(self, projsharename, srcname, newname, 
     update_db(url, json=postdata)
 
 
-@shared_task(bind=True, queue=settings.QUEUE_FILE_DOWNLOAD)
+@shared_task(bind=True)
 def rsync_dset_servershare(self, dset_id, srcsharename, srcpath, srcserver_url,
         srcshare_path_controller, dstserver_url, dstsharename, fns, upd_sfl_ids):
     '''Uses rsync to copy a dataset to other servershare. E.g in case of consolidating
@@ -136,7 +136,7 @@ def rsync_dset_servershare(self, dset_id, srcsharename, srcpath, srcserver_url,
     update_db(dsurl, json=dspostdata)
 
 
-@shared_task(bind=True, queue=settings.QUEUE_STORAGE)
+@shared_task(bind=True)
 def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, dset_id, sfloc_ids):
     """This expects one dataset per dir, as it will rename the whole dir"""
     print(f'Renaming dataset storage {srcpath} to {dstpath}')
@@ -178,7 +178,7 @@ def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, dset_id, 
         raise
 
 
-@shared_task(bind=True, queue=settings.QUEUE_STORAGE)
+@shared_task(bind=True)
 def move_file_storage(self, fn, srcshare, srcpath, dstpath, sfloc_id, dstsharename, newname=False):
     '''Moves file across server shares, dirs, or as rename'''
     src = os.path.join(settings.SHAREMAP[srcshare], srcpath, fn)
@@ -215,7 +215,7 @@ def move_file_storage(self, fn, srcshare, srcpath, dstpath, sfloc_id, dstsharena
         raise
 
 
-@shared_task(bind=True, queue=settings.QUEUE_STORAGE)
+@shared_task(bind=True)
 def move_stored_file_tmp(self, sharename, fn, path, sfloc_id):
     src = os.path.join(settings.SHAREMAP[sharename], path, fn)
     dst = os.path.join(settings.TMPSHARE, fn)

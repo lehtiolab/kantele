@@ -25,6 +25,7 @@ class DownloadFastaFromRepos(BaseJob):
     that we havent downloaded  yet. If so, queue tasks'''
     refname = 'download_fasta_repos'
     task = tasks.check_ensembl_uniprot_fasta_download
+    queue = settings.QUEUE_FILE_DOWNLOAD
     
     def process(self, **kwargs):
         self.run_tasks.append(((kwargs['db'], kwargs['version'], kwargs['organism'], 
@@ -34,6 +35,7 @@ class DownloadFastaFromRepos(BaseJob):
 class RefineMzmls(DatasetJob):
     refname = 'refine_mzmls'
     task = tasks.refine_mzmls
+    queue = settings.QUEUE_NXF
     revokable = True
 
     def process(self, **kwargs):
@@ -89,6 +91,7 @@ class RefineMzmls(DatasetJob):
 class RunLongitudinalQCWorkflow(SingleFileJob):
     refname = 'run_longit_qc_workflow'
     task = tasks.run_nextflow_longitude_qc
+    queue=settings.QUEUE_QC_NXF
     revokable = True
 
     def process(self, **kwargs):
@@ -182,6 +185,7 @@ def recurse_nrdsets_baseanalysis(aba):
 class RunNextflowWorkflow(MultiFileJob):
     refname = 'run_nf_search_workflow'
     task = tasks.run_nextflow_workflow
+    queue = settings.QUEUE_NXF
     revokable = True
 
     """

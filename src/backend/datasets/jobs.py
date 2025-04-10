@@ -18,6 +18,7 @@ class RenameProject(ProjectJob):
     dsets / storedfiles to new path post job'''
     refname = 'rename_top_lvl_projectdir'
     task = tasks.rename_top_level_project_storage_dir
+    queue = settings.QUEUE_STORAGE
     retryable = False
 
     def getfiles_query(self, **kwargs):
@@ -62,6 +63,7 @@ class RenameDatasetStorageLoc(DatasetJob):
     '''
     refname = 'rename_dset_storage_loc'
     task = tasks.rename_dset_storage_location
+    queue = settings.QUEUE_STORAGE
     retryable = False
 
     def check_error(self, **kwargs):
@@ -84,6 +86,7 @@ class MoveDatasetServershare(DatasetJob):
     After all the files are done, delete them from src, and update dset.storage_loc
     '''
     refname = 'move_dset_servershare'
+    queue = settings.QUEUE_FILE_DOWNLOAD
     task = tasks.rsync_dset_servershare
 
     def check_error(self, **kwargs):
@@ -137,6 +140,7 @@ class MoveDatasetServershare(DatasetJob):
 class MoveFilesToStorage(DatasetJob):
     refname = 'move_files_storage'
     task = tasks.move_file_storage
+    queue = settings.QUEUE_STORAGE
 
     def getfiles_query(self, **kwargs):
         '''Get all files going to dataset (passed ids), but only those with 
@@ -198,6 +202,7 @@ class MoveFilesToStorage(DatasetJob):
 class MoveFilesStorageTmp(DatasetJob):
     """Moves file from a dataset back to a tmp/inbox-like share"""
     refname = 'move_stored_files_tmp'
+# FIXME multiqueue, queue=settings.QUEUE_STORAGE)
     task = False
 
     def getfiles_query(self, **kwargs):
@@ -219,20 +224,23 @@ class MoveFilesStorageTmp(DatasetJob):
         for fn in self.getfiles_query(**kwargs).select_related('sfile__mzmlfile', 'servershare'):
             if hasattr(fn.sfile, 'mzmlfile'):
                 fullpath = os.path.join(fn.path, fn.sfile.filename)
-                self.run_tasks.append(((fn.servershare.name, fullpath, fn.id), {}, filetasks.delete_file))
+                self.run_tasks.append(((fn.servershare.name, fullpath, fn.id), {},
+                    filetasks.delete_file, settings.QUEUE_STORAGE))
             else:
-                self.run_tasks.append(((fn.servershare.name, fn.sfile.filename, fn.path, fn.id), {}, tasks.move_stored_file_tmp))
+                self.run_tasks.append(((fn.servershare.name, fn.sfile.filename, fn.path, fn.id), {},
+                    tasks.move_stored_file_tmp, settings.QUEUE_STORAGE))
 
     def queue_tasks(self):
         for task in self.run_tasks:
-            args, kwargs, taskfun = task[0], task[1], task[2]
-            tid = taskfun.delay(*args, **kwargs)
+            args, kwargs, taskfun, queue = task
+            tid = taskfun.apply_async(args=args, kwargs=kwargs, queue=queue)
             self.create_db_task(tid, self.job_id, *args, **kwargs)
 
 
 class ConvertDatasetMzml(DatasetJob):
     refname = 'convert_dataset_mzml'
     task = tasks.run_convert_mzml_nf
+    queue = settings.QUEUE_NXF
     revokable = True
 
     def getfiles_query(self, **kwargs):

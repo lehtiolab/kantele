@@ -54,7 +54,7 @@ def search_raws_downloaded(serversharename, dirname):
     return raw_paths_found
 
 
-@shared_task(queue=settings.QUEUE_FILE_DOWNLOAD, bind=True)
+@shared_task(bind=True)
 def register_downloaded_external_raw(self, fpath, sf_id, raw_id, sharename, dset_id):
     """Downloaded external files on inbox somewhere get MD5 checked and associate
     with a dataset
@@ -80,7 +80,7 @@ def register_downloaded_external_raw(self, fpath, sf_id, raw_id, sharename, dset
     print('MD5 of {} is {}, registered in DB'.format(dstfile, postdata['md5']))
 
 
-@shared_task(queue=settings.QUEUE_FILE_DOWNLOAD, bind=True)
+@shared_task(bind=True)
 def download_px_file_raw(self, ftpurl, ftpnetloc, sf_id, raw_id, shasum, size, sharename, dset_id):
     """Downloads PX file, validate by file size and SHA1, get MD5.
     Uses separate queue on storage, because otherwise trouble when 
@@ -121,7 +121,7 @@ def download_px_file_raw(self, ftpurl, ftpnetloc, sf_id, raw_id, shasum, size, s
     print('MD5 of {} is {}, registered in DB'.format(dstfile, postdata['md5']))
 
 
-@shared_task(queue=settings.QUEUE_WEB_RSYNC, bind=True)
+@shared_task(bind=True)
 def rsync_transfer_file(self, sfid, srcpath, dstpath, dstsharename, do_unzip, stablefiles):
     '''Uses rsync to transfer uploaded file from KANTELEHOST/other RSYNC_HOST to storage server.
     In case of a zipped folder transfer, the file is unzipped and an MD5 check is done 
@@ -202,7 +202,7 @@ def rsync_transfer_file(self, sfid, srcpath, dstpath, dstsharename, do_unzip, st
     print(msg)
 
 
-@shared_task(bind=True, queue=settings.QUEUE_STORAGE)
+@shared_task(bind=True)
 def delete_file(self, servershare, filepath, sfloc_id, is_dir=False):
     print('Deleting file {} on {}'.format(filepath, servershare))
     fileloc = os.path.join(settings.SHAREMAP[servershare], filepath)
@@ -240,7 +240,7 @@ def delete_file(self, servershare, filepath, sfloc_id, is_dir=False):
             raise
 
 
-@shared_task(bind=True, queue=settings.QUEUE_STORAGE)
+@shared_task(bind=True)
 def delete_empty_dir(self, servershare, directory):
     """Deletes the (reportedly) empty directory, then proceeds to delete any
     parent directory which is also empty"""
@@ -282,7 +282,7 @@ def delete_empty_dir(self, servershare, directory):
             raise
 
 
-@shared_task(bind=True, queue=settings.QUEUE_BACKUP)
+@shared_task(bind=True)
 def pdc_archive(self, md5, yearmonth, servershare, filepath, fn_id, isdir):
     print('Archiving file {} to PDC tape'.format(filepath))
     basedir = settings.SHAREMAP[servershare]
@@ -347,7 +347,7 @@ def pdc_archive(self, md5, yearmonth, servershare, filepath, fn_id, isdir):
             pass
 
 
-@shared_task(bind=True, queue=settings.QUEUE_BACKUP)
+@shared_task(bind=True)
 def pdc_restore(self, servershare, filepath, pdcpath, sfloc_id, isdir):
     print('Restoring file {} from PDC tape'.format(filepath))
     basedir = settings.SHAREMAP[servershare]
@@ -397,7 +397,7 @@ def pdc_restore(self, servershare, filepath, pdcpath, sfloc_id, isdir):
             raise
 
 
-@shared_task(bind=True, queue=settings.QUEUE_SEARCH_INBOX)
+@shared_task(bind=True)
 def classify_msrawfile(self, token, fnid, ftypename, servershare, path, fname):
     path = os.path.join(settings.SHAREMAP[servershare], path)
     fpath = os.path.join(path, fname)

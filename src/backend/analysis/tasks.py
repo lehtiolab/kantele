@@ -22,7 +22,7 @@ from rawstatus.tasks import calc_md5
 from analysis.models import UniProtFasta
 
 
-@shared_task(bind=True, queue=settings.QUEUE_FILE_DOWNLOAD)
+@shared_task(bind=True)
 def check_ensembl_uniprot_fasta_download(self, dbname, version, organism, dbtype):
     """Checks if there is a new version of ENSEMBL data,
     downloads it to system over FTP"""
@@ -128,7 +128,7 @@ def log_analysis(analysis_id, message):
     update_db(logurl, json={'analysis_id': analysis_id, 'message': message})
 
 
-@shared_task(bind=True, queue=settings.QUEUE_NXF)
+@shared_task(bind=True)
 def run_nextflow_workflow(self, run, params, stagefiles, profiles, nf_version):
     print('Got message to run nextflow workflow, preparing')
     # Init
@@ -201,7 +201,7 @@ def run_nextflow_workflow(self, run, params, stagefiles, profiles, nf_version):
     return run
 
 
-@shared_task(bind=True, queue=settings.QUEUE_NXF)
+@shared_task(bind=True)
 def refine_mzmls(self, run, params, mzmls, stagefiles, profiles, nf_version):
     print('Got message to run mzRefine workflow, preparing')
     rundir = create_runname_dir(run)
@@ -423,7 +423,7 @@ def execute_normal_nf(run, params, rundir, gitwfdir, taskid, nf_version, profile
     return outfiles
 
 
-@shared_task(bind=True, queue=settings.QUEUE_QC_NXF)
+@shared_task(bind=True)
 def run_nextflow_longitude_qc(self, run, params, stagefiles, profiles, nf_version):
     print('Got message to run QC workflow, preparing')
     reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:storelongqc'))

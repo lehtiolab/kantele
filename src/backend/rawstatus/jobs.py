@@ -26,6 +26,7 @@ class RsyncFileTransfer(SingleFileJob):
     # Possibly dont generalize as this could check if 
     refname = 'rsync_transfer'
     task = tasks.rsync_transfer_file
+    queue = settings.QUEUE_WEB_RSYNC
 
     def check_error(self, **kwargs):
         src_sfloc = self.getfiles_query(**kwargs)
@@ -50,6 +51,7 @@ class CreatePDCArchive(SingleFileJob):
     are not - then we use the BackupDataset job instead'''
     refname = 'create_pdc_archive'
     task = tasks.pdc_archive
+    queue = settings.QUEUE_BACKUP
 
     def process(self, **kwargs):
         # FIXME should we not check if we already have a DB row w success=1 here?
@@ -63,6 +65,7 @@ class RestoreFromPDC(SingleFileJob):
     '''For restoring files which are not in a dataset'''
     refname = 'restore_from_pdc_archive'
     task = tasks.pdc_restore
+    queue = settings.QUEUE_BACKUP
 
     def process(self, **kwargs):
         '''Path must come from storedfile itself, not its dataset, since it
@@ -75,6 +78,7 @@ class RestoreFromPDC(SingleFileJob):
 class RenameFile(SingleFileJob):
     refname = 'rename_file'
     task = dstasks.move_file_storage
+    queue = settings.QUEUE_STORAGE
     retryable = False
     """Only renames file inside same path/server. Does not move cross directories. Does not change extensions.
     Updates RawFile in job instead of view since jobs are processed in a single queue. StoredFile names are
@@ -116,6 +120,7 @@ class RenameFile(SingleFileJob):
 class ClassifyMSRawFile(SingleFileJob):
     refname = 'classify_msrawfile'
     task = tasks.classify_msrawfile
+    queue=settings.QUEUE_SEARCH_INBOX
 
     def process(self, **kwargs):
         sfloc = self.getfiles_query(**kwargs)
@@ -162,6 +167,7 @@ class PurgeFiles(MultiFileJob):
     """Removes a number of files from active storage"""
     refname = 'purge_files'
     task = tasks.delete_file
+    queue = settings.QUEUE_STORAGE
     # FIXME needs to happen for all storages?
 
     def getfiles_query(self, **kwargs):
@@ -192,6 +198,7 @@ class DeleteEmptyDirectory(MultiFileJob):
     the file-purging tasks before this directory deletion"""
     refname = 'delete_empty_directory'
     task = tasks.delete_empty_dir
+    queue = settings.QUEUE_STORAGE
 
     def getfiles_query(self, **kwargs):
         return super().getfiles_query(**kwargs).values('servershare__name', 'path')
@@ -211,6 +218,7 @@ class DeleteEmptyDirectory(MultiFileJob):
 class RegisterExternalFile(MultiFileJob):
     refname = 'register_external_raw'
     task = tasks.register_downloaded_external_raw
+    queue = settings.QUEUE_FILE_DOWNLOAD
     """gets sf_ids, of non-checked downloaded external RAW files in tmp., checks MD5 and 
     registers to dataset
     """
@@ -228,6 +236,7 @@ class DownloadPXProject(DatasetJob):
     # FIXME dupe check?
     refname = 'download_px_data'
     task = tasks.download_px_file_raw
+    queue = settings.QUEUE_FILE_DOWNLOAD
     """gets sf_ids, of non-checked non-downloaded PX files.
     checks pride, fires tasks for files not yet downloaded. 
     """

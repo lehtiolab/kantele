@@ -23,7 +23,7 @@ from jobs.post import update_db
 # read fasta to keep track/lookup protein names to organism when running this
 
 
-@shared_task(bind=True, queue=settings.QUEUE_SEARCH_INBOX)
+@shared_task(bind=True)
 def summarize_result_peptable(self, token, organism_id, peptide_file, psm_file, gene_file,
         outheaders, fafns):
     # FIXME maybe not do proteins when running 6FT? Need to make it selectable!
