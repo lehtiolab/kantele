@@ -8,6 +8,7 @@ from analysis import jobs as anjobs
 from mstulos import jobs as mtjobs
 from jobs.jobs import Jobstates
 from jobs.models import Job
+from rawstatus.models import FileJob
 
 
 alljobs = [
@@ -52,12 +53,15 @@ def create_job(name, state=False, **kwargs):
     '''Checks errors and then creates the job'''
     if not state:
         state = Jobstates.PENDING
+    jwrap = jobmap[name](False)
     if error := check_job_error(name, **kwargs):
         jobdata = {'id': False, 'error': error}
     else:
         job = Job.objects.create(funcname=name, timestamp=timezone.now(),
             state=state, kwargs=kwargs)
         jobdata = {'id': job.id, 'error': False}
+        FileJob.objects.bulk_create([FileJob(storedfile_id=sf_id, job_id=job.id) for sf_id in 
+            jwrap.get_sf_ids_jobrunner(**kwargs)])
     return jobdata
 
 

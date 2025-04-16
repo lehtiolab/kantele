@@ -50,11 +50,9 @@ def run_ready_jobs(job_fn_map, job_ds_map, active_jobs):
             print(f'Registering new job {job.id} - {job.funcname} - {job.state}')
             # Register files
             # FIXME do some jobs really have no files?
-            sf_ids = jwrapper.get_sf_ids_jobrunner(**job.kwargs)
-            FileJob.objects.filter(job_id=job.id).delete()
-            FileJob.objects.bulk_create([FileJob(storedfile_id=sf_id, job_id=job.id)
-                for sf_id in sf_ids])
-            job_fn_map[job.id] = set(sf_ids)
+            job_fn_map[job.id] = [x['storedfile_id'] for x in
+                    FileJob.objects.filter(job_id=job.pk).values('storedfile_id')]
+            jwrapper.get_sf_ids_jobrunner(**job.kwargs)
             # Register dsets FIXME
             ds_ids = jwrapper.get_dsids_jobrunner(**job.kwargs)
             job_ds_map[job.id] = set(ds_ids)

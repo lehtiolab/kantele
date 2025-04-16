@@ -16,7 +16,7 @@ from django.db.models import F
 from jobs import models
 
 from rawstatus.models import (RawFile, StoredFile, StoredFileLoc, ServerShare, StoredFileType,
-        SwestoreBackedupFile, PDCBackedupFile, Producer, UploadToken)
+        SwestoreBackedupFile, PDCBackedupFile, Producer, UploadToken, FileJob)
 from rawstatus import jobs as rj
 from analysis import models as am
 from analysis.views import write_analysis_log
@@ -482,10 +482,16 @@ def do_retry_job(job, force=False):
     if not is_job_ready(job=job, tasks=tasks) and not force:
         print('Tasks not all ready yet, will not retry, try again later')
         return
-    jobq = models.Job.objects.filter(pk=job.pk, state__in=JOBSTATES_RETRYABLE).update(
-            state=Jobstates.PENDING)
     # revoke tasks in case they are still running (force retry)
     revoke_and_delete_tasks(tasks.exclude(state=states.SUCCESS))
+    # Redo file jobs (for runner) in case the job has been in WAITING state and other jobs 
+    # have changed files associated to a dset or such.
+    jwrap = jobmap[job.name](job.pk)
+    FileJob.objects.filter(job_id=job.pk).delete()
+    FileJob.objects.bulk_create([FileJob(storedfile_id=sf_id, job_id=job.id) for sf_id in 
+        jwrap.get_sf_ids_jobrunner(**job.kwargs)])
+    jobq = models.Job.objects.filter(pk=job.pk, state__in=JOBSTATES_RETRYABLE).update(
+            state=Jobstates.PENDING)
     try:
         job.joberror.delete()
     except models.JobError.DoesNotExist:

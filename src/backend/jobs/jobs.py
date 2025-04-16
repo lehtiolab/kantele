@@ -155,24 +155,17 @@ class DatasetJob(BaseJob):
         return [kwargs['dset_id']]
 
     def get_sf_ids_jobrunner(self, **kwargs):
-        '''Let all files associated with dataset wait, including added files on other path, and 
-        removed files on dset path (will be moved to new folder before their move to tmp)'''
-        dset = dm.Dataset.objects.get(pk=kwargs['dset_id'])
-        dsfiles = StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=kwargs['dset_id'])
-        ds_ondisk = StoredFile.objects.filter(storedfileloc__servershare=dset.storageshare, storedfileloc__path=dset.storage_loc)
-        return [x.pk for x in dsfiles.union(ds_ondisk)]
+        '''Called to make FileJob records.  Let all files associated with dataset wait'''
+        dset = dm.Dataset.objects.get(pk=kwargs['dss_id'])
+        return [x['pk'] for x in StoredFile.objects.filter(
+            rawfile__datasetrawfile__dataset__datasetserver__pk=kwargs['dss_id']).values('pk')]
 
     def getfiles_query(self, **kwargs):
-        '''Get all files with same path as dset.storage_loc. This gets all files in the dset dir,
-        not only the ones that have a datasetrawfile. If this job runs just after a user removes
-        files from the dataset, the job that runs the removal comes after this, and the removed files
-        will not have a datasetrawfile, so we need to take care of all the files in the dset.
-        Also, files ADDED to the dataset will still be on tmp and need not to be included in this
-        job, even though they will have a datasetrawfile.
-        # FIXME to avoid this particular issue, create_job could create the sfids instead of dset_id when being run.
-        '''
-        dset = dm.Dataset.objects.get(pk=kwargs['dset_id'])
-        return StoredFileLoc.objects.filter(servershare=dset.storageshare, path=dset.storage_loc)
+        '''Get all files which had a datasetrawfile association when this job was created/retried,
+        (so get the FileJob entries). Files will either be used in the
+        job itself and/or post the job in e.g. re-setting their paths etc.'''
+        dss = dm.DatasetServer.objects.get(pk=kwargs['dss_id'])
+        return StoredFileLoc.objects.filter(purged=False, sfile__filejob__job_id=self.pk)
 
 
 class ProjectJob(BaseJob):
@@ -190,9 +183,7 @@ class ProjectJob(BaseJob):
 
     def get_sf_ids_jobrunner(self, **kwargs):
         """Get all sf ids in project to mark them as not using pre-this-job"""
-        projfiles = StoredFile.objects.filter(deleted=False, storedfileloc__purged=False,
-                rawfile__datasetrawfile__dataset__runname__experiment__project_id=kwargs['proj_id'])
-        dsets = dm.Dataset.objects.filter(runname__experiment__project_id=kwargs['proj_id'])
-        allfiles = StoredFile.objects.filter(storedfileloc__servershare__in=[x.storageshare for x in dsets.distinct('storageshare')],
-                storedfileloc__path__in=[x.storage_loc for x in dsets.distinct('storage_loc')]).union(projfiles)
-        return [x.pk for x in allfiles]
+        return [x['pk'] for x in StoredFile.objects.filter(
+            deleted=False, storedfileloc__purged=False,
+            rawfile__datasetrawfile__dataset__runname__experiment__project_id=kwargs['proj_id']
+            ).values('pk')]
