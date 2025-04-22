@@ -23,14 +23,14 @@ services:
             SERVABLE_FILE_PATH: "${CONTAINER_ANALYSISPATH}"
     
     db:
-        image: postgres:14.3
+        image: postgres:17.4
         ## Comment user: line on MacOS, not on linux
         user: "${DBUID:-0}:${DBGID:-0}"
         environment:
             POSTGRES_PASSWORD: "${PG_SUPERUSER_PASSWORD}"
 
     mq:
-        image: rabbitmq:3.10
+        image: rabbitmq:3.13.7
         environment:
             RABBITMQ_DEFAULT_USER: "${RABBITUSER:-guest}"
             RABBITMQ_DEFAULT_PASS: "${RABBITPASS:-guest}"

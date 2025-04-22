@@ -56,29 +56,20 @@ class RenameProject(ProjectJob):
 
 
 class RenameDatasetStorageLoc(DatasetJob):
-    '''Renames dataset, then updates storage_loc of it and path of all dataset storedfiles
-    which have same path as dataset.storage_loc, including any deleted files, but not newly
-    added files from tmp.
+    '''Renames dataset path in specific share, then updates storedfileloc for that dataset
     Calling this job needs to be checked for forbidden duplicate storage locs
     '''
     refname = 'rename_dset_storage_loc'
     task = tasks.rename_dset_storage_location
-    queue = settings.QUEUE_STORAGE
     retryable = False
 
-    def check_error(self, **kwargs):
-        '''Duplicate check, not only check other storage loc, but also any files with the same name'''
-        if Dataset.objects.filter(storage_loc=kwargs['dstpath']):
-            return f'There is already a dataset at the location {kwargs["dstpath"]} you are renaming to'
-        else:
-            return False
-
     def process(self, **kwargs):
-        """Fetch fresh storage_loc src dir here, then queue for move from there"""
-        dset = Dataset.objects.get(pk=kwargs['dset_id'])
-        if dset.storage_loc != kwargs['dstpath']:
-            self.run_tasks = [((dset.storageshare.name, dset.storage_loc, kwargs['dstpath'],
-                kwargs['dset_id'], [x.id for x in self.getfiles_query(**kwargs)]), {})]
+        dss = DatasetServer.objects.get(pk=kwargs['dss_id']).values('storageshare_id',
+                'storageshare__name', 'storage_loc', 
+        self.queue = f'{dss["storageshare__name"]}__{settings.QUEUE_STORAGE}'
+        sflocs_share = self.getfiles_query(**kwargs).filter(servershare_id=dss['storageshare_id'])
+        self.run_tasks = [((dss["storageshare__name"]}, kwargs['oldpath'], dss['storage_loc'], 
+            [x['pk'] for x in sflocs_share.values('pk'), {})]
 
 
 class MoveDatasetServershare(DatasetJob):

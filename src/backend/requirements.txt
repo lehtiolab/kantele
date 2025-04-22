@@ -1,9 +1,8 @@
-Django==4.2.13
+Django==5.2
 celery==5.4.0
-psycopg2==2.9.9
+psycopg2==2.9.10
 requests==2.32.3
 requests_toolbelt==1.0.0
-uWSGI==2.0.26
-dulwich==0.22.1
-biopython==1.83
-psutil==6.1.0
+uWSGI==2.0.29
+dulwich==0.22.8
+biopython==1.85
