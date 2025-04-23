@@ -489,7 +489,7 @@ def do_retry_job(job, force=False):
     jwrap = jobmap[job.name](job.pk)
     FileJob.objects.filter(job_id=job.pk).delete()
     FileJob.objects.bulk_create([FileJob(storedfile_id=sf_id, job_id=job.id) for sf_id in 
-        jwrap.get_sf_ids_jobrunner(**job.kwargs)])
+        jwrap.get_sf_ids_for_filejobs(**job.kwargs)])
     jobq = models.Job.objects.filter(pk=job.pk, state__in=JOBSTATES_RETRYABLE).update(
             state=Jobstates.PENDING)
     try:

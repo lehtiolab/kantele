@@ -1,3 +1,5 @@
+import os
+import re
 from datetime import datetime
 from base64 import b64encode
 
@@ -72,9 +74,47 @@ class ServerShare(models.Model):
     server = models.ForeignKey(FileServer, on_delete=models.CASCADE)
     share = models.TextField()  # /home/disk1
     max_security = models.IntegerField(choices=DataSecurityClass.choices)
+    description = models.TextField()
+    active = models.BooleanField(default=True)
+    # Not all shares are for raw data:
+    # - web for serving QC
+    # - analysis for storing analysis results
+    # - mzml_in etc etc
+    # This may become obsolete in the future but is needed now
+    has_rawdata = models.BooleanField(default=True)
+    # 0 is no expiry date
+    maxdays_data = models.IntegerField(default=0)
 
     def __str__(self):
         return self.name
+
+    def set_dset_storage_location(self, quantprot_id, project, exp, dset, dtype, prefrac, hiriefrange_id):
+        # FIXME adapt to multiple server shares
+        """
+        Governs rules for storage path naming of datasets on "open" servershares.
+        Project name is always top level, this is also used in 
+        rename_storage_loc_toplvl
+        """
+        if self.max_security == DataSecurityClass.NOSECURITY:
+            subdir = ''
+            if dtype.pk != quantprot_id:
+                subdir = dtype.name
+            if prefrac and hiriefrange_id:
+                subdir = os.path.join(subdir, models.HiriefRange.objects.get(
+                    pk=hiriefrange_id).get_path())
+            elif prefrac:
+                subdir = os.path.join(prefrac.name)
+            subdir = re.sub('[^a-zA-Z0-9_\-\/\.]', '_', subdir)
+            if len(subdir):
+                subdir = '/{}'.format(subdir)
+            if dtype.id in settings.LC_DTYPE_IDS:
+                return os.path.join(project.name, exp.name, str(dset.runname_id))
+            else:
+                #return os.path.join(project.name, exp.name, subdir, runname.name)
+                return '{}/{}{}/{}'.format(project.name, exp.name, subdir, dset.runname.name)
+        else:
+            return os.path.join(project.pk, dset.pk)
+
 
 
 class RawFile(models.Model):

@@ -61,7 +61,7 @@ def create_job(name, state=False, **kwargs):
             state=state, kwargs=kwargs)
         jobdata = {'id': job.id, 'error': False}
         FileJob.objects.bulk_create([FileJob(storedfile_id=sf_id, job_id=job.id) for sf_id in 
-            jwrap.get_sf_ids_jobrunner(**kwargs)])
+            jwrap.get_sf_ids_for_filejobs(**kwargs)])
     return jobdata
 
 

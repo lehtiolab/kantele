@@ -104,13 +104,35 @@ class Dataset(models.Model):
     #runname = models.TextField()
     datatype = models.ForeignKey(Datatype, on_delete=models.CASCADE)
     securityclass = models.IntegerField(choices=DataSecurityClass.choices)
-    # NB! storage_loc/share should only ever be updated in jobs' post-run (after moves)
-    # because it is source of truth for where to/from move files
-    storage_loc = models.TextField(max_length=200, unique=True)
-    storageshare = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
     deleted = models.BooleanField(default=False) # for UI only, indicate deleted from active storage
     purged = models.BooleanField(default=False) # for UI only, indicate permanent deleted from cold storage too
     locked = models.BooleanField(default=False)
+
+
+class DatasetServer(models.Model):
+    '''For 
+       - reporting of dataset locations to user in UI
+       - moving datasets paths TO (so it will be destination in jobs, not source)
+       - not for up-to-date file locations for operations on files!
+    This table is edited in views (as high up as possible), so when duplicates race, 
+    they will crash before any job that will use them, which would cause more problems'''
+    # FIXME check that jobs dont use this info from DB
+    dataset = models.ForeignKey(Dataset, on_delete=models.CASCADE)
+    storageshare = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
+    storage_loc = models.TextField(max_length=200, unique=True)
+    # Keep track of when dataset was on storage (start set when instantiated, and when 
+    # files added/removed), for expiry reasons, and log
+    startdate = models.DateTimeField()
+    active = models.BooleanField(default=True)
+    log = models.JSONField(default=list)
+
+    class Meta:
+        '''We will only have one server/storage loc combination (so no path crash),
+        and each dataset can only be in a given server once'''
+        constraints = [
+                models.UniqueConstraint(fields=['storageshare', 'storage_loc'], name='uni_dsshare'),
+                models.UniqueConstraint(fields=['dataset', 'storageshare'], name='uni_dsloc'),
+                ]
 
 
 class DatasetOwner(models.Model):

@@ -242,11 +242,6 @@ class DownloadPXProject(DatasetJob):
     checks pride, fires tasks for files not yet downloaded. 
     """
 
-    def get_sf_ids_jobrunner(self, **kwargs):
-        """This is run before running job, to define files used by
-        the job (so it cant run if if files are in use by other job)"""
-        return [x.sfile_id for x in self.getfiles_query(**kwargs)]
-
     def getfiles_query(self, **kwargs):
         return models.StoredFileLoc.objects.filter(sfile__rawfile_id__in=kwargs['shasums'], 
             checked=False).select_related('rawfile')

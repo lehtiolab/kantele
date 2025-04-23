@@ -84,10 +84,10 @@ class BaseJob:
     def getfiles_query(self, **kwargs):
         return []
 
-    def get_sf_ids_jobrunner(self, **kwargs):
+    def get_sf_ids_for_filejobs(self, **kwargs):
         """This is run before running job, to define files used by
         the job (so it cant run if if files are in use by other job)"""
-        return [x.pk for x in self.getfiles_query(**kwargs)]
+        return [x['sfile_id'] for x in self.getfiles_query(**kwargs).values('sfile_id')]
 
     def get_dsids_jobrunner(self, **kwargs):
         return []
@@ -120,14 +120,19 @@ class BaseJob:
 
 
 class SingleFileJob(BaseJob):
+    '''Job class for any job which specifies a single file on a share (so an StoredFileLoc).
+
+    QC, PDC, Rename, Classify, rsyncFileTtransfer (for http uploads)
+    
+    deprecate?:
+    move_single
+    '''
+
     def getfiles_query(self, **kwargs):
+        return StoredFileLoc.objects.filter(pk=kwargs['sfloc_id']).select_related(
+                'servershare', 'sfile__rawfile')
         # FIXME do .get and .select_related in jobs itself?
         # As in multifile job (PurgeFiles)
-        return StoredFileLoc.objects.filter(pk=kwargs['sfloc_id']).select_related(
-                'servershare', 'sfile__rawfile').get()
-
-    def get_sf_ids_jobrunner(self, **kwargs):
-        return [self.getfiles_query(**kwargs).id]
 
     def get_dsids_jobrunner(self, **kwargs):
         ''''In case a single file has a dataset'''
@@ -136,11 +141,16 @@ class SingleFileJob(BaseJob):
 
 
 class MultiFileJob(BaseJob):
+    '''Job class to specify any job on a number of files on a specific share.
+    Jobs:
+    - Run NF analysis
+    - Purge analysis
+    - Purge files
+    - Delete empty dir
+    - Register external file
+    '''
     def getfiles_query(self, **kwargs):
         return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'])
-
-    def get_sf_ids_jobrunner(self, **kwargs):
-        return [x['sfile_id'] for x in self.getfiles_query(**kwargs).values('sfile_id')]
 
     def get_dsids_jobrunner(self, **kwargs):
         ''''In case a single file has a dataset'''
@@ -149,26 +159,50 @@ class MultiFileJob(BaseJob):
 
 
 class DatasetJob(BaseJob):
-    '''Any job that changes a dataset (rename, adding/removing files, backup, reactivate)'''
+    '''Any job that changes a dataset (rename, adding/removing files, backup, reactivate).
+    We include add/remove etc since the jobrunner will wait for the entire dataset file operations
+    then, not only for the files-to-be-added, which is good since otherwise you could start
+    an analysis on the dataset without those files, for example.
+
+    Jobs:
+    With servershare:
+    - refine mzml
+    - rename storloc
+    - move dset servershare (rsync)
+    - mzml convert
+    - backup
+    - retrieve
+
+    Without servershare (all ss)
+    - add/rm files 
+    - delete mzml
+    - delete dset
+    - delete backup
+    '''
 
     def get_dsids_jobrunner(self, **kwargs):
-        return [kwargs['dset_id']]
-
-    def get_sf_ids_jobrunner(self, **kwargs):
-        '''Called to make FileJob records.  Let all files associated with dataset wait'''
-        dset = dm.Dataset.objects.get(pk=kwargs['dss_id'])
-        return [x['pk'] for x in StoredFile.objects.filter(
-            rawfile__datasetrawfile__dataset__datasetserver__pk=kwargs['dss_id']).values('pk')]
+        return [x.pk for x in dm.Dataset.objects.filter(datasetserver__pk=kwargs['dss_id'])]
 
     def getfiles_query(self, **kwargs):
         '''Get all files which had a datasetrawfile association when this job was created/retried,
         (so get the FileJob entries). Files will either be used in the
-        job itself and/or post the job in e.g. re-setting their paths etc.'''
+        job itself and/or post the job in e.g. re-setting their paths etc.
+
+        FileJob records: let all files associated with dataset wait,
+        this means that the job is created AFTER new datasetrawfile associations, and BEFORE
+        removed datasetrawfile association.
+
+        When e.g. check_job_error is used, there is no job yet, and this will return the files
+        of a dataset'
+        '''
         dss = dm.DatasetServer.objects.get(pk=kwargs['dss_id'])
-        return StoredFileLoc.objects.filter(purged=False, sfile__filejob__job_id=self.pk)
+        return StoredFileLoc.objects.filter(purged=False, servershare=dss.storageshare,
+                sfile__rawfile__datasetrawfile__dataset__datasetserver=dss)
 
 
 class ProjectJob(BaseJob):
+    '''There is only one ProjectJob and it is RenameProject - maybe change to MultiFile?
+    '''
     def get_dsids_jobrunner(self, **kwargs):
         return [x.pk for x in dm.Dataset.objects.filter(deleted=False, purged=False,
             runname__experiment__project_id=kwargs['proj_id'])]
@@ -176,14 +210,5 @@ class ProjectJob(BaseJob):
     def getfiles_query(self, **kwargs):
         '''Get all files with same path as project_dsets.storage_locs, used to update
         path of those files post-job'''
-        dsets = dm.Dataset.objects.filter(runname__experiment__project_id=kwargs['proj_id'])
-        return StoredFileLoc.objects.filter(
-                servershare__in=[x.storageshare for x in dsets.distinct('storageshare')],
-                path__in=[x.storage_loc for x in dsets.distinct('storage_loc')])
-
-    def get_sf_ids_jobrunner(self, **kwargs):
-        """Get all sf ids in project to mark them as not using pre-this-job"""
-        return [x['pk'] for x in StoredFile.objects.filter(
-            deleted=False, storedfileloc__purged=False,
-            rawfile__datasetrawfile__dataset__runname__experiment__project_id=kwargs['proj_id']
-            ).values('pk')]
+        return StoredFileLoc.objects.filter(purged=False, sfile__deleted=False,
+                sfile__rawfile__datasetrawfile__dataset__runname__experiment__project_id=kwargs['proj_id'])

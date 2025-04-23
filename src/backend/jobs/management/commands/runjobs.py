@@ -52,7 +52,6 @@ def run_ready_jobs(job_fn_map, job_ds_map, active_jobs):
             # FIXME do some jobs really have no files?
             job_fn_map[job.id] = [x['storedfile_id'] for x in
                     FileJob.objects.filter(job_id=job.pk).values('storedfile_id')]
-            jwrapper.get_sf_ids_jobrunner(**job.kwargs)
             # Register dsets FIXME
             ds_ids = jwrapper.get_dsids_jobrunner(**job.kwargs)
             job_ds_map[job.id] = set(ds_ids)
@@ -117,11 +116,12 @@ def run_ready_jobs(job_fn_map, job_ds_map, active_jobs):
             job_ds = job_ds_map[job.id]
             # do not start job if there is activity on files or datasets
             active_files = {sf for jid in active_jobs for sf in job_fn_map[jid]}
-            active_datasets = {ds for jid in active_jobs for ds in job_ds_map[jid]}
+            # Blocking Dataset seem to be never used in production 
+#            active_datasets = {ds for jid in active_jobs for ds in job_ds_map[jid]}
             if blocking_files := active_files.intersection(jobfiles):
                 print(f'Deferring job since files {blocking_files} are being used in other job')
-            elif blocking_ds := active_datasets.intersection(job_ds):
-                print(f'Deferring job since datasets {blocking_ds} are being used in other job')
+#            elif blocking_ds := active_datasets.intersection(job_ds):
+#                print(f'Deferring job since datasets {blocking_ds} are being used in other job')
             else:
                 print('Executing job {}'.format(job.id))
                 active_jobs.add(job.id)
