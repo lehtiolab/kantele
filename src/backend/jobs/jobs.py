@@ -87,7 +87,8 @@ class BaseJob:
     def get_sf_ids_jobrunner(self, **kwargs):
         """This is run before running job, to define files used by
         the job (so it cant run if if files are in use by other job)"""
-        return [x.pk for x in self.getfiles_query(**kwargs)]
+        return [x['sfile_id'] for x in self.getfiles_query(**kwargs)]
+
 
     def get_dsids_jobrunner(self, **kwargs):
         return []
@@ -127,7 +128,7 @@ class SingleFileJob(BaseJob):
                 'servershare', 'sfile__rawfile').get()
 
     def get_sf_ids_jobrunner(self, **kwargs):
-        return [self.getfiles_query(**kwargs).id]
+        return [self.getfiles_query(**kwargs).sfile_id]
 
     def get_dsids_jobrunner(self, **kwargs):
         ''''In case a single file has a dataset'''
@@ -138,9 +139,6 @@ class SingleFileJob(BaseJob):
 class MultiFileJob(BaseJob):
     def getfiles_query(self, **kwargs):
         return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'])
-
-    def get_sf_ids_jobrunner(self, **kwargs):
-        return [x['sfile_id'] for x in self.getfiles_query(**kwargs).values('sfile_id')]
 
     def get_dsids_jobrunner(self, **kwargs):
         ''''In case a single file has a dataset'''
