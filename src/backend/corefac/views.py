@@ -25,12 +25,11 @@ def corefac_home(request):
         
     # create following JSON:
     # {1: { id: 1, title: Cleanup, methods: [{name: SP3, versions: [(v1, doi123), ]}]}
-    for spo in dm.SampleprepParameterOption.objects.all().values('param__title', 'param__pk',
-            'value', 'pk', 'param__active', 'active'):
+    for spcat in dm.SampleprepParameter.objects.all().values('title', 'pk', 'active'):
+        protos[spcat['pk']] = {'id': spcat['pk'], 'title': spcat['title'], 'active': spcat['active'],
+                'methods': []}
+    for spo in dm.SampleprepParameterOption.objects.all().values('param__pk', 'value', 'pk', 'active'):
         versions = all_doi[spo['pk']] if spo['pk'] in all_doi else []
-        if spo['param__pk'] not in protos:
-            protos[spo['param__pk']] = {'id': spo['param__pk'], 'title': spo['param__title'],
-                    'active': spo['param__active'], 'methods': []}
         protos[spo['param__pk']]['methods'].append({'name': spo['value'], 'id': spo['pk'],
             'versions': versions, 'active': spo['active']})
     pipelines = {}
