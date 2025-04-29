@@ -64,6 +64,8 @@ class FileServer(models.Model):
     name = models.TextField(unique=True)
     uri = models.TextField() # for users
     fqdn = models.TextField() # controller URL for rsync SSH etc
+    rsyncusername = models.TextField()
+    rsynckeyfile = models.TextField()
 
     def __str__(self):
         return self.name
@@ -72,7 +74,7 @@ class FileServer(models.Model):
 class ServerShare(models.Model):
     name = models.TextField(unique=True)  # storage, tmp,
     server = models.ForeignKey(FileServer, on_delete=models.CASCADE)
-    share = models.TextField()  # /home/disk1
+    share = models.TextField(help_text='Base path, e.g. /disk1/data/raw/projects')  # /home/disk1
     max_security = models.IntegerField(choices=DataSecurityClass.choices)
     description = models.TextField()
     active = models.BooleanField(default=True)

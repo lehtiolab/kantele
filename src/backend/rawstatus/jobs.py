@@ -7,6 +7,7 @@ from datetime import datetime
 from rawstatus import tasks, models
 from datasets import tasks as dstasks
 from datasets import models as dm
+from datasets.jobs import RsyncDatasetServershare, RemoveDatasetFilesFromServershare
 from kantele import settings
 from jobs.jobs import SingleFileJob, MultiFileJob, DatasetJob
 
@@ -20,12 +21,44 @@ def get_host_upload_dst(web_dst):
     return web_dst.replace(settings.TMP_UPLOADPATH, settings.HOST_UPLOADDIR, 1)
 
 
-class RsyncFileTransfer(SingleFileJob):
+class RsyncFileTransfer(RsyncDatasetServershare):
+    '''Does the same as rsync dset, but for when files are not in a dataset
+    '''
+    refname = 'rsync_transfer_files'
+    task = tasks.rsync_files_to_servershares
+    queue = settings.QUEUE_FILE_DOWNLOAD
+
+    def get_dsids_jobrunner(self, **kwargs):
+        return []
+
+    def get_sf_ids_for_filejobs(self, **kwargs):
+        """This is run before running job, to define files used by
+        the job (so it cant run if if files are in use by other job)"""
+        return [x['sfile_id'] for x in self.getfiles_query(**kwargs).values('sfile_id')]
+
+
+class RemoveFilesFromServershare(RemoveDatasetFilesFromServershare):
+    '''Does the same as rsync dset, but for when files are not in a dataset
+    '''
+    refname = 'purge_files'
+    task = tasks.delete_file
+    queue = False
+
+    def get_dsids_jobrunner(self, **kwargs):
+        return []
+
+    def get_sf_ids_for_filejobs(self, **kwargs):
+        """This is run before running job, to define files used by
+        the job (so it cant run if if files are in use by other job)"""
+        return [x['sfile_id'] for x in self.getfiles_query(**kwargs).values('sfile_id')]
+
+
+class RsyncFileTransferFromWeb(SingleFileJob):
     # FIXME change name? All these are for web-to-storage, can maybe generalize that
     # with the also-rsyncing move_dset_servershare, or with (later) any-mover like for analysis results
     # Possibly dont generalize as this could check if 
     refname = 'rsync_transfer'
-    task = tasks.rsync_transfer_file
+    task = tasks.rsync_transfer_file_web
     queue = settings.QUEUE_WEB_RSYNC
 
     def check_error(self, **kwargs):

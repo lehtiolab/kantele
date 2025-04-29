@@ -1,4 +1,3 @@
-import json
 import requests
 
 from celery import states
@@ -109,11 +108,17 @@ class BaseJob:
         pass
 
     def queue_tasks(self):
-        for task in self.run_tasks:
-            args, kwargs = task[0], task[1]
-            tid = self.task.apply_async(args=args, kwargs=kwargs, queue=self.queue)
+        '''If queue is defined on job, run that queue, otherwise, get queue
+        from the task (in case of variable server-dependent queues'''
+        for runtask in self.run_tasks:
+            if self.queue:
+                args, kwargs = runtask
+                queue = self.queue
+            else:
+                args, kwargs, queue = runtask
+            tid = self.task.apply_async(args=args, kwargs=kwargs, queue=queue)
             self.create_db_task(tid, *args, **kwargs)
-    
+
     def create_db_task(self, task_id, *args, **kwargs):
         return Task.objects.create(asyncid=task_id, job_id=self.job_id, state=states.PENDING,
                 args=[args, kwargs])
@@ -183,6 +188,12 @@ class DatasetJob(BaseJob):
     def get_dsids_jobrunner(self, **kwargs):
         return [x.pk for x in dm.Dataset.objects.filter(datasetserver__pk=kwargs['dss_id'])]
 
+    def get_sf_ids_for_filejobs(self, **kwargs):
+        '''Let runner wait for entire dataset'''
+        dss = dm.DatasetServer.objects.get(pk=kwargs['dss_id'])
+        return [x['pk'] for x in StoredFile.objects.filter(
+            rawfile__datasetrawfile__dataset__datasetserver=dss).values('pk')]
+
     def getfiles_query(self, **kwargs):
         '''Get all files which had a datasetrawfile association when this job was created/retried,
         (so get the FileJob entries). Files will either be used in the
@@ -195,9 +206,7 @@ class DatasetJob(BaseJob):
         When e.g. check_job_error is used, there is no job yet, and this will return the files
         of a dataset'
         '''
-        dss = dm.DatasetServer.objects.get(pk=kwargs['dss_id'])
-        return StoredFileLoc.objects.filter(purged=False, servershare=dss.storageshare,
-                sfile__rawfile__datasetrawfile__dataset__datasetserver=dss)
+        return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'], purged=False)
 
 
 class ProjectJob(BaseJob):

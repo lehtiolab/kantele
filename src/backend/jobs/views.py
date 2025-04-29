@@ -81,17 +81,15 @@ def update_storagepath_file(request):
             data['client_id'], [settings.STORAGECLIENT_APIKEY, settings.ANALYSISCLIENT_APIKEY]):
         return HttpResponseForbidden()
     print('Updating storage task finished')
-    print(data)
     if 'sfloc_id' in data:
         sfloc = StoredFileLoc.objects.get(pk=data['sfloc_id'])
-        print(sfloc)
-        sfloc.servershare = ServerShare.objects.get(name=data['servershare'])
+        # sfloc.servershare = ServerShare.objects.get(name=data['servershare'])
         sfloc.path = data['dst_path']
         if 'newname' in data:
             sfloc.sfile.filename = data['newname']
             sfloc.sfile.rawfile.name = data['newname']
             sfloc.sfile.rawfile.save()
-        sfloc.sfile.save()
+            sfloc.sfile.save()
         sfloc.save()
     elif 'sfloc_ids' in data:
         sfns = StoredFileLoc.objects.filter(pk__in=[int(x) for x in data['sfloc_ids']])

@@ -85,59 +85,7 @@ def rename_top_level_project_storage_dir(self, projsharename, srcname, newname, 
 
 
 @shared_task(bind=True)
-def rsync_dset_servershare(self, dset_id, srcsharename, srcpath, srcserver_url,
-        srcshare_path_controller, dstserver_url, dstsharename, fns, upd_sfl_ids):
-    '''Uses rsync to copy a dataset to other servershare. E.g in case of consolidating
-    projects to a certain share, or when e.g. moving to new storage unit. Files are rsynced
-    one at a time, to avoid rsyncing files removed from dset before running this job,
-    and avoiding files added to dset updating servershare post-job'''
-    # TODO this task is very specific to our Lehtio infra at scilife,
-    # and we should probably remove it from the codebase when we're
-    # done migrating, including its job and views etc
-    dstdir = os.path.join(settings.SHAREMAP[dstsharename], srcpath)
-    try:
-        os.makedirs(dstdir, exist_ok=True)
-    except Exception:
-        taskfail_update_db(self.request.id)
-        raise
-    for srcfn in fns:
-        # Dont compress, tests with raw data just make it slower and likely
-        # the raw data is already fairly well compressed.
-        cmd = ['rsync', '-av']
-        if srcserver_url != dstserver_url:
-            # two different controllers -> rsync over ssh
-            cmd.extend(['-e',
-                f'ssh -l {settings.SECONDARY_STORAGE_RSYNC_USER} -i {settings.SECONDARY_STORAGE_RSYNC_KEY}',
-                f'{srcserver_url}:{os.path.join(srcshare_path_controller, srcpath, srcfn)}', dstdir])
-        else:
-            # same controller on src and dst -> rsync over mounts
-            srcfpath = os.path.join(settings.SHAREMAP[srcsharename], srcpath, srcfn)
-            cmd.extend([srcfpath, dstdir])
-        try:
-            subprocess.run(cmd, check=True)
-        except subprocess.CalledProcessError:
-            print('Failed to run', cmd)
-            try:
-                self.retry(countdown=60)
-            except MaxRetriesExceededError:
-                taskfail_update_db(self.request.id)
-                raise
-    # Do not delete files afterwards, as that cannot be done when they live on a different
-    # controller server
-
-    # report finished
-    fnpostdata = {'sfloc_ids': upd_sfl_ids, 'servershare': dstsharename,
-            'dst_path': srcpath, 'client_id': settings.APIKEY, 'task': self.request.id}
-    dspostdata = {'storage_loc': srcpath, 'dset_id': dset_id, 'newsharename': dstsharename,
-            'task': self.request.id, 'client_id': settings.APIKEY}
-    fnurl = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
-    dsurl = urljoin(settings.KANTELEHOST, reverse('jobs:update_ds_storage'))
-    update_db(fnurl, json=fnpostdata)
-    update_db(dsurl, json=dspostdata)
-
-
-@shared_task(bind=True)
-def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, dset_id, sfloc_ids):
+def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, sfloc_ids):
     """This expects one dataset per dir, as it will rename the whole dir"""
     print(f'Renaming dataset storage {srcpath} to {dstpath}')
     ds_share = settings.SHAREMAP[ds_sharename]
@@ -164,15 +112,10 @@ def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, dset_id, 
             except:
                 taskfail_update_db(self.request.id)
                 raise
-    fn_postdata = {'sfloc_ids': sfloc_ids, 'dst_path': dstpath, 
-            'client_id': settings.APIKEY}
-    ds_postdata = {'storage_loc': dstpath, 'dset_id': dset_id, 'newsharename': False,
-            'task': self.request.id, 'client_id': settings.APIKEY}
+    fn_postdata = {'sfloc_ids': sfloc_ids, 'dst_path': dstpath, 'client_id': settings.APIKEY}
     fnurl = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
-    dsurl = urljoin(settings.KANTELEHOST, reverse('jobs:update_ds_storage'))
     try:
         update_db(fnurl, json=fn_postdata)
-        update_db(dsurl, json=ds_postdata)
     except RuntimeError:
         # FIXME cannot move back shutil.move(dst, src)
         raise

@@ -122,7 +122,50 @@ def download_px_file_raw(self, ftpurl, ftpnetloc, sf_id, raw_id, shasum, size, s
 
 
 @shared_task(bind=True)
-def rsync_transfer_file(self, sfid, srcpath, dstpath, dstsharename, do_unzip, stablefiles):
+def rsync_files_to_servershares(self, srcsharename, srcpath, srcserver_url, dstserver_url,
+        dstsharename, dstpath, dstshare_remote_path, dst_rsync_user, dst_rsync_key, fns, upd_sfl_ids):
+    '''Uses rsync to copy a dataset to other servershare. Files are rsynced
+    one at a time, for more control in case there's some anomaly in the dataset folder.
+    This is always run on the storage controller, which has access to local but not
+    external cluster shares - so an only transfer files FROM the local storage.
+    Clarification:
+    dstpath - proj/exp/run (dset path)
+    dstshare_remote_path - /crex/proj/abc2025-123/raw (base remote path in case on SSH remote)
+    '''
+    for srcfn in fns:
+        # Dont compress, tests with raw data just make it slower and likely
+        # the raw data is already fairly well compressed.
+        cmd = ['rsync', '-av', '--mkpath']
+        if srcserver_url != dstserver_url:
+            # two different controllers -> rsync over ssh
+            cmd.extend(['-e', f'ssh -l {dst_rsync_user} -i {dst_rsync_key}'])
+            dstfpath = f'{dstserver_url}:{os.path.join(dstshare_remote_path, dstpath, srcfn)}'
+        else:
+            # same controller on src and dst -> rsync over mounts
+            dstfpath = os.path.join(settings.SHAREMAP[dstsharename], dstpath, srcfn)
+        srcfpath = os.path.join(settings.SHAREMAP[srcsharename], srcpath, srcfn)
+        cmd.extend([srcfpath, dstfpath])
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError:
+            print('Failed to run', cmd)
+            try:
+                self.retry(countdown=60)
+            except MaxRetriesExceededError:
+                taskfail_update_db(self.request.id)
+                raise
+    # Do not delete files afterwards, as that cannot be done when they live on a different
+    # controller server
+
+    # report finished
+    fnpostdata = {'sfloc_ids': upd_sfl_ids, 'servershare': dstsharename,
+            'dst_path': srcpath, 'client_id': settings.APIKEY, 'task': self.request.id}
+    fnurl = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
+    update_db(fnurl, json=fnpostdata)
+
+
+@shared_task(bind=True)
+def rsync_transfer_file_web(self, sfid, srcpath, dstpath, dstsharename, do_unzip, stablefiles):
     '''Uses rsync to transfer uploaded file from KANTELEHOST/other RSYNC_HOST to storage server.
     In case of a zipped folder transfer, the file is unzipped and an MD5 check is done 
     on its relevant file, in case the transferred file is corrupt'''
@@ -203,9 +246,9 @@ def rsync_transfer_file(self, sfid, srcpath, dstpath, dstsharename, do_unzip, st
 
 
 @shared_task(bind=True)
-def delete_file(self, servershare, filepath, sfloc_id, is_dir=False):
-    print('Deleting file {} on {}'.format(filepath, servershare))
-    fileloc = os.path.join(settings.SHAREMAP[servershare], filepath)
+def delete_file(self, servershare, path, fname, sfloc_id, is_dir=False):
+    print(f'Deleting file {path}/{fname} on {servershare}')
+    fileloc = os.path.join(settings.SHAREMAP[servershare], path, fname)
     try:
         if is_dir:
             shutil.rmtree(fileloc)
@@ -219,14 +262,14 @@ def delete_file(self, servershare, filepath, sfloc_id, is_dir=False):
         # FIXME proper feedback on error!
         fn_or_dir = ['directory', 'file']
         fn_or_dir = fn_or_dir if is_dir else fn_or_dir[::-1]
-        msg = (f'When trying to delete file {filepath}, expected a {fn_or_dir[0]}, but encountered '
+        msg = (f'When trying to delete file {path}/{fname}, expected a {fn_or_dir[0]}, but encountered '
                 f'a {fn_or_dir[1]}')
         taskfail_update_db(self.request.id, msg)
         raise
     except Exception:
-        taskfail_update_db(self.request.id, msg=f'Something went wrong trying to delete {filepath}')
+        taskfail_update_db(self.request.id, msg=f'Something went wrong trying to delete {path}/{fname}')
         raise
-    msg = f'after succesful deletion of fn {filepath}. {{}}'
+    msg = f'after succesful deletion of fn {path}/{fname}. {{}}'
     url = urljoin(settings.KANTELEHOST, reverse('jobs:deletefile'))
     postdata = {'sfloc_id': sfloc_id, 'task': self.request.id, 'client_id': settings.APIKEY}
     print(postdata)
