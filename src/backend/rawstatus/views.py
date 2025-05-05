@@ -416,46 +416,55 @@ def get_files_transferstate(request):
         sfn.refresh_from_db()
 
         dstsharename, dstpath = UPLOAD_DESTINATIONS[upload.uploadtype]
-        sfnss = StoredFileLoc.objects.get(sfile=sfn, servershare__name=dstsharename)
-        if sfn.checked:
-            # File transfer and check finished
-            tstate = 'done'
-            has_backupjob = jm.Job.objects.filter(funcname='create_pdc_archive',
-
-                    kwargs__sfloc_id=sfnss.pk, state__in=jobutil.JOBSTATES_WAIT).exists()
-            if not has_backupjob and not PDCBackedupFile.objects.filter(storedfile_id=sfn.id):
-                # No already-backedup PDC file, then do some processing work
-                process_file_confirmed_ready(rfn, sfn, sfnss, upload, desc)
-        # FIXME this is too hardcoded data model which will be changed one day,
-        # needs to be in Job class abstraction!
-
-        elif not last_rsjob:
-            # There is no rsync job for this file, means it's old or somehow
-            # errored # TODO how to report to user? File is also not OK checked
-            tstate = 'wait'
-        # FIXME elif last_rsjob.state == jobutil.Jobstates.ERROR: tstate = 'skip' ??
-        elif last_rsjob.state not in jobutil.JOBSTATES_DONE:
-            # File being rsynced and optionally md5checked (or it crashed, job
-            # errored, revoked, wait for system or admin to catch job)
-            # WARNING: this did not work when doing sfn.filejob_set.filter ?
-            # A second call to this route would fire the rsync/md5 job again,
-            # until the file was checked. But in theory it'd work, and by hand too.
-            # Maybe a DB or cache thing, however 3seconds between calls should be enough?
-            # Maybe NGINX caches stuff, add some sort of no-cache into the header of request in client producer.py
-            tstate = 'wait'
-
-        elif last_rsjob.state == jobutil.Jobstates.DONE:
-            # MD5 on disk is not same as registered MD5, corrupted transfer
-            # reset MD5 on stored file to make sure no NEW stored files are created
-            # basically setting its state to pre-transfer state
-            sfn.md5 = rfn.source_md5
-            sfn.save()
-            tstate = 'transfer'
-
+        try:
+            sfnss = StoredFileLoc.objects.get(sfile=sfn, servershare__name=dstsharename)
+        except StoredFileLoc.DoesNotExist:
+            # This happens when a file is accidentally (or in case of analysis, a duplicate),
+            # retransferred
+            if sfn.checked:
+                tstate = 'done'
+            else:
+                raise
         else:
-            # There is an unlikely rsync job which is canceled, requeue it
-            create_job('rsync_transfer', sfloc_id=sfnss.pk, src_path=up_dst)
-            tstate = 'wait'
+            if sfn.checked:
+                # File transfer and check finished
+                tstate = 'done'
+                has_backupjob = jm.Job.objects.filter(funcname='create_pdc_archive',
+
+                        kwargs__sfloc_id=sfnss.pk, state__in=jobutil.JOBSTATES_WAIT).exists()
+                if not has_backupjob and not PDCBackedupFile.objects.filter(storedfile_id=sfn.id):
+                    # No already-backedup PDC file, then do some processing work
+                    process_file_confirmed_ready(rfn, sfn, sfnss, upload, desc)
+            # FIXME this is too hardcoded data model which will be changed one day,
+            # needs to be in Job class abstraction!
+
+            elif not last_rsjob:
+                # There is no rsync job for this file, means it's old or somehow
+                # errored # TODO how to report to user? File is also not OK checked
+                tstate = 'wait'
+            # FIXME elif last_rsjob.state == jobutil.Jobstates.ERROR: tstate = 'skip' ??
+            elif last_rsjob.state not in jobutil.JOBSTATES_DONE:
+                # File being rsynced and optionally md5checked (or it crashed, job
+                # errored, revoked, wait for system or admin to catch job)
+                # WARNING: this did not work when doing sfn.filejob_set.filter ?
+                # A second call to this route would fire the rsync/md5 job again,
+                # until the file was checked. But in theory it'd work, and by hand too.
+                # Maybe a DB or cache thing, however 3seconds between calls should be enough?
+                # Maybe NGINX caches stuff, add some sort of no-cache into the header of request in client producer.py
+                tstate = 'wait'
+
+            elif last_rsjob.state == jobutil.Jobstates.DONE:
+                # MD5 on disk is not same as registered MD5, corrupted transfer
+                # reset MD5 on stored file to make sure no NEW stored files are created
+                # basically setting its state to pre-transfer state
+                sfn.md5 = rfn.source_md5
+                sfn.save()
+                tstate = 'transfer'
+
+            else:
+                # There is an unlikely rsync job which is canceled, requeue it
+                create_job('rsync_transfer', sfloc_id=sfnss.pk, src_path=up_dst)
+                tstate = 'wait'
     response = {'transferstate': tstate, 'fn_id': rfn.pk}
     return JsonResponse(response)
 
