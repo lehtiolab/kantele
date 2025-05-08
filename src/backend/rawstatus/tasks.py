@@ -159,7 +159,7 @@ def rsync_files_to_servershares(self, srcsharename, srcpath, srcserver_url, dsts
 
     # report finished
     fnpostdata = {'sfloc_ids': upd_sfl_ids, 'servershare': dstsharename,
-            'dst_path': srcpath, 'client_id': settings.APIKEY, 'task': self.request.id}
+            'dst_path': dstpath, 'client_id': settings.APIKEY, 'task': self.request.id}
     fnurl = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
     update_db(fnurl, json=fnpostdata)
 

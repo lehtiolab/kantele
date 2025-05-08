@@ -90,6 +90,15 @@ class ServerShare(models.Model):
     def __str__(self):
         return self.name
 
+    def get_non_open_dset_path(self, project_id, dset_id):
+        return os.path.join(project_id, dset_id)
+
+    def rename_storage_loc_toplvl(self, newprojname, oldpath, project_id, dset_id):
+        if self.max_security == DataSecurityClass.NOSECURITY:
+            return os.path.join(newprojname, *oldpath.split(os.path.sep)[1:])
+        else:
+            return self.get_non_open_dset_path(project_id, dset_id)
+
     def set_dset_storage_location(self, quantprot_id, project, exp, dset, dtype, prefrac, hiriefrange_id):
         # FIXME adapt to multiple server shares
         """
@@ -115,7 +124,7 @@ class ServerShare(models.Model):
                 #return os.path.join(project.name, exp.name, subdir, runname.name)
                 return '{}/{}{}/{}'.format(project.name, exp.name, subdir, dset.runname.name)
         else:
-            return os.path.join(project.pk, dset.pk)
+            return self.get_non_open_dset_path(project.pk, dset.pk)
 
 
 
@@ -152,10 +161,21 @@ class StoredFile(models.Model):
 
 
 class StoredFileLoc(models.Model):
+    '''This should be an up-to-date table for file locations, so while a record here is always
+    CREATED in the request view, its path/purged etc will e.g. change AFTER a rename job has 
+    finished. In case rsync job is canceled or held, those will not be updated
+    Deleting a file from a share will not delete this record, but it will set active=False
+    in the view/request, likewise updating an old file will set active=True in the view.
+    '''
     sfile = models.ForeignKey(StoredFile, on_delete=models.CASCADE)
+    active = models.BooleanField(default=False)
+    # Fields below are current status, i.e. they are updated after a job
     servershare = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
     path = models.TextField()
-    purged = models.BooleanField(default=False) # deleted from active storage filesystems
+    # deleted from active storage filesystems
+    # This indicates ACTUAL deletion, not the UI or pre-job status of the file,
+    # and is set as a delete job finishes
+    purged = models.BooleanField(default=True)
 
     class Meta:
         # Include the deleted field to allow for multi-version of a file 
@@ -244,6 +264,12 @@ class SwestoreBackedupFile(models.Model):
 
 
 class FileJob(models.Model):
+    '''This registers which files are in a job for the jobrunner, so it knows
+    if it should wait before executing a job. Creation of a filejob is done when
+    the job is created. It will overreport the number of actually-used files in
+    case of datasets, since some jobs operate only on half of a dataset, e.g.
+    deletion, refine mzML, etc
+    '''
     # FIXME move to job module
     storedfile = models.ForeignKey(StoredFile, on_delete=models.CASCADE)
     job = models.ForeignKey(Job, on_delete=models.CASCADE)

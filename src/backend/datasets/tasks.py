@@ -92,6 +92,9 @@ def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, sfloc_ids
     srcfull = os.path.join(ds_share, srcpath)
     dstfull = os.path.join(ds_share, dstpath)
     try:
+        # os.renames can rename recursively so not only leaf node
+        # can change, but we can rename a project directly for each
+        # dataset e.g. proj1/exp/ds1 -> proj2/exp/ds1
         os.renames(srcfull, dstfull)
     except NotADirectoryError:
         taskfail_update_db(self.request.id, msg=f'Failed renaming project {srcfull} is a directory '
@@ -112,7 +115,8 @@ def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, sfloc_ids
             except:
                 taskfail_update_db(self.request.id)
                 raise
-    fn_postdata = {'sfloc_ids': sfloc_ids, 'dst_path': dstpath, 'client_id': settings.APIKEY}
+    fn_postdata = {'sfloc_ids': sfloc_ids, 'dst_path': dstpath, 'client_id': settings.APIKEY,
+            'task': self.request.id}
     fnurl = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
     try:
         update_db(fnurl, json=fn_postdata)

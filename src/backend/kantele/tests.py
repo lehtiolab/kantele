@@ -165,7 +165,7 @@ class BaseTest(TestCase):
         self.oldsf = rm.StoredFile.objects.create(rawfile=self.oldraw, filename=oldfn,
                     md5=self.oldraw.source_md5, filetype=self.ft, checked=True)
         self.oldsss = rm.StoredFileLoc.objects.create(sfile=self.oldsf, servershare=self.ssoldstorage,
-                path=self.oldstorloc)
+                path=self.oldstorloc, active=True, purged=False)
         self.oldqsf = dm.QuantSampleFile.objects.create(rawfile=self.olddsr, projsample=self.projsam2)
 
         # Tmp rawfile
@@ -176,7 +176,8 @@ class BaseTest(TestCase):
                 source_md5='tmpraw_fakemd5', size=tmpsize, date=timezone.now(), claimed=False)
         self.tmpsf = rm.StoredFile.objects.create(rawfile=self.tmpraw, md5=self.tmpraw.source_md5,
                 filename=tmpfn, checked=True, filetype=self.ft)
-        self.tmpsss = rm.StoredFileLoc.objects.create(sfile=self.tmpsf, servershare=self.sstmp, path='')
+        self.tmpsss = rm.StoredFileLoc.objects.create(sfile=self.tmpsf, servershare=self.sstmp,
+                path='', active=True, purged=False)
 
         # Library files, for use as input, so claimed and ready
         self.libraw = rm.RawFile.objects.create(name='libfiledone', producer=self.prod,
@@ -184,7 +185,8 @@ class BaseTest(TestCase):
 
         self.sflib = rm.StoredFile.objects.create(rawfile=self.libraw, md5=self.libraw.source_md5,
         filetype=self.ft, checked=True, filename=self.libraw.name)
-        rm.StoredFileLoc.objects.create(sfile=self.sflib, servershare=self.ssnewstore, path='')
+        rm.StoredFileLoc.objects.create(sfile=self.sflib, servershare=self.ssnewstore, path='',
+                active=True, purged=False)
         self.lf = am.LibraryFile.objects.create(sfile=self.sflib, description='This is a libfile')
 
 #        # User files for input
@@ -197,13 +199,15 @@ class BaseTest(TestCase):
         self.anasfile = rm.StoredFile.objects.create(rawfile=self.ana_raw, filetype_id=self.ft.id,
 
                 filename=self.ana_raw.name, md5=self.ana_raw.source_md5)
-        rm.StoredFileLoc.objects.create(sfile=self.anasfile, servershare=self.sstmp, path='')
+        rm.StoredFileLoc.objects.create(sfile=self.anasfile, servershare=self.sstmp, path='',
+                active=True, purged=False)
         self.ana_raw2, _ = rm.RawFile.objects.get_or_create(name='ana_file2', producer=self.anaprod,
                 source_md5='anarawabc1234', size=100, defaults={'date': timezone.now(), 'claimed': True})
         self.anasfile2 = rm.StoredFile.objects.create(rawfile=self.ana_raw2,
                 filetype_id=self.ft.id, filename=self.ana_raw2.name, filetype=self.ft,
                     md5=self.ana_raw2.source_md5)
-        rm.StoredFileLoc.objects.create(sfile=self.anasfile2, servershare=self.sstmp, path='')
+        rm.StoredFileLoc.objects.create(sfile=self.anasfile2, servershare=self.sstmp, path='',
+                active=True, purged=False)
 
 
 class ProcessJobTest(BaseTest):

@@ -126,7 +126,7 @@ def run_ready_jobs(job_fn_map, job_ds_map, active_jobs):
                 print('Executing job {}'.format(job.id))
                 active_jobs.add(job.id)
                 job.state = Jobstates.PROCESSING
-                if errmsg := jwrapper.check_error(**job.kwargs):
+                if errmsg := jwrapper.check_error_on_running(**job.kwargs):
                     jwrapper.set_error(job, errmsg=errmsg)
                 else:
                     try:

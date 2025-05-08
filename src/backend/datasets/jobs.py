@@ -65,7 +65,7 @@ class RenameDatasetStorageLoc(DatasetJob):
 
     def process(self, **kwargs):
         srcsfs = self.getfiles_query(**kwargs)
-        srcloc = srcsfs.distinct('path', 'servershare__name')
+        srcloc = srcsfs.distinct('path', 'servershare__name').values('path', 'servershare__name')
 
         # Error check too many src locations for dataset:
         if srcloc.count() > 1:
@@ -79,53 +79,47 @@ class RenameDatasetStorageLoc(DatasetJob):
 
 
 class RsyncDatasetServershare(DatasetJob):
-    '''Moves all files associated to a dataset to another servershare, in one task.
-    After all the files are done, delete them from src, and update dset.storage_loc
+    '''Moves files associated to a dataset to another servershare, in one task.
+    After all the files are done,, update dset.storage_loc
     '''
     refname = 'rsync_dset_files_to_servershare'
     queue = settings.QUEUE_FILE_DOWNLOAD
     task = filetasks.rsync_files_to_servershares
 
-    def check_error(self, **kwargs):
-        dset = Dataset.objects.values('pk', 'storage_loc').get(pk=kwargs['dset_id'])
-        sfs = self.getfiles_query(**kwargs).values('path', 'servershare__name', 'sfile__filename', 'pk')
-        if sfs.count() == 0:
-            # Do not error on empty dataset, just skip
-            return
-        # FIXME due to getfiles_query being .filter(path=x, ..) this distinct and the error after
-        # will never occur
-        paths = sfs.distinct('path')
-        if paths.count() > 1:
-            return (f'Dataset {dset["pk"]} live files are spread over multiple paths and cannot '
-                    f'be consolidated to {kwargs["dstsharename"]} under one path. '
-                    f'Please group files first, to dset storage location {dset["storage_loc"]}')
-        if paths.exists() and paths.get()['path'] != dset['storage_loc']:
-            return (f'Dataset {dset["pk"]} storage location is different from paths of dset live '
-                    'files. Please make sure files are in correct location, {dset["storage_loc"]}')
-        sharename = sfs.first()['servershare__name']
-        if sharename == kwargs['dstsharename']:
-            return f'Cannot move dataset {dset["pk"]} to same share as its files are on, using this job'
-        split_loc = os.path.split(dset['storage_loc'])
-        if StoredFileLoc.objects.filter(path=split_loc[0], sfile__filename=split_loc[1],
-                servershare__name=kwargs['dstsharename']).exists():
-            return (f'Cannot move dataset {dset["pk"]} to {dset["storage_path"]} as there is already '
-                    'a file by that name there')
-        if StoredFileLoc.objects.exclude(pk__in=[x['pk'] for x in sfs]).filter(
-                path=dset['storage_loc'], servershare__name=kwargs['dstsharename']).exists():
-            return (f'Cannot move dataset {dset["pk"]} to {dset["storage_path"]} as there is already '
-                    'file(s) stored in that exact directory. Please resolve first.')
+    def check_error_on_creation(self, **kwargs):
+        '''This should check errors on creation, i.e. files crashing with other files etc,
+        which means we cannot check for database fields reflecting an immediate current state (e.g. purged sfl)
+        '''
+        srcsfl = self.getfiles_query(**kwargs).values('sfile__filename')
+        for sfl in srcsfl:
+            err_fpath = os.path.join(kwargs['dstpath'], sfl['sfile__filename'])
+            err_dss = DatasetServer.objects.filter(storageshare_id=kwargs['dstshare_id'],
+                    storage_loc=err_fpath)
+            if err_dss.exists():
+                return (f'There is already a dataset with the exact path as the target file {err_fpath}, '
+                        f'namely dataset {err_dss.values("pk").get()["pk"]}. Consider renaming the dataset.')
+        if StoredFileLoc.objects.filter(sfile__filename__in=[x['sfile__filename'] for x in srcsfl],
+                path=kwargs['dstpath'], servershare_id=kwargs['dstshare_id']).exists():
+            return ('There is already a file existing with the same name as a the target file'
+                    f'in path {kwargs["dstpath"]}')
+        return False
+            
+
+    def check_error_on_running(self, **kwargs):
+        # FIXME should we just put the error checks in def process?
         return False
 
     def process(self, **kwargs):
         srcsfs = self.getfiles_query(**kwargs)
-        srcvals = ['servershare__name', 'path', 'servershare__share', 'servershare__server__fqdn']
+        srcvals = ['servershare__name', 'path', 'servershare__server__fqdn']
         srcloc = srcsfs.distinct(*srcvals)
 
         # Error check too many src locations for dataset:
         if srcloc.count() > 1:
             raise RuntimeError('Dataset source files are spread over more than one location, please '
                     'contact admin to make sure files are consolicated before sync to a new location')
-        dstshare = ServerShare.objects.values('pk', '').get(pk=kwargs['dstshare_id'])
+        dstshare = ServerShare.objects.values('pk', 'server__fqdn', 'name', 'share',
+                'server__rsyncusername', 'server__rsynckeyfile').get(pk=kwargs['dstshare_id'])
         # Check if target sflocs already exist in a nonpurged state in wrong path?
         or_wrongloc_q = Q(path=kwargs['dstpath']) | Q(servershare_id=dstshare['pk'])
         all_dstsfs = StoredFileLoc.objects.filter(pk__in=kwargs['dstsfloc_ids']) 
@@ -137,11 +131,12 @@ class RsyncDatasetServershare(DatasetJob):
             # Do not error on empty dataset, just skip
             return
         dstsfs = all_dstsfs.values('sfile__filename', 'pk')
-        srcloc_vals = [srcloc.values(srcvals).get()[x] for x in srcvals]
+        print(srcloc)
+        srcloc_vals = [srcloc.values(*srcvals).get()[x] for x in srcvals]
         self.run_tasks.append(((*srcloc_vals, dstshare['server__fqdn'], dstshare['name'],
             kwargs['dstpath'], dstshare['share'], dstshare['server__rsyncusername'], 
             dstshare['server__rsynckeyfile'], 
-            [x['sfile__filename'] for x in srcsfs], kwargs['dst_sfloc_ids']), {}))
+            [x['sfile__filename'] for x in srcsfs.values('sfile__filename')], kwargs['dstsfloc_ids']), {}))
 
 
 class RemoveDatasetFilesFromServershare(DatasetJob):
@@ -151,15 +146,9 @@ class RemoveDatasetFilesFromServershare(DatasetJob):
     refname = 'remove_dset_files_servershare'
     queue = False
     task = filetasks.delete_file
-        #self.queue = f'{dss["storageshare__name"]}__{settings.QUEUE_STORAGE}'
 
     def check_error(self, **kwargs):
-        sfs = self.getfiles_query(**kwargs).values('pk', 'sfile__filename')
-        if StoredFileLoc.objects.exclude(pk__in=[x['pk'] for x in sfs]).filter(
-                servershare__name=settings.TMPSHARENAME, path='',
-                sfile__filename__in=[x['sfile__filename'] for x in sfs]):
-            return (f'Cannot move files from dataset {kwargs["dset_id"]} to tmp storage, as there '
-                    'exist file(s) with the same name there. Please resolve this before retrying')
+        # FIXME testing wo errcheck
         return False
 
     def process(self, **kwargs):

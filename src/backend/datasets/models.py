@@ -110,19 +110,27 @@ class Dataset(models.Model):
 
 
 class DatasetServer(models.Model):
-    '''For 
-       - reporting of dataset locations to user in UI
-       - moving datasets paths TO (so it will be destination in jobs, not source)
-       - not for up-to-date file locations for operations on files!
-    This table is edited in views (as high up as possible), so when duplicates race, 
-    they will crash before any job that will use them, which would cause more problems'''
+    '''
+    - dont use for actual operations on files!
+    - for reporting of dataset locations to user in UI
+    - will contain future locations (edit in views updates here immediately)
+    - this is to make sure dataset paths of files wont be duplicates when running a job,
+        but user will find out immediately here
+    - cannot delete these rows or job runner will crash as dset jobs will have dss_id in kwargs
+        but can be set to active=False, which is also future
+    '''
     # FIXME check that jobs dont use this info from DB
+    # Dataset and storageshare should NEVER change (in case of change it will be deactivation)
     dataset = models.ForeignKey(Dataset, on_delete=models.CASCADE)
     storageshare = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
-    storage_loc = models.TextField(max_length=200, unique=True)
+
+    # Storage loc can be renamed
+    storage_loc = models.TextField(max_length=200)
     # Keep track of when dataset was on storage (start set when instantiated, and when 
     # files added/removed), for expiry reasons, and log
     startdate = models.DateTimeField()
+    # Active is an intention field, so when set to False, dataset will be deleted soon
+    # So views can use it in order to know if their next job will work there.
     active = models.BooleanField(default=True)
     log = models.JSONField(default=list)
 

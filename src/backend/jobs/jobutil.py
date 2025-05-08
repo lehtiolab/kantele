@@ -13,8 +13,8 @@ from rawstatus.models import FileJob
 
 alljobs = [
         dsjobs.RenameDatasetStorageLoc,
-        dsjobs.MoveFilesToStorage,
-        dsjobs.MoveFilesStorageTmp,
+        dsjobs.RsyncDatasetServershare,
+        dsjobs.RemoveDatasetFilesFromServershare,
         dsjobs.ConvertDatasetMzml,
         dsjobs.DeleteActiveDataset,
         dsjobs.DeleteDatasetMzml,
@@ -24,6 +24,7 @@ alljobs = [
         dsjobs.RenameProject,
         dsjobs.MoveDatasetServershare,
         rsjobs.RsyncFileTransfer,
+        rsjobs.RsyncFileTransferFromWeb,
         rsjobs.CreatePDCArchive,
         rsjobs.RestoreFromPDC,
         rsjobs.RenameFile,
@@ -70,6 +71,9 @@ def create_job_without_check(name, state=False, **kwargs):
     for quicker creation without another check'''
     if not state:
         state = Jobstates.PENDING
+    jwrap = jobmap[name](False)
     job = Job.objects.create(funcname=name, timestamp=timezone.now(),
             state=state, kwargs=kwargs)
+    FileJob.objects.bulk_create([FileJob(storedfile_id=sf_id, job_id=job.id) for sf_id in 
+            jwrap.get_sf_ids_for_filejobs(**kwargs)])
     return {'id': job.id, 'error': False}

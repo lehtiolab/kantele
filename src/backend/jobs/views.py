@@ -57,21 +57,6 @@ def set_task_status(request):
     return HttpResponse()
 
 
-@require_POST
-def update_storage_loc_dset(request):
-    """Updates storage_loc on dset after a dset update storage job"""
-    data = json.loads(request.body.decode('utf-8'))
-    if 'client_id' not in data or not taskclient_authorized(
-            data['client_id'], [settings.STORAGECLIENT_APIKEY]):
-        return HttpResponseForbidden()
-    dset = Dataset.objects.filter(pk=data['dset_id'])
-    dset.update(storage_loc=data['storage_loc'])
-    if data['newsharename']:
-        newshare = ServerShare.objects.get(name=data['newsharename'])
-        dset.update(storageshare=newshare)
-    if 'task' in data:
-        set_task_done(data['task'])
-    return HttpResponse()
 
 
 @require_POST
@@ -85,6 +70,7 @@ def update_storagepath_file(request):
         sfloc = StoredFileLoc.objects.get(pk=data['sfloc_id'])
         # sfloc.servershare = ServerShare.objects.get(name=data['servershare'])
         sfloc.path = data['dst_path']
+        sfloc.purged = False
         if 'newname' in data:
             sfloc.sfile.filename = data['newname']
             sfloc.sfile.rawfile.name = data['newname']
@@ -93,7 +79,7 @@ def update_storagepath_file(request):
         sfloc.save()
     elif 'sfloc_ids' in data:
         sfns = StoredFileLoc.objects.filter(pk__in=[int(x) for x in data['sfloc_ids']])
-        sfns.update(path=data['dst_path'])
+        sfns.update(path=data['dst_path'], purged=False)
         if 'servershare' in data:
             sshare = ServerShare.objects.get(name=data['servershare'])
             sfns.update(servershare=sshare)
