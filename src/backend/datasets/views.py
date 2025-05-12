@@ -103,7 +103,7 @@ def dataset_info(request, project_id, dataset_id=False):
         components = models.DatatypeComponent.objects.filter(
             datatype_id=dset.datatype_id).select_related('component')
         project = dset.runname.experiment.project
-        ds_servers = {x.storageshare_id: x.storage_loc for x in
+        ds_servers = {x.storageshare_id: x.storage_loc_ui for x in
                 models.DatasetServer.objects.filter(dataset=dset, active=True)}
         response_json['dsinfo'] = {
                 'dataset_id': dset.id,
@@ -442,13 +442,13 @@ def update_dataset(data, user_id):
         err_fpath, err_fname = os.path.split(new_storage_loc)
         # dsshare_q already has shares that are active etc, through share
         dsshare_q = alldsshares_q.filter(storageshare=share)
-        is_new_storloc = not dsshare_q.filter(storage_loc=new_storage_loc).exists()
+        is_new_storloc = not dsshare_q.filter(storage_loc_ui=new_storage_loc).exists()
         active_old_storloc_on_share = dsshare_q.filter(active=True).exists()
         ## FIXME check, rsync job already checks this errors? Maybe same for the rename job
         # or maybe do so that is done! Centralize -> less code, and it is checked on job creation
         # anyway so we can do it here.
         if models.DatasetServer.objects.exclude(dataset=dset).filter(storageshare=share,
-                storage_loc=new_storage_loc).exists():
+                storage_loc_ui=new_storage_loc).exists():
             return JsonResponse({'error': 'There is already another dataset with that exact storage'
                 f' location: {new_storage_loc}'}, status=403)
         elif is_new_storloc and filemodels.StoredFileLoc.objects.filter(servershare=share,
@@ -458,7 +458,7 @@ def update_dataset(data, user_id):
         else:
             # If a path was updated, and files are in it that are not marked as (future) deleted,
             # we do a rename job. If no dss_sflocs exist for that share, we need to rsync them there
-            dsshare_upds.append((share, {'storage_loc': new_storage_loc, 'active': True}))
+            dsshare_upds.append((share, {'storage_loc_ui': new_storage_loc, 'active': True}))
             # Can do .get() since dsshare is Unique per dset/share
             if is_new_storloc and active_old_storloc_on_share:
                 dss = dsshare_q.get()
@@ -470,7 +470,7 @@ def update_dataset(data, user_id):
                     return JsonResponse({'error': joberror}, status=403)
                 else:
                     # Add dss.storage_loc here since it will change before the job is launched!
-                    dsshare_jobs.append((dss, dss.storage_loc))
+                    dsshare_jobs.append((dss, dss.storage_loc_ui))
             elif is_new_storloc:
                 # No active dataset on share, so rsync it over.
                 # If we need to fetch dset from other source than primary
@@ -520,7 +520,7 @@ def update_dataset(data, user_id):
             dst_sfloc_ids = []
             for sf in filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=dset):
                 newsfl, _ = filemodels.StoredFileLoc.objects.get_or_create(sfile=sf,
-                        servershare=share, defaults={'path': dstdss.storage_loc, 'active': True})
+                        servershare=share, defaults={'path': dstdss.storage_loc_ui, 'active': True})
                 dst_sfloc_ids.append(sf.pk)
             # If theres diff nr of files between dsetrawfile / old-records-of-sfloc on disk
             # 1. dset existed here before, now has more files -> create new (purged) files
@@ -530,7 +530,7 @@ def update_dataset(data, user_id):
             # Already checked above for existing sfloc purged=False ->error , so here we can ignore
             # weird bookkeeping error
         create_job('rsync_dset_files_to_servershare', dss_id=srcdss.pk, sfloc_ids=src_sfloc_ids,
-                dstsfloc_ids=dst_sfloc_ids, dstshare_id=dstshare.pk, dstpath=dstdss.storage_loc)
+                dstsfloc_ids=dst_sfloc_ids, dstshare_id=dstshare.pk)
     # update prefrac
     try:
         pfds = models.PrefractionationDataset.objects.filter(
@@ -811,14 +811,18 @@ def save_new_dataset(data, project, experiment, runname, user_id):
             storloc = share.set_dset_storage_location(get_quantprot_id(), project, experiment, dset,
                     dtype, prefrac, hrrange_id)
             err_fpath, err_fname = os.path.split(storloc)
-            if models.DatasetServer.objects.filter(storageshare=share, storage_loc=storloc).exists():
+            other_dss = models.DatasetServer.objects.filter(
+                    Q(storage_loc_ui=storloc) | Q(storage_loc=storloc), storageshare=share)
+            if other_dss.exists():
                 raise IntegrityError('There is already another dataset with that exact storage'
                         f' location: {storloc}')
             elif filemodels.StoredFileLoc.objects.filter(servershare=share,
                 path=err_fpath, sfile__filename=err_fname).exists():
                 raise IntegrityError(f'There is already a file with that exact path {storloc}')
+            # new dss will have storage_loc=storage_loc_ui, can be used immediately
+            # for transferring files to (rsync --mkpath)
             dsshares.append(models.DatasetServer(dataset=dset, storageshare=share, 
-                    storage_loc=storloc, startdate=timezone.now()))
+                storage_loc_ui=storloc, storage_loc=storloc, startdate=timezone.now()))
         else:
             raise IntegrityError('Selected servershare does not exist')
     models.DatasetServer.objects.bulk_create(dsshares)
@@ -937,14 +941,14 @@ def merge_projects(request):
                 hrrange_id = pfds.hiriefdataset.hirief_id if hasattr(pfds, 'hiriefdataset') else False
                 for dss in models.DatasetServer.objects.filter(active=True, dataset=dset):
                     # Get new storage location if moving stuff, and path/file names for error check on storedfile
-                    new_storage_loc = dss.share.storageshare.set_dset_storage_location(get_quantprot_id(),
-                            projs[0], exp, runname.dset, runname.dset.dtype, prefrac, hrrange_id)
+                    new_storage_loc = dss.storageshare.set_dset_storage_location(get_quantprot_id(),
+                            projs[0], exp, dset, dset.datatype, prefrac, hrrange_id)
 
                     err_fpath, err_fname = os.path.split(new_storage_loc)
                     # is_new_storloc is True if project is part of path, which is currently always
-                    is_new_storloc = dss.storage_loc != new_storage_loc
+                    is_new_storloc = dss.storage_loc_ui != new_storage_loc
                     if models.DatasetServer.objects.exclude(dataset=dset).filter(storageshare=dss.storageshare,
-                            storage_loc=new_storage_loc).exists():
+                            storage_loc_ui=new_storage_loc).exists():
                         return JsonResponse({'error': 'There is already another dataset with that exact storage'
                             f' location: {new_storage_loc}'}, status=403)
                     elif is_new_storloc and filemodels.StoredFileLoc.objects.filter(servershare=dss.storageshare,
@@ -958,18 +962,19 @@ def merge_projects(request):
                                 sfile__rawfile__datasetrawfile__dataset_id=runname.dset.id,
                                 servershare=dss.storageshare, sfile__deleted=False)
                         if is_new_storloc and dss_sflocs.exists():
-                            dsshare_upds.append((dss, dss.storage_loc, new_storage_loc))
-                            models.ProjectLog.objects.create(project=dset.runname.experiment.project,
+                            dsshare_upds.append((dss, new_storage_loc))
+                            models.ProjectLog.objects.create(project=runname.experiment.project,
                                     level=models.ProjLogLevels.INFO,
-                                    message=f'User {request.user_id} changed dataset '
-                                    f'{dset.pk} path to {new_storage_loc} from {dss.storage_loc}')
+                                    message=f'User {request.user.id} changed dataset '
+                                    f'{dset.pk} path to {new_storage_loc} from {dss.storage_loc_ui}')
 
         # Now update:
-        for dss, oldstorloc, newstorloc in dsshare_upds:
-            dss.storage_loc = newstorloc
+        for dss, newstorloc in dsshare_upds:
+            dss.storage_loc_ui = newstorloc
             dss.save()
-            renamesfl = filemodels.StoredFileLoc.objects.filter(servershare=dss.storageshare,
-                    sfile__rawfile__datasetrawfile__dataset_id=runname.dset.id)
+            renamesfl = [x['pk'] for x in
+                    filemodels.StoredFileLoc.objects.filter(servershare=dss.storageshare,
+                        sfile__rawfile__datasetrawfile__dataset_id=dset.id).values('pk')]
             create_job('rename_dset_storage_loc', dss_id=dss.pk, sfloc_ids=renamesfl,
                 newpath=new_storage_loc)
         for proj in projs[1:]:
@@ -994,27 +999,32 @@ def rename_project(request):
     except models.Project.DoesNotExist:
         return JsonResponse({'error': f'Project with that ID does not exist in DB'}, status=404)
     # check if new project not already exist, and user have permission for all dsets
-    if data['newname'] == proj.name:
+    if data['newname'] == proj.name or models.Project.objects.filter(name=data['newname']).exists():
         return JsonResponse({'error': f'Cannot change name to existing name for project {proj.name}'}, status=403)
     elif is_invalid_proj_exp_runnames(data['newname']):
         return JsonResponse({'error': f'Project name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
     dsets = models.Dataset.objects.filter(runname__experiment__project=proj)
-    storageshare_id = False
-    for dset in  dsets.values('pk', 'deleted', 'storageshare_id', 'storageshare__name', 'runname__experiment__project_id'):
-        if not storageshare_id:
-            # Only first dataset
-            storageshare_id = dset['storageshare_id']
+    for dset in  dsets.values('pk', 'deleted'):
         dsown_ids = [x['user_id'] for x in models.DatasetOwner.objects.filter(dataset_id=dset['pk']).values('user_id')]
         if not check_ownership(request.user, proj.ptype_id, dset['deleted'], dsown_ids):
             return JsonResponse({'error': f'You do not have the rights to change all datasets in this project'}, status=403)
-    # queue jobs to rename project, update project name after that since it is needed in job for path
-    job = create_job('rename_top_lvl_projectdir', newname=data['newname'], proj_id=data['projid'])
-    if job['error']:
-        return JsonResponse({'error': job['error']}, status=403)
     models.ProjectLog.objects.create(project=proj, level=models.ProjLogLevels.INFO,
             message=f'User {request.user.id} renamed project from {proj.name} to {data["newname"]}')
     proj.name = data['newname']
     proj.save()
+    for dss in models.DatasetServer.objects.select_related('storageshare').filter(active=True,
+            dataset__runname__experiment__project_id=data['projid']):
+        newstorloc = dss.storageshare.rename_storage_loc_toplvl(data['newname'], dss.storage_loc_ui,
+                data['projid'], dss.dataset_id)
+        if newstorloc != dss.storage_loc_ui:
+            # For some shares the project names is not in path
+            dss.storage_loc_ui = newstorloc
+            dss.save()
+            renamesfl = [x['pk'] for x in 
+                    filemodels.StoredFileLoc.objects.filter(servershare=dss.storageshare,
+                        sfile__rawfile__datasetrawfile__dataset_id=dss.dataset_id).values('pk')]
+            job = create_job('rename_dset_storage_loc', dss_id=dss.pk, sfloc_ids=renamesfl,
+                    newpath=newstorloc)
     return JsonResponse({})
 
 
@@ -1554,7 +1564,7 @@ def save_or_update_files(data, user_id):
     removed_ids = [int(x['id']) for x in data['removed_files'].values()]
     dset = models.Dataset.objects.select_related('runname__experiment').get(pk=dset_id)
     tmpshare = filemodels.ServerShare.objects.get(name=settings.TMPSHARENAME)
-    alldss = dset.datasetserver_set.filter(active=True).values('pk', 'storageshare_id', 'storage_loc')
+    alldss = dset.datasetserver_set.filter(active=True).values('pk', 'storageshare_id', 'storage_loc_ui')
     addsfl = filemodels.StoredFileLoc.objects.filter(sfile_id__in=added_fnids, sfile__checked=True,
             servershare__name=settings.TMPSHARENAME)
     pre_addsfl = addsfl.filter(sfile__rawfile__claimed=False)
@@ -1572,8 +1582,8 @@ def save_or_update_files(data, user_id):
                     'on multiple file servers. This should not happen, please contact admin'}, 403
         for dss in alldss:
             if joberr := check_job_error('rsync_dset_files_to_servershare', dss_id=dss['pk'],
-                    sfloc_ids=[x['pk'] for x in pre_addsfl.values('pk')],
-                    dstshare_id=dss['storageshare_id'], dstpath=dss['storage_loc']):
+                    sfloc_ids=[x['pk'] for x in pre_addsfl.values('pk')], dstsfloc_ids=[],
+                    dstshare_id=dss['storageshare_id']):
                 return {'error': joberr}, 403
 
     if removed_ids:
@@ -1607,21 +1617,23 @@ def save_or_update_files(data, user_id):
             for sfid in added_fnids:
                 dst_sfl, _ = filemodels.StoredFileLoc.objects.update_or_create(sfile_id=sfid,
                         servershare_id=dss['storageshare_id'],
-                        defaults={'path': dss['storage_loc'], 'active': True})
+                        defaults={'path': dss['storage_loc_ui'], 'active': True})
                 dst_sfloc_ids.append(dst_sfl.pk)
             # Error check already done above before any creation to be able to return 403
             # without side effects
             create_job_without_check('rsync_dset_files_to_servershare', dss_id=dss['pk'],
                     # need to re-filter addsfl since have changed claimed=True now
                     sfloc_ids=[x['pk'] for x in addsfl.filter(sfile__rawfile__claimed=True).values('pk')],
-                    dstsfloc_ids=dst_sfloc_ids, dstshare_id=dss['storageshare_id'], dstpath=dss['storage_loc'])
+                    dstsfloc_ids=dst_sfloc_ids, dstshare_id=dss['storageshare_id'])
 
     if removed_ids:
         # Create job first so the dataset files are waited for by other jobs since that depends
         # on datasetrawfiles on job creation time
         for dss in alldss:
             dssrmsfl = [x['pk'] for x in rmsfl.filter(servershare_id=dss['storageshare_id']).values('pk')]
-            create_job('remove_dset_files_servershare', dss_id=dss['pk'], sfloc_ids=dssrmsfl)
+            if len(dssrmsfl):
+                create_job('remove_dset_files_servershare', dss_id=dss['pk'], sfloc_ids=dssrmsfl)
+        rmsfl.update(active=False)
         models.DatasetRawFile.objects.filter(
             dataset_id=dset_id, rawfile__storedfile__id__in=removed_ids).delete()
         filemodels.RawFile.objects.filter(storedfile__pk__in=removed_ids).update(
@@ -1656,15 +1668,15 @@ def accept_or_reject_dset_preassoc_files(request):
     dss_ids = [x['pk'] for x in
             models.DatasetServer.objects.filter(dataset_id=data['dataset_id']).values('pk')]
     if len(data['rejected_files']):
-        # have to go home FIXME
-        rej_sflocs = [x['pk'] for x in
-                filemodels.StoredFileLoc.objects.filter(sfile_id__in=data['rejected_files']).values('pk')]
+        rejsfl = filemodels.StoredFileLoc.objects.filter(sfile_id__in=data['rejected_files'])
+        rej_sflocs = [x['pk'] for x in rejsfl.values('pk')]
         deleted = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare',
                 state=jj.Jobstates.HOLD, kwargs__dss_id__in=dss_ids,
                 kwargs__sfloc_ids__0__in=rej_sflocs, kwargs__dstsfloc_ids__0__in=rej_sflocs).delete()
         if deleted:
             filemodels.RawFile.objects.filter(
                     storedfile__pk__in=data['rejected_files']).update(claimed=False)
+            rejsfl.update(active=False)
     # Now start jobs for accepted files
     if len(data['accepted_files']):
         acc_sflocs = filemodels.StoredFileLoc.objects.filter(sfile_id__in=data['accepted_files'])

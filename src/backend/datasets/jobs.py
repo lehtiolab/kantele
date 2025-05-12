@@ -75,7 +75,7 @@ class RenameDatasetStorageLoc(DatasetJob):
         srcloc = srcloc.get()
         self.queue = f'{srcloc["servershare__name"]}__{settings.QUEUE_STORAGE}'
         self.run_tasks = [((srcloc["servershare__name"], srcloc['path'], kwargs['newpath'], 
-            [x['pk'] for x in srcsfs.values('pk')]), {})]
+            [x['pk'] for x in srcsfs.values('pk')], kwargs['dss_id']), {})]
 
 
 class RsyncDatasetServershare(DatasetJob):
@@ -90,24 +90,29 @@ class RsyncDatasetServershare(DatasetJob):
         '''This should check errors on creation, i.e. files crashing with other files etc,
         which means we cannot check for database fields reflecting an immediate current state (e.g. purged sfl)
         '''
+        dst_dss = DatasetServer.objects.values('storage_loc_ui').get(pk=kwargs['dss_id'])
+        return self._check_error_either(dst_dss['storage_loc_ui'], **kwargs)
+
+    def _check_error_either(self, dstpath, **kwargs):
         srcsfl = self.getfiles_query(**kwargs).values('sfile__filename')
         for sfl in srcsfl:
-            err_fpath = os.path.join(kwargs['dstpath'], sfl['sfile__filename'])
+            # Check for storage_loc_ui in the on_creation error check
+            err_fpath = os.path.join(dstpath, sfl['sfile__filename'])
             err_dss = DatasetServer.objects.filter(storageshare_id=kwargs['dstshare_id'],
-                    storage_loc=err_fpath)
+                    storage_loc_ui=err_fpath)
             if err_dss.exists():
                 return (f'There is already a dataset with the exact path as the target file {err_fpath}, '
                         f'namely dataset {err_dss.values("pk").get()["pk"]}. Consider renaming the dataset.')
-        if StoredFileLoc.objects.filter(sfile__filename__in=[x['sfile__filename'] for x in srcsfl],
-                path=kwargs['dstpath'], servershare_id=kwargs['dstshare_id']).exists():
+        if StoredFileLoc.objects.exclude(pk__in=kwargs['dstsfloc_ids']).filter(
+                sfile__filename__in=[x['sfile__filename'] for x in srcsfl],
+                path=dstpath, servershare_id=kwargs['dstshare_id'], active=True).exists():
             return ('There is already a file existing with the same name as a the target file'
-                    f'in path {kwargs["dstpath"]}')
+                    f' in path {dstpath}')
         return False
             
-
     def check_error_on_running(self, **kwargs):
-        # FIXME should we just put the error checks in def process?
-        return False
+        dst_dss = DatasetServer.objects.values('storage_loc').get(pk=kwargs['dss_id'])
+        return self._check_error_either(dst_dss['storage_loc'], **kwargs)
 
     def process(self, **kwargs):
         srcsfs = self.getfiles_query(**kwargs)
@@ -120,8 +125,9 @@ class RsyncDatasetServershare(DatasetJob):
                     'contact admin to make sure files are consolicated before sync to a new location')
         dstshare = ServerShare.objects.values('pk', 'server__fqdn', 'name', 'share',
                 'server__rsyncusername', 'server__rsynckeyfile').get(pk=kwargs['dstshare_id'])
+        dst_dss = DatasetServer.objects.values('storage_loc').get(pk=kwargs['dss_id'])
         # Check if target sflocs already exist in a nonpurged state in wrong path?
-        or_wrongloc_q = Q(path=kwargs['dstpath']) | Q(servershare_id=dstshare['pk'])
+        or_wrongloc_q = Q(path=dst_dss['storage_loc']) | Q(servershare_id=dstshare['pk'])
         all_dstsfs = StoredFileLoc.objects.filter(pk__in=kwargs['dstsfloc_ids']) 
         if all_dstsfs.filter(purged=False).exclude(or_wrongloc_q).exists():
             raise RuntimeError('There are existing target files in another location than the dataset'
@@ -131,10 +137,9 @@ class RsyncDatasetServershare(DatasetJob):
             # Do not error on empty dataset, just skip
             return
         dstsfs = all_dstsfs.values('sfile__filename', 'pk')
-        print(srcloc)
         srcloc_vals = [srcloc.values(*srcvals).get()[x] for x in srcvals]
         self.run_tasks.append(((*srcloc_vals, dstshare['server__fqdn'], dstshare['name'],
-            kwargs['dstpath'], dstshare['share'], dstshare['server__rsyncusername'], 
+            dst_dss['storage_loc'], dstshare['share'], dstshare['server__rsyncusername'], 
             dstshare['server__rsynckeyfile'], 
             [x['sfile__filename'] for x in srcsfs.values('sfile__filename')], kwargs['dstsfloc_ids']), {}))
 

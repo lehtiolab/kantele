@@ -22,7 +22,7 @@ from analysis import models as am
 from analysis.views import write_analysis_log
 from dashboard import views as dashviews
 from datasets import views as dsviews
-from datasets.models import DatasetRawFile, Dataset
+from datasets.models import DatasetRawFile, Dataset, DatasetServer
 from jobs.jobs import Jobstates, JOBSTATES_PAUSABLE, JOBSTATES_JOB_SENT, JOBSTATES_JOB_NOT_SENT, JOBSTATES_RETRYABLE
 from jobs.jobutil import create_job, jobmap
 from kantele import settings
@@ -57,6 +57,20 @@ def set_task_status(request):
     return HttpResponse()
 
 
+@require_POST
+def update_storage_loc_dset(request):
+    """Updates storage_loc on dset after a dset update storage job"""
+    data = json.loads(request.body.decode('utf-8'))
+    if 'client_id' not in data or not taskclient_authorized(
+            data['client_id'], [settings.STORAGECLIENT_APIKEY]):
+        return HttpResponseForbidden()
+    dss = DatasetServer.objects.filter(pk=data['dss_id'])
+    dss.update(storage_loc=data['dst_path'])
+    sfns = StoredFileLoc.objects.filter(pk__in=[int(x) for x in data['sfloc_ids']])
+    sfns.update(path=data['dst_path'], purged=False)
+    if 'task' in data:
+        set_task_done(data['task'])
+    return HttpResponse()
 
 
 @require_POST
@@ -85,28 +99,6 @@ def update_storagepath_file(request):
             sfns.update(servershare=sshare)
     if 'task' in data:
         set_task_done(data['task'])
-    return HttpResponse()
-
-
-@require_POST
-def renamed_project(request):
-    """
-    After project renaming on disk, we need to set all paths of the storedfile objects
-    to the new path name, and rename the project in the DB as well.
-    """
-    data = json.loads(request.body.decode('utf-8'))
-    print('Updating storage task finished')
-    if 'client_id' not in data or not taskclient_authorized(
-            data['client_id'], [settings.STORAGECLIENT_APIKEY, settings.ANALYSISCLIENT_APIKEY]):
-        return HttpResponseForbidden()
-    # this updates also deleted files. Good in case restoring backup etc
-    proj_sfiles = StoredFileLoc.objects.filter(pk__in=data['sfloc_ids'])
-    for dset in Dataset.objects.filter(runname__experiment__project_id=data['proj_id']):
-        newstorloc = dsviews.rename_storage_loc_toplvl(data['newname'], dset.storage_loc)
-        dset.storage_loc = newstorloc
-        dset.save()
-        proj_sfiles.filter(sfile__rawfile__datasetrawfile__dataset=dset).update(path=newstorloc)
-    set_task_done(data['task'])
     return HttpResponse()
 
 

@@ -78,6 +78,13 @@ class BaseJob:
         self.run_tasks = []
     
     def check_error(self, **kwargs):
+        # FIXME check_error will be used differently when creating vs when running, please fix!
+        return self.check_error_on_creation(**kwargs)
+
+    def check_error_on_creation(self, **kwargs):
+        return False
+
+    def check_error_on_running(self, **kwargs):
         return False
 
     def getfiles_query(self, **kwargs):

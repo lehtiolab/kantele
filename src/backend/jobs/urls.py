@@ -6,6 +6,7 @@ app_name = 'jobs'
 urlpatterns = [
     path('set/task/', views.set_task_status, name='settask'),
     path('retry/', views.retry_job, name='retry'),
+    path('set/storagepathds/', views.update_storage_loc_dset, name='updatestorageds'),
     path('set/storagepath/', views.update_storagepath_file, name='updatestorage'),
     path('delete/', views.delete_job, name='deletejob'),
     path('pause/', views.pause_job, name='pausejob'),

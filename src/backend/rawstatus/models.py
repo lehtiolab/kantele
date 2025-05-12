@@ -168,9 +168,10 @@ class StoredFileLoc(models.Model):
     in the view/request, likewise updating an old file will set active=True in the view.
     '''
     sfile = models.ForeignKey(StoredFile, on_delete=models.CASCADE)
-    active = models.BooleanField(default=False)
-    # Fields below are current status, i.e. they are updated after a job
     servershare = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
+    active = models.BooleanField(default=True)
+
+    # Fields below are current status, i.e. they are updated after a job
     path = models.TextField()
     # deleted from active storage filesystems
     # This indicates ACTUAL deletion, not the UI or pre-job status of the file,

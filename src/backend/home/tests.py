@@ -47,7 +47,8 @@ class MzmlTests(BaseTest):
             'size': 100, 'date': timezone.now(), 'claimed': True})
         self.qesf = rm.StoredFile.objects.create(rawfile=self.qeraw, filename=self.qeraw.name,
                 md5=self.qeraw.source_md5, checked=True, filetype=self.ft)
-        self.qesss = rm.StoredFileLoc.objects.create(sfile=self.qesf, servershare=self.ds.storageshare, path=self.storloc)
+        self.qesss = rm.StoredFileLoc.objects.create(sfile=self.qesf,
+                servershare=self.ds.storageshare, path=self.storloc, purged=False, active=True)
         self.timsraw = rm.RawFile.objects.create(name='file2', producer=self.prodtims,
                 source_md5='timsmd4', size=100, date=timezone.now(), claimed=True)
         dm.DatasetRawFile.objects.update_or_create(rawfile=self.qeraw, defaults={'dataset': self.ds})
@@ -179,7 +180,8 @@ class TestRefineMzmls(MzmlTests):
                 size=100, date=timezone.now(), claimed=True)
         self.dbsf = rm.StoredFile.objects.create(rawfile=dbraw, filename=dbraw.name,
                     md5=dbraw.source_md5, filetype=dbft, checked=True)
-        rm.StoredFileLoc.objects.create(sfile=self.dbsf, servershare=self.ssnewstore, path=self.storloc)
+        rm.StoredFileLoc.objects.create(sfile=self.dbsf, servershare=self.ssnewstore, path=self.storloc,
+                purged=False, active=True)
         self.refinewf = am.NextflowWfVersionParamset.objects.create(update='refine wf',
                 commit='refine ci', filename='refine.nf', nfworkflow=self.nfw, paramset=self.pset, 
                 nfversion='', active=True)
@@ -221,7 +223,8 @@ class TestRefineMzmls(MzmlTests):
         # refined exists already
         refinedsf = rm.StoredFile.objects.create(rawfile=self.qeraw, filename=f'{self.qeraw.name}_refined',
                 md5='refined_md5', checked=True, filetype=self.ft)
-        rm.StoredFileLoc.objects.create(sfile=refinedsf, servershare=self.ds.storageshare, path=self.storloc)
+        rm.StoredFileLoc.objects.create(sfile=refinedsf, servershare=self.ds.storageshare, path=self.storloc,
+                purged=False, active=True)
         am.MzmlFile.objects.create(sfile=refinedsf, pwiz=self.pw, refined=True)
         resp = self.cl.post(self.url, content_type='application/json', data={'dsid': self.ds.pk})
         self.assertEqual(resp.status_code, 403)

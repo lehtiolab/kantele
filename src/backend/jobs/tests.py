@@ -49,7 +49,8 @@ class TestRenamedProject(BaseJobTest):
         dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=rf)
         sf = rm.StoredFile.objects.create(rawfile=rf, filename=rf.name,
                 md5=rf.source_md5, checked=True, filetype=sftype)
-        sfloc = rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.ssnewstore, path=self.ds.storage_loc)
+        sfloc = rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.ssnewstore, path=self.ds.storage_loc,
+                purged=False, active=True)
         resp = self.cl.post(self.url, content_type='application/json', data={
             'client_id': settings.STORAGECLIENT_APIKEY, 'task': self.taskid,
             'proj_id': self.p1.pk, 'newname': self.p_newname, 'sfloc_ids': [sfloc.pk]})

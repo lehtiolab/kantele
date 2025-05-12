@@ -85,7 +85,7 @@ def rename_top_level_project_storage_dir(self, projsharename, srcname, newname, 
 
 
 @shared_task(bind=True)
-def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, sfloc_ids):
+def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, sfloc_ids, dss_id):
     """This expects one dataset per dir, as it will rename the whole dir"""
     print(f'Renaming dataset storage {srcpath} to {dstpath}')
     ds_share = settings.SHAREMAP[ds_sharename]
@@ -115,11 +115,11 @@ def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, sfloc_ids
             except:
                 taskfail_update_db(self.request.id)
                 raise
-    fn_postdata = {'sfloc_ids': sfloc_ids, 'dst_path': dstpath, 'client_id': settings.APIKEY,
-            'task': self.request.id}
-    fnurl = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
+    postdata = {'sfloc_ids': sfloc_ids, 'dst_path': dstpath, 'client_id': settings.APIKEY,
+            'dss_id': dss_id, 'task': self.request.id}
+    url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorageds'))
     try:
-        update_db(fnurl, json=fn_postdata)
+        update_db(url, json=postdata)
     except RuntimeError:
         # FIXME cannot move back shutil.move(dst, src)
         raise

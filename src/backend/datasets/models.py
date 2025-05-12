@@ -111,9 +111,9 @@ class Dataset(models.Model):
 
 class DatasetServer(models.Model):
     '''
-    - dont use for actual operations on files!
-    - for reporting of dataset locations to user in UI
-    - will contain future locations (edit in views updates here immediately)
+    - for 1. reporting of dataset locations to user in UI
+          2. source of dset location for jobs
+    - 1. will contain future locations (edit in views updates here immediately)
     - this is to make sure dataset paths of files wont be duplicates when running a job,
         but user will find out immediately here
     - cannot delete these rows or job runner will crash as dset jobs will have dss_id in kwargs
@@ -123,9 +123,10 @@ class DatasetServer(models.Model):
     # Dataset and storageshare should NEVER change (in case of change it will be deactivation)
     dataset = models.ForeignKey(Dataset, on_delete=models.CASCADE)
     storageshare = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
-
-    # Storage loc can be renamed
-    storage_loc = models.TextField(max_length=200)
+    # Storage loc can be renamed, the base one is used in jobs, the _ui one is
+    # updated by the UI immediately
+    storage_loc = models.TextField()
+    storage_loc_ui = models.TextField()
     # Keep track of when dataset was on storage (start set when instantiated, and when 
     # files added/removed), for expiry reasons, and log
     startdate = models.DateTimeField()
@@ -139,6 +140,7 @@ class DatasetServer(models.Model):
         and each dataset can only be in a given server once'''
         constraints = [
                 models.UniqueConstraint(fields=['storageshare', 'storage_loc'], name='uni_dsshare'),
+                models.UniqueConstraint(fields=['storageshare', 'storage_loc_ui'], name='uni_dsshare_ui'),
                 models.UniqueConstraint(fields=['dataset', 'storageshare'], name='uni_dsloc'),
                 ]
 

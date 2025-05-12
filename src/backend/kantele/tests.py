@@ -97,7 +97,7 @@ class BaseTest(TestCase):
         self.ds = dm.Dataset.objects.create(date=self.p1.registered, runname=self.run1,
                 datatype=self.dtype, securityclass=max(rm.DataSecurityClass))
         self.dss = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.ssnewstore,
-                storage_loc=self.storloc, startdate=timezone.now())
+                storage_loc_ui=self.storloc, storage_loc=self.storloc, startdate=timezone.now())
         dm.DatasetComponentState.objects.create(dataset=self.ds, state=dm.DCStates.OK, dtcomp=self.dtcompfiles)
         dm.DatasetComponentState.objects.create(dataset=self.ds, state=dm.DCStates.OK, dtcomp=self.dtcompsamples)
         self.contact, _ = dm.ExternalDatasetContact.objects.get_or_create(dataset=self.ds,
@@ -117,7 +117,7 @@ class BaseTest(TestCase):
         self.f3sf = rm.StoredFile.objects.create(rawfile=self.f3raw, filename=fn3,
                 md5=self.f3raw.source_md5, filetype=self.ft, checked=True)
         self.f3sss = rm.StoredFileLoc.objects.create(sfile=self.f3sf, servershare=self.ssnewstore,
-                path=self.storloc)
+                path=self.storloc, active=True, purged=False)
         self.qcs = dm.QuantChannelSample.objects.create(dataset=self.ds, channel=self.qtch,
                 projsample=self.projsam1)
         dm.QuantDataset.objects.create(dataset=self.ds, quanttype=self.qt)
@@ -135,7 +135,7 @@ class BaseTest(TestCase):
         self.f3sfmz = rm.StoredFile.objects.create(rawfile=self.f3raw, filename=f'{fn3}.mzML',
                 md5='md5_for_f3sf_mzml', filetype=self.ft, checked=True)
         self.f3mzsss = rm.StoredFileLoc.objects.create(sfile=self.f3sfmz, servershare=self.ssnewstore,
-                path=self.storloc)
+                path=self.storloc, active=True, purged=False)
         am.MzmlFile.objects.create(sfile=self.f3sfmz, pwiz=self.pwiz)
 
         # Project/dataset/files on old storage
@@ -150,7 +150,7 @@ class BaseTest(TestCase):
         self.oldds = dm.Dataset.objects.create(date=self.oldp.registered, runname=self.oldrun,
                 datatype=self.dtype, securityclass=max(rm.DataSecurityClass)) 
         self.olddss = dm.DatasetServer.objects.create(dataset=self.oldds, storageshare=self.ssoldstorage,
-                storage_loc=self.oldstorloc, startdate=timezone.now())
+                storage_loc_ui=self.oldstorloc, storage_loc=self.oldstorloc, startdate=timezone.now())
         dm.QuantDataset.objects.get_or_create(dataset=self.oldds, quanttype=self.lfqt)
         dm.DatasetComponentState.objects.create(dataset=self.oldds, dtcomp=self.dtcompfiles, state=dm.DCStates.OK)
         dm.DatasetComponentState.objects.create(dataset=self.oldds, dtcomp=self.dtcompsamples, state=dm.DCStates.OK)

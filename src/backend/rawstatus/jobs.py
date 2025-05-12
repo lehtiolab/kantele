@@ -7,7 +7,7 @@ from datetime import datetime
 from rawstatus import tasks, models
 from datasets import tasks as dstasks
 from datasets import models as dm
-from datasets.jobs import RsyncDatasetServershare, RemoveDatasetFilesFromServershare
+from datasets.jobs import RsyncDatasetServershare, RemoveDatasetFromServershare
 from kantele import settings
 from jobs.jobs import SingleFileJob, MultiFileJob, DatasetJob
 
