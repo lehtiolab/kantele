@@ -1059,7 +1059,7 @@ class TestArchiveFile(BaseFilesTest):
         self.sfile = rm.StoredFile.objects.create(rawfile=self.registered_raw, filename=self.registered_raw.name,
                 md5=self.registered_raw.source_md5, filetype_id=self.ft.id)
         self.sfloc = rm.StoredFileLoc.objects.create(sfile=self.sfile, servershare_id=self.sstmp.id,
-                path='')
+                path='', purged=False, active=True)
 
     def test_get(self):
         resp = self.cl.get(self.url)
@@ -1089,7 +1089,8 @@ class TestArchiveFile(BaseFilesTest):
     def test_deleted_file(self):
         sfile1 = rm.StoredFile.objects.create(rawfile=self.registered_raw,
                 filename=self.registered_raw.name, md5='deletedmd5', filetype_id=self.ft.id, deleted=True)
-        rm.StoredFileLoc.objects.create(sfile=sfile1, servershare_id=self.sstmp.id, path='')
+        rm.StoredFileLoc.objects.create(sfile=sfile1, servershare_id=self.sstmp.id, path='',
+                purged=False, active=True)
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': sfile1.pk})
         self.assertEqual(resp.status_code, 404)
         self.assertEqual(resp.json()['error'], 'File does not exist, maybe it is deleted?')

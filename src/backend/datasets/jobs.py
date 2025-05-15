@@ -249,50 +249,13 @@ class DeleteActiveDataset(DatasetJob):
     def process(self, **kwargs):
         for fn in self.getfiles_query(**kwargs).select_related('sfile__filetype').filter(purged=False):
             fullpath = os.path.join(fn.path, fn.sfile.filename)
-            print(f'Purging {fullpath} from dataset {kwargs["dset_id"]}')
+            print(f'Purging {fullpath} from dataset {kwargs["dss_id"]}')
             if hasattr(fn.sfile, 'mzmlfile'):
                 is_folder = False
             else:
                 is_folder = fn.sfile.filetype.is_folder
             self.run_tasks.append(((fn.servershare.name, fullpath, fn.id, is_folder), {}))
 
-
-class BackupPDCDataset(DatasetJob):
-    """Transfers all raw files in dataset to backup"""
-    refname = 'backup_dataset'
-    task = filetasks.pdc_archive
-    queue = settings.QUEUE_BACKUP
-    
-    def process(self, **kwargs):
-        for fn in self.getfiles_query(**kwargs).exclude(sfile__mzmlfile__isnull=False).exclude(
-                sfile__pdcbackedupfile__success=True, sfile__pdcbackedupfile__deleted=False).filter(
-                        sfile__rawfile__datasetrawfile__dataset_id=kwargs['dset_id']):
-            isdir = hasattr(fn.sfile.rawfile.producer, 'msinstrument') and fn.sfile.filetype.is_folder
-            self.run_tasks.append((rsjobs.upload_file_pdc_runtask(fn, isdir=isdir), {}))
-
-
-class ReactivateDeletedDataset(DatasetJob):
-    refname = 'reactivate_dataset'
-    task = filetasks.pdc_restore
-    queue = settings.QUEUE_BACKUP
-
-    def getfiles_query(self, **kwargs):
-        '''Reactivation will only be relevant for old datasets that will not just happen to get
-        some new files, or old files removed. For this job to be retryable, fetch all files regardless
-        of their servershare (which may change in server migrations).'''
-        return StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=kwargs['dset_id'])
-
-    def process(self, **kwargs):
-        for sfloc in self.getfiles_query(**kwargs).exclude(sfile__mzmlfile__isnull=False).filter(
-                purged=True, sfile__pdcbackedupfile__isnull=False):
-            self.run_tasks.append((rsjobs.restore_file_pdc_runtask(sfloc), {}))
-        # Also set archived/archivable files which are already active (purged=False) to not deleted in UI
-        # FIXME deleted=False should be done in view probably, higher up
-        sfs = self.getfiles_query(**kwargs).filter(purged=False, sfile__deleted=True,
-                sfile__pdcbackedupfile__isnull=False).values('sfile_id')
-        StoredFile.objects.filter(pk__in=sfs).update(deleted=False)
-        Dataset.objects.filter(pk=kwargs['dset_id']).update(
-                storageshare=ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME))
 
 
 class DeleteDatasetPDCBackup(DatasetJob):

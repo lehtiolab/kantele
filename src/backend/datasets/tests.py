@@ -1043,7 +1043,7 @@ class TestDeleteDataset(ProcessJobTest):
         # Delete both raw and mzML file, pretend they are files
         self.ft.is_folder = False
         self.ft.save()
-        kwargs = {'dset_id': self.ds.pk}
+        kwargs = {'dss_id': self.ds.pk, 'sfloc_ids': [self.f3sss.pk, self.f3mzsss.pk]}
         self.job.process(**kwargs)
         exp_t = [
                 ((self.f3sss.servershare.name, os.path.join(self.f3sss.path, self.f3sf.filename),
@@ -1055,7 +1055,7 @@ class TestDeleteDataset(ProcessJobTest):
 
     def test_is_dir(self):
         # Delete both raw and mzML file, where raw is a folder
-        kwargs = {'dset_id': self.ds.pk}
+        kwargs = {'dss_id': self.ds.pk, 'sfloc_ids': [self.f3sss.pk, self.f3mzsss.pk]}
         self.job.process(**kwargs)
         exp_t = [
                 ((self.f3sss.servershare.name, os.path.join(self.f3sss.path, self.f3sf.filename),
@@ -1214,14 +1214,23 @@ class TestArchiveDataset(BaseTest):
         self.assertEqual(resp.json()['error'], 'Cannot archive dataset, no permission for user')
 
     def test_ok(self):
-        dsfiles = rm.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=self.ds)
-        dsfiles.update(deleted=True)
+        dsfiles = rm.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=self.ds)
+        dsfiles.filter(sfile__mzmlfile__isnull=False).delete()
+        dsfiles.update(active=False)
+        rm.PDCBackedupFile.objects.bulk_create([rm.PDCBackedupFile(storedfile=sf.sfile, pdcpath=sf.sfile.md5,
+            success=True) for sf in dsfiles])
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.json()['error'], 'Cannot archive dataset, already cold')
+
+        rm.PDCBackedupFile.objects.all().delete()
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.ds.pk})
         self.assertEqual(resp.status_code, 500)
         self.assertEqual(resp.json()['error'], 'Cannot archive dataset, already purged')
 
-        dsfiles.update(deleted=False)
+        dsfiles.update(active=True)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.ds.pk})
         self.assertEqual(resp.status_code, 200)
@@ -1257,19 +1266,28 @@ class TestReactivateDataset(BaseTest):
         self.assertEqual(resp.json()['error'], 'Dataset already in active storage')
 
     def test_ok(self):
-        dsfiles = rm.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=self.ds)
-        dsfiles.update(deleted=True)
+        dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=self.tmpraw)
+        dsfiles = rm.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=self.ds)
+        dsfiles.filter(sfile__mzmlfile__isnull=False).delete()
+        dsfiles.update(active=False)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.ds.pk})
         self.assertEqual(resp.status_code, 500)
         self.assertEqual(resp.json()['error'], 'Cannot reactivate purged dataset')
-        rm.PDCBackedupFile.objects.bulk_create([rm.PDCBackedupFile(storedfile=sf, pdcpath=sf.md5,
+
+        rm.PDCBackedupFile.objects.bulk_create([rm.PDCBackedupFile(storedfile=sf.sfile, pdcpath=sf.sfile.md5,
             success=True) for sf in dsfiles])
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.ds.pk})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.ProjectLog.objects.last().message,
                 f'User {self.user.pk} reactivated dataset {self.ds.pk}')
+
+        rm.PDCBackedupFile.objects.filter(storedfile=self.f3sf).delete()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.ds.pk})
+        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.json()['error'], 'Cannot reactivate dataset, files missing in backup storage')
 
 
 class TestArchiveProject(BaseTest):
@@ -1326,12 +1344,12 @@ class TestReactivateProject(BaseTest):
         self.assertEqual(resp.json()['error'], 'User has no permission to reactivate this project, does not own all datasets in project')
 
     def test_ok(self):
-        dsfiles = rm.StoredFile.objects.filter(rawfile__datasetrawfile__dataset__runname__experiment__project=self.p1)
-        dsfiles.update(deleted=True)
+        dsfiles = rm.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset__runname__experiment__project=self.p1)
+        dsfiles.update(active=False)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.p1.pk})
         self.assertEqual(resp.status_code, 500)
-        self.assertEqual(resp.json()['error'], 'Not all project datasets could be reactivated. Errors: Cannot reactivate purged dataset')
+        self.assertEqual(resp.json()['error'], 'Not all project datasets could be reactivated. Errors: Cannot reactivate cold dataset')
 
         rm.PDCBackedupFile.objects.bulk_create([rm.PDCBackedupFile(storedfile=sf, pdcpath=sf.md5,
             success=True) for sf in dsfiles])

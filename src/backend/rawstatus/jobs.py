@@ -296,18 +296,42 @@ class DownloadPXProject(DatasetJob):
 def upload_file_pdc_runtask(sfloc, isdir):
     """Generates the arguments for task to upload file to PDC. Reused in dataset jobs"""
     yearmonth = datetime.strftime(sfloc.sfile.regdate, '%Y%m')
-    try:
-        pdcfile = models.PDCBackedupFile.objects.get(storedfile=sfloc.sfile, is_dir=isdir)
-    except models.PDCBackedupFile.DoesNotExist:
-        # only create entry when not already exists
-        models.PDCBackedupFile.objects.create(storedfile=sfloc.sfile, is_dir=isdir,
-                pdcpath='', success=False)
-    else:
-        # Dont do more work than necessary, although this is probably too defensive
-        if pdcfile.success and not pdcfile.deleted:
-            return
+    pdcfile, _cr = models.PDCBackedupFile.objects.get_or_create(storedfile=sfloc.sfile, is_dir=isdir,
+            defaults={'pdcpath': '', 'success': False, 'deleted': False})
     fnpath = os.path.join(sfloc.path, sfloc.sfile.filename)
     return (sfloc.sfile.md5, yearmonth, sfloc.servershare.name, fnpath, sfloc.sfile.id, isdir)
+
+
+class BackupPDCDataset(DatasetJob):
+    """Transfers all raw files in dataset to backup"""
+    refname = 'backup_dataset'
+    task = tasks.pdc_archive
+    queue = settings.QUEUE_BACKUP
+    
+    def process(self, **kwargs):
+        for fn in self.getfiles_query(**kwargs).exclude(sfile__mzmlfile__isnull=False).exclude(
+                sfile__pdcbackedupfile__success=True, sfile__pdcbackedupfile__deleted=False):
+            isdir = hasattr(fn.sfile.rawfile.producer, 'msinstrument') and fn.sfile.filetype.is_folder
+            self.run_tasks.append((upload_file_pdc_runtask(fn, isdir=isdir), {}))
+
+
+class ReactivateDeletedDataset(DatasetJob):
+    '''Reactivation to fetch a dataset from the backup.
+    Datasets are placed in whatever is passed but that is likely
+    a sens tmp share from which they can be uploaded to e.g. PX,
+    rsynced to open, or to analysis cluster'''
+
+    refname = 'reactivate_dataset'
+    task = tasks.pdc_restore
+    queue = settings.QUEUE_BACKUP
+
+    def getfiles_query(self, **kwargs):
+        '''In this case, the sflocs are dst files and will have purged=True instead of False'''
+        return models.StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'], purged=True)
+
+    def process(self, **kwargs):
+        for sfloc in self.getfiles_query(**kwargs).select_related('sfile'):
+            self.run_tasks.append((restore_file_pdc_runtask(sfloc), {}))
 
 
 def restore_file_pdc_runtask(sfloc):
