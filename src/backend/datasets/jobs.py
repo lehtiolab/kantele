@@ -80,11 +80,23 @@ class RenameDatasetStorageLoc(DatasetJob):
 
 class RsyncDatasetServershare(DatasetJob):
     '''Moves files associated to a dataset to another servershare, in one task.
-    After all the files are done,, update dset.storage_loc
+    After all the files are done, update dset.storage_loc
+    - dss_id is TARGET (destination) datasetserver, some files do not come from a dset
     '''
     refname = 'rsync_dset_files_to_servershare'
     queue = settings.QUEUE_FILE_DOWNLOAD
     task = filetasks.rsync_files_to_servershares
+
+    def on_create_addkwargs(self, **kwargs):
+        '''Create destination sfloc db rows'''
+        dstdss = DatasetServer.objects.values('storage_loc_ui', 'storageshare_id').get(pk=kwargs['dss_id'])
+        dstsfl = []
+        for sfl in self.getfiles_query(**kwargs):
+            sfl, _ = StoredFileLoc.objects.update_or_create(sfile=sfl.sfile,
+                    servershare_id=dstdss['storageshare_id'],
+                    defaults={'path': dstdss['storage_loc_ui'], 'active': True, 'purged': True})
+            dstsfl.append(sfl.pk)
+        return {'dstsfloc_ids': dstsfl}
 
     def check_error_on_creation(self, **kwargs):
         '''This should check errors on creation, i.e. files crashing with other files etc,

@@ -90,6 +90,9 @@ class BaseJob:
     def getfiles_query(self, **kwargs):
         return []
 
+    def on_create_addkwargs(self, **kwargs):
+        return {}
+
     def get_sf_ids_for_filejobs(self, **kwargs):
         """This is run before running job, to define files used by
         the job (so it cant run if if files are in use by other job)"""

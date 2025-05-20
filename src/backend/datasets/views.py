@@ -512,29 +512,10 @@ def update_dataset(data, user_id):
     for srcdss, dstshare in rsync_jobs:
         src_sfloc_ids = [x['pk'] for x in filemodels.StoredFileLoc.objects.filter(
             servershare=srcdss.storageshare, sfile__rawfile__datasetrawfile__dataset=dset).values('pk')]
-        dst_sflocs = filemodels.StoredFileLoc.objects.filter(servershare=dstshare,
-                sfile__rawfile__datasetrawfile__dataset=dset)
         dstdss = dss_shares[dstshare]
-        if dst_sflocs.count() == dset.datasetrawfile_set.count():
-            dst_sfloc_ids = [x['pk'] for x in dst_sflocs.values('pk')]
-        else:
-            # Create new sflocs where needed, with purged=True
-            # Any existing files with purged=False will be assumed to be purged=True when the actual
-            # job runs, or else the job will error
-            dst_sfloc_ids = []
-            for sf in filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=dset):
-                newsfl, _ = filemodels.StoredFileLoc.objects.get_or_create(sfile=sf,
-                        servershare=share, defaults={'path': dstdss.storage_loc_ui, 'active': True})
-                dst_sfloc_ids.append(sf.pk)
-            # If theres diff nr of files between dsetrawfile / old-records-of-sfloc on disk
-            # 1. dset existed here before, now has more files -> create new (purged) files
-            # 2. some file record used to be e.g. in other dset, has since been released (purged)
-            # Dset cannot have fewer files than dst_sfloc since we spec datasetrawfile to get those,
-            # i.e. even if a file's just been removed we dont need to care about it here
-            # Already checked above for existing sfloc purged=False ->error , so here we can ignore
-            # weird bookkeeping error
-        create_job('rsync_dset_files_to_servershare', dss_id=srcdss.pk, sfloc_ids=src_sfloc_ids,
-                dstsfloc_ids=dst_sfloc_ids, dstshare_id=dstshare.pk)
+        create_job('rsync_dset_files_to_servershare', dss_id=dstdss.pk, sfloc_ids=src_sfloc_ids,
+                dstshare_id=dstshare.pk)
+
     # update prefrac
     try:
         pfds = models.PrefractionationDataset.objects.filter(
@@ -1635,18 +1616,12 @@ def save_or_update_files(data, user_id):
             # create_job('restore_from_pdc_archive', sfloc_id=sfloc.pk)
             pass
         for dss in alldss:
-            dst_sfloc_ids = []
-            for sfid in added_fnids:
-                dst_sfl, _ = filemodels.StoredFileLoc.objects.update_or_create(sfile_id=sfid,
-                        servershare_id=dss['storageshare_id'],
-                        defaults={'path': dss['storage_loc_ui'], 'active': True})
-                dst_sfloc_ids.append(dst_sfl.pk)
             # Error check already done above before any creation to be able to return 403
             # without side effects
             create_job_without_check('rsync_dset_files_to_servershare', dss_id=dss['pk'],
                     # need to re-filter addsfl since have changed claimed=True now
                     sfloc_ids=[x['pk'] for x in addsfl.filter(sfile__rawfile__claimed=True).values('pk')],
-                    dstsfloc_ids=dst_sfloc_ids, dstshare_id=dss['storageshare_id'])
+                    dstshare_id=dss['storageshare_id'])
 
     if removed_ids:
         # Create job first so the dataset files are waited for by other jobs since that depends
