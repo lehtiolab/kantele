@@ -122,16 +122,16 @@ class BaseJob:
         from the task (in case of variable server-dependent queues'''
         for runtask in self.run_tasks:
             if self.queue:
-                args, kwargs = runtask
+                args = runtask
                 queue = self.queue
             else:
-                args, kwargs, queue = runtask
-            tid = self.task.apply_async(args=args, kwargs=kwargs, queue=queue)
-            self.create_db_task(tid, *args, **kwargs)
+                args, queue = runtask
+            print(args, queue)
+            tid = self.task.apply_async(args=args, queue=queue)
+            self.create_db_task(tid, *args)
 
-    def create_db_task(self, task_id, *args, **kwargs):
-        return Task.objects.create(asyncid=task_id, job_id=self.job_id, state=states.PENDING,
-                args=[args, kwargs])
+    def create_db_task(self, task_id, *args):
+        return Task.objects.create(asyncid=task_id, job_id=self.job_id, state=states.PENDING, args=args)
 
 
 class SingleFileJob(BaseJob):

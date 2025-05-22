@@ -4,7 +4,7 @@ from django.db.models import F, Q
 from django.urls import reverse
 
 from kantele import settings
-from rawstatus.models import StoredFile, ServerShare, StoredFileType, StoredFileLoc
+from rawstatus.models import StoredFile, ServerShare, StoredFileType, StoredFileLoc, FileServer
 from datasets.models import Dataset, DatasetRawFile, Project, DatasetServer
 from analysis.models import Proteowizard, MzmlFile, NextflowWfVersionParamset
 from datasets import tasks
@@ -191,41 +191,46 @@ class RemoveDatasetFilesFromServershare(DatasetJob):
 class ConvertDatasetMzml(DatasetJob):
     refname = 'convert_dataset_mzml'
     task = tasks.run_convert_mzml_nf
-    queue = settings.QUEUE_NXF
+    queue = False
     revokable = True
 
-    def getfiles_query(self, **kwargs):
-        '''Return raw files only (from dset path)'''
-        return super().getfiles_query(**kwargs).exclude(sfile__mzmlfile__isnull=False).select_related(
-                'servershare', 'sfile__rawfile__datasetrawfile__dataset', 'sfile__filetype')
+    def on_create_addkwargs(self, **kwargs):
+        # FIXME create dst sfloc ids etc
+        pwiz = Proteowizard.objects.get(pk=kwargs['pwiz_id'])
+        dst_sfls = []
+        for sfl in self.getfiles_query(**kwargs):
+            mzmlfilename = os.path.splitext(sfl.sfile.filename)[0] + '.mzML'
+            mzsf, mzsfl = get_or_create_mzmlentry(sfl, pwiz=pwiz, refined=False,
+                servershare_id=sfl.servershare_id, path=sfl.path, mzmlfilename=mzmlfilename)
+            if mzsf:
+                dst_sfls.append(mzsfl.pk)
+        return {'dstsfloc_ids': dst_sfls}
 
     def process(self, **kwargs):
-        dset = Dataset.objects.get(pk=kwargs['dset_id'])
+        dss = DatasetServer.objects.values('storageshare__name', 'storageshare_id', 'storage_loc',
+                'dataset_id').get(pk=kwargs['dss_id'])
+        ana_server = FileServer.objects.filter(is_analysis=True,
+                servershare__id=dss['storageshare_id']).values('name', 'scratchdir').first()
         pwiz = Proteowizard.objects.get(pk=kwargs['pwiz_id'])
-        res_share = ServerShare.objects.get(pk=kwargs['dstshare_id'])
+        runpath = f'{dss["dataset_id"]}_convert_mzml_{kwargs["timestamp"]}'
         nf_raws = []
-        runpath = f'{dset.id}_convert_mzml_{kwargs["timestamp"]}'
-        for fn in self.getfiles_query(**kwargs):
-            mzmlfilename = os.path.splitext(fn.sfile.filename)[0] + '.mzML'
-            mzsf, mzsfl = get_or_create_mzmlentry(fn, pwiz=pwiz, refined=False,
-                    servershare_id=res_share.pk, path=runpath, mzmlfilename=mzmlfilename)
-            if mzsf.checked and not mzsfl.purged:
-                continue
-            nf_raws.append((fn.servershare.name, fn.path, fn.sfile.filename, mzsfl.id, mzmlfilename))
+        for fn in self.getfiles_query(**kwargs).values('sfile__rawfile_id', 'sfile__filename'):
+            # Have to line up the sfl with their dst mzml sfl ids, so we cant just oneline it
+            mzsfl = StoredFileLoc.objects.values('pk', 'sfile__filename', 'sfile__filetype__name'
+                    ).get(pk__in=kwargs['dstsfloc_ids'], sfile__rawfile_id=fn['sfile__rawfile_id'])
+            nf_raws.append((dss['storageshare__name'], dss['storage_loc'], fn['sfile__filename'],
+                mzsfl['pk'], mzsfl['sfile__filename']))
         if not nf_raws:
             return
-        # FIXME last file filetype decides mzml input filetype, we should enforce
-        # same filetype files in a dataset if possible
-        ftype = mzsf.filetype.name
         print(f'Queuing {len(nf_raws)} raw files for conversion')
         nfwf = NextflowWfVersionParamset.objects.select_related('nfworkflow').get(
                 pk=pwiz.nf_version_id)
-        run = {'timestamp': kwargs['timestamp'],
-               'dset_id': dset.id,
+        run = {
                'wf_commit': nfwf.commit,
                'nxf_wf_fn': nfwf.filename,
                'repo': nfwf.nfworkflow.repo,
-               'dstsharename': res_share.name,
+               'dstsharename': dss['storageshare__name'],
+               'dstpath': dss['storage_loc'],
                'runname': runpath,
                }
         params = ['--container', pwiz.container_version]
@@ -233,41 +238,9 @@ class ConvertDatasetMzml(DatasetJob):
             p2parse = kwargs.get(pname, [])
             if len(p2parse):
                 params.extend(['--{}'.format(pname), ';'.join(p2parse)])
-        profiles = ','.join(nfwf.profiles)
-        self.run_tasks.append(((run, params, nf_raws, ftype, nfwf.nfversion, profiles), {'pwiz_id': pwiz.id}))
-
-
-class DeleteDatasetMzml(DatasetJob):
-    """Removes dataset mzml files from active storage"""
-    refname = 'delete_mzmls_dataset'
-    task = filetasks.delete_file
-    queue = settings.QUEUE_STORAGE
-
-    def process(self, **kwargs):
-        for fn in self.getfiles_query(**kwargs).filter(sfile__deleted=True, purged=False, checked=True,
-                mzmlfile__pwiz_id=kwargs['pwiz_id']):
-            fullpath = os.path.join(fn.path, fn.sfile.filename)
-            print('Queueing deletion of mzML file {fullpath} from dataset {kwargs["dset_id"]}')
-            self.run_tasks.append(((fn.servershare.name, fullpath, fn.id), {}))
-
-
-class DeleteActiveDataset(DatasetJob):
-    """Removes dataset from active storage"""
-    refname = 'delete_active_dataset'
-    # FIXME need to be able to delete directories
-    task = filetasks.delete_file
-    queue = settings.QUEUE_STORAGE
-
-    def process(self, **kwargs):
-        for fn in self.getfiles_query(**kwargs).select_related('sfile__filetype').filter(purged=False):
-            fullpath = os.path.join(fn.path, fn.sfile.filename)
-            print(f'Purging {fullpath} from dataset {kwargs["dss_id"]}')
-            if hasattr(fn.sfile, 'mzmlfile'):
-                is_folder = False
-            else:
-                is_folder = fn.sfile.filetype.is_folder
-            self.run_tasks.append(((fn.servershare.name, fullpath, fn.id, is_folder), {}))
-
+        self.queue = f'{ana_server["name"]}__{settings.QUEUE_NXF}'
+        self.run_tasks.append((run, params, nf_raws, mzsfl['sfile__filetype__name'],
+            nfwf.nfversion, ','.join(nfwf.profiles), ana_server['scratchdir']))
 
 
 class DeleteDatasetPDCBackup(DatasetJob):
@@ -285,15 +258,18 @@ def get_or_create_mzmlentry(fn, pwiz, refined, servershare_id, path, mzmlfilenam
     mzsf, cr = StoredFile.objects.get_or_create(mzmlfile__pwiz=pwiz, mzmlfile__refined=refined,
             rawfile_id=fn.sfile.rawfile_id, filetype_id=fn.sfile.filetype_id, defaults={'md5': new_md5,
                 'filename': mzmlfilename})
-    sfl, _ = StoredFileLoc.objects.get_or_create(sfile=mzsf, defaults={'servershare_id': servershare_id, 'path': path})
+    sfl, sfl_cr = StoredFileLoc.objects.get_or_create(sfile=mzsf, servershare_id=servershare_id,
+            defaults={'path': path})
     if cr:
         MzmlFile.objects.create(sfile=mzsf, pwiz=pwiz, refined=refined)
-    elif sfl.purged or not mzsf.checked:
-        # Any previous mzML files which are deleted or otherwise odd need resetting
-        # Only update in case of purged/non-checked, so cannot use update_or_create
-        sfl.purged = False
-        sfl.servershare_id = servershare_id
-        sfl.path = path
+    elif not sfl_cr and sfl.active:
+        # Old file exists or is going to be made in a job, skip it
+        # FIXME now we really need an on_delete/on_create thing on the job, to reset dst_sflocs
+        return False, False
+    elif not sfl_cr:
+        # Any previous mzML files which are (set to be) deleted or otherwise odd (not checked)
+        # need resetting. Only update in case of non-active/checked, so cannot use update_or_create
+        sfl.active = True
         sfl.save()
         mzsf.checked = False
         mzsf.deleted = False

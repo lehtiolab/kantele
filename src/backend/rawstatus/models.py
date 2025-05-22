@@ -64,6 +64,11 @@ class FileServer(models.Model):
     name = models.TextField(unique=True)
     uri = models.TextField() # for users
     fqdn = models.TextField() # controller URL for rsync SSH etc
+    # Is this an analysis server? Scratchdir can be blank even for those!
+    is_analysis = models.BooleanField(default=False)
+    scratchdir = models.TextField()
+    # Does the server have rsync private keys (aka is some kind of controller)
+    can_rsync = models.BooleanField(default=False)
     rsyncusername = models.TextField()
     rsynckeyfile = models.TextField()
 
@@ -73,7 +78,7 @@ class FileServer(models.Model):
 
 class ServerShare(models.Model):
     name = models.TextField(unique=True)  # storage, tmp,
-    server = models.ForeignKey(FileServer, on_delete=models.CASCADE)
+    server = models.ManyToManyField(FileServer)
     share = models.TextField(help_text='Base path, e.g. /disk1/data/raw/projects')  # /home/disk1
     max_security = models.IntegerField(choices=DataSecurityClass.choices)
     description = models.TextField()

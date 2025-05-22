@@ -56,11 +56,11 @@ def create_job(name, state=False, **kwargs):
     jwrap = jobmap[name](False)
     kwargs.update(jwrap.on_create_addkwargs(**kwargs))
     if error := check_job_error(name, **kwargs):
-        jobdata = {'id': False, 'error': error}
+        jobdata = {'id': False, 'kwargs': kwargs, 'error': error}
     else:
         job = Job.objects.create(funcname=name, timestamp=timezone.now(),
             state=state, kwargs=kwargs)
-        jobdata = {'id': job.id, 'error': False}
+        jobdata = {'id': job.id, 'kwargs': kwargs, 'error': False}
         FileJob.objects.bulk_create([FileJob(storedfile_id=sf_id, job_id=job.id) for sf_id in 
             jwrap.get_sf_ids_for_filejobs(**kwargs)])
     return jobdata
@@ -77,4 +77,4 @@ def create_job_without_check(name, state=False, **kwargs):
             state=state, kwargs=kwargs)
     FileJob.objects.bulk_create([FileJob(storedfile_id=sf_id, job_id=job.id) for sf_id in 
             jwrap.get_sf_ids_for_filejobs(**kwargs)])
-    return {'id': job.id, 'error': False}
+    return {'id': job.id, 'kwargs': kwargs, 'error': False}

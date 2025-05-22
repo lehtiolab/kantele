@@ -82,7 +82,7 @@ def check_ensembl_uniprot_fasta_download(self, dbname, version, organism, dbtype
         
 
 
-def run_nextflow(run, params, rundir, gitwfdir, profiles, nf_version):
+def run_nextflow(run, params, rundir, gitwfdir, profiles, nf_version, scratchdir):
     """Fairly generalized code for kantele celery task to run a WF in NXF"""
     print('Starting nextflow workflow {}'.format(run['nxf_wf_fn']))
     outdir = os.path.join(rundir, 'output')
@@ -99,6 +99,8 @@ def run_nextflow(run, params, rundir, gitwfdir, profiles, nf_version):
     cmd = [settings.NXF_COMMAND, 'run', run['nxf_wf_fn'], *params, '--outdir', outdir, '-profile', profiles, '-with-trace', '-resume']
     env = os.environ
     env['NXF_VER'] = nf_version
+    if scratchdir:
+        env['TMPDIR'] = scratchdir
     if 'token' in run and run['token']:
         nflogurl = urljoin(settings.KANTELEHOST, reverse('analysis:nflog'))
         cmd.extend(['-name', run['token'], '-with-weblog', nflogurl])
@@ -269,7 +271,7 @@ def create_runname_dir(run):
     return os.path.join(settings.NF_RUNDIR, run['runname']).replace(' ', '_')
 
 
-def prepare_nextflow_run(run, taskid, rundir, stagefiles, infiles, params):
+def prepare_nextflow_run(run, taskid, rundir, stageparamfiles, params, stagescratchdir):
     '''Creates run dirs, stage dir if needed, and stages files to either of those.
     '''
     if 'analysis_id' in run:
@@ -281,47 +283,96 @@ def prepare_nextflow_run(run, taskid, rundir, stagefiles, infiles, params):
         taskfail_update_db(taskid, 'Could not create workdir on analysis server')
         raise
     if 'analysis_id' in run:
-        log_analysis(run['analysis_id'], 'Checked out workflow repo, staging files')
-    scratchstage = os.path.join(settings.TMP_SCRATCHDIR, os.path.basename(rundir))
-    print(f'Staging parameter files to {scratchstage}')
-    for flag, files in stagefiles.items():
-        stagefiledir = os.path.join(scratchstage, flag.replace('--', ''))
-        if len(files) > 1:
-            dst = os.path.join(stagefiledir, '*')
+        log_analysis(run['analysis_id'], 'Staging files')
+    if stagescratchdir:
+        stagedir = os.path.join(stagescratchdir, os.path.basename(rundir), 'stage')
+        scratchdir = os.path.join(stagescratchdir, os.path.basename(rundir), 'scratch')
+        try:
+            os.makedirs(stagedir, exist_ok=True)
+            os.makedirs(scratchdir, exist_ok=True)
+        except (OSError, PermissionError):
+            taskfail_update_db(taskid, 'Could not create stage/scratch dirs on analysis server')
+            raise
+    else:
+        stagedir, scratchdir = False, False
+    for flag, files in stageparamfiles.items():
+        # Always stage these so they end up in workdirs of their own. In case of multifile
+        # on a param, or when having a scratchdir in place
+        if stagedir:
+            stage_or_linkdir = os.path.join(stagedir, flag.replace('--', ''))
         else:
-            dst = os.path.join(stagefiledir, files[0][2])
+            stage_or_linkdir = os.path.join(rundir, 'stage', flag.replace('--', ''))
+        if len(files) > 1:
+            dst = os.path.join(stage_or_linkdir, '*')
+        else:
+            dst = os.path.join(stage_or_linkdir, files[0][2])
         params.extend([flag, dst])
         try:
-            os.makedirs(stagefiledir, exist_ok=True)
+            os.makedirs(stage_or_linkdir, exist_ok=True)
         except Exception:
             taskfail_update_db(taskid, f'Could not create dir to stage files for {flag}')
             raise
-        try:
-            copy_stage_files(stagefiledir, files)
-        except Exception:
-            taskfail_update_db(taskid, f'Could not stage files for {flag} for analysis')
-            raise
+        if stagedir:
+            try:
+                copy_stage_files(stage_or_linkdir, files)
+            except Exception:
+                taskfail_update_db(taskid, f'Could not stage files for {flag} for analysis')
+                raise
+        else:
+            try:
+                copy_stage_files(stage_or_linkdir, files)
+            except Exception:
+                taskfail_update_db(taskid, f'Could not stage files for {flag} for analysis')
+                raise
 
-    if len(infiles) and settings.ANALYSIS_STAGESHARE:
-        # If we run with a stageing disk, use it for all files, else
-        # only stage the "small files", i.e. non --input files (no mzML, BAM etc)
-        infilestagedir = os.path.join(settings.ANALYSIS_STAGESHARE, run['runname'])
-        # Files which will be defined in some kind of input.txt file (no --param filename)
-        infiledir = os.path.join(infilestagedir, 'infiles')
+#    if len(infiles) and settings.ANALYSIS_STAGESHARE:
+#        # If we run with a stageing disk, use it for all files, else
+#        # only stage the "small files", i.e. non --input files (no mzML, BAM etc)
+#        infilestagedir = os.path.join(settings.ANALYSIS_STAGESHARE, run['runname'])
+#        # Files which will be defined in some kind of input.txt file (no --param filename)
+#        infiledir = os.path.join(infilestagedir, 'infiles')
+#        try:
+#            os.makedirs(infiledir, exist_ok=True)
+#        except Exception:
+#            taskfail_update_db(taskid, f'Could not create dir to stage files for input')
+#            raise
+#        try:
+#            copy_stage_files(infiledir, [(x['servershare'], x['path'], x['fn']) for x in infiles])
+#        except Exception:
+#            taskfail_update_db(taskid, f'Could not stage files for {flag} for analysis')
+#            raise
+#    else:
+#        # No infiles or no stage disk used, no need to remove later
+#        infiledir = False
+    return params, gitwfdir, stagedir, scratchdir #, infiledir 
+
+
+def link_stage_files(linkdir, files):
+    not_needed_files = set(os.listdir(linkdir))
+    for fdata in files:
+        fpath = os.path.join(settings.SHAREMAP[fdata[0]], fdata[1], fdata[2])
+        fdst = os.path.join(linkdir, fdata[2])
         try:
-            os.makedirs(infiledir, exist_ok=True)
-        except Exception:
-            taskfail_update_db(taskid, f'Could not create dir to stage files for input')
-            raise
-        try:
-            copy_stage_files(infiledir, [(x['servershare'], x['path'], x['fn']) for x in infiles])
-        except Exception:
-            taskfail_update_db(taskid, f'Could not stage files for {flag} for analysis')
-            raise
-    else:
-        # No infiles or no stage disk used, no need to remove later
-        infiledir = False
-    return params, gitwfdir, infiledir 
+            not_needed_files.remove(fdata[2])
+        except KeyError:
+            pass
+        if not os.path.exists(fdst):
+            os.symlink(fpath, fdst)
+        elif os.path.abspath(os.path.readlink(fdst)) != fpath:
+            # file/dir exists but is not correct, delete first
+            if not os.path.islink(fdst) and os.path.isdir(fdst):
+                shutil.rmtree(fdst)
+            else:
+                os.remove(fdst)
+            os.symlink(fpath, fdst)
+    # Remove obsolete files from linkdir
+    for fn in not_needed_files:
+        fpath = os.path.join(linkdir, fn)
+        # Defensive checking if exist, they come from a listdir op above
+        if os.path.exists(fpath) and not os.path.islink(fpath) and os.path.isdir(fpath):
+            shutil.rmtree(fpath)
+        elif os.path.exists(fpath):
+            os.remove(fpath)
 
 
 def copy_stage_files(stagefiledir, files):
@@ -505,11 +556,11 @@ def register_resultfile(fname, fpath, token):
         return False
 
 
-def transfer_resultfile(outfullpath, outpath, fn, dstsharename, url, token, task_id,
-        fn_id, reg_md5, newname, analysis_id=False, checksrvurl=False, is_fasta=False):
+def transfer_resultfile(outfullpath, dstpath, fn, dstsharename, url, token, task_id,
+        sfl_id, reg_md5, newname, analysis_id=False, checksrvurl=False, is_fasta=False):
     '''Copies files from analyses to outdir on result storage.
     outfullpath is absolute destination dir for file
-    outpath is the path stored in Kantele DB (for users on the share of outfullpath)
+    dstpath is the path stored in Kantele DB (for users on the share of outfullpath)
     fn is absolute path to src file
     '''
     dst = os.path.join(outfullpath, newname)
@@ -519,7 +570,7 @@ def transfer_resultfile(outfullpath, outpath, fn, dstsharename, url, token, task
         taskfail_update_db(task_id, 'Errored when trying to copy files to analysis result destination')
         raise
     os.chmod(dst, 0o640)
-    postdata = {'client_id': settings.APIKEY, 'fn_id': fn_id, 'outdir': outpath,
+    postdata = {'client_id': settings.APIKEY, 'sfloc_id': sfl_id, 'dst_path': dstpath,
             'filename': newname, 'token': token, 'dstsharename': dstsharename,
             'analysis_id': analysis_id, 'is_fasta': is_fasta}
     if calc_md5(dst) != reg_md5:

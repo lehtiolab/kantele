@@ -123,14 +123,10 @@ EXTERNAL_PRODUCER_IDS = [int(x) for x in os.environ.get('EXTERNAL_PRODUCER_IDS',
 USERFILEDIR = 'uploadfiles'
 
 # nextflow
-NXF_COMMAND = os.environ.get('NXF_COMMAND', 'nextflow')
+NXF_COMMAND = os.environ.get('NXF_COMMAND', 'nextflow run').split(' ')
 LIBRARY_FILE_PATH = 'databases'
-# Large things (e.g. lots of mzmls) are staged in the stage disk (if any):
-ANALYSIS_STAGESHARE = os.environ.get('STAGESHARE', False)
-# Small files can be staged on normal disk (where NF scratch is run)
-TMP_SCRATCHDIR = os.environ.get('TMP_SCRATCHDIR', False)
 
-NF_RUNDIR = os.environ.get('NEXTFLOW_RUNDIR')
+NF_RUNDIR = os.environ.get('NEXTFLOW_RUNDIR', 'nf_runs')
 
 # hardcoded name for filetypes fasta DBs, analysis output
 DBFA_FT_NAME = 'database'

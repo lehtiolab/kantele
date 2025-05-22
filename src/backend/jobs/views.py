@@ -81,22 +81,19 @@ def update_storagepath_file(request):
         return HttpResponseForbidden()
     print('Updating storage task finished')
     if 'sfloc_id' in data:
-        sfloc = StoredFileLoc.objects.get(pk=data['sfloc_id'])
-        # sfloc.servershare = ServerShare.objects.get(name=data['servershare'])
-        sfloc.path = data['dst_path']
-        sfloc.purged = False
+        StoredFileLoc.objects.filter(pk=data['sfloc_id']).update(path=data['dst_path'], purged=False)
+        sf_q = StoredFile.objects.filter(storedfileloc__pk=data['sfloc_id'])
         if 'newname' in data:
-            sfloc.sfile.filename = data['newname']
-            sfloc.sfile.rawfile.name = data['newname']
-            sfloc.sfile.rawfile.save()
-            sfloc.sfile.save()
-        sfloc.save()
+            # FIXME newname sfile/rawfile should be done prejob, not post job? only rawfile, sfile is current!
+            sf_q.update(filename=data['newname'])
+            RawFile.objects.filter(storedfile__storedfileloc__pk=data['sfloc_id']).update(
+                    filename=data['newname'])
+        elif 'md5' in data:
+            # Case for produced mzMLs, already registered
+            sf_q.update(md5=data['md5'], checked=True)
     elif 'sfloc_ids' in data:
         sfns = StoredFileLoc.objects.filter(pk__in=[int(x) for x in data['sfloc_ids']])
         sfns.update(path=data['dst_path'], purged=False)
-        if 'servershare' in data:
-            sshare = ServerShare.objects.get(name=data['servershare'])
-            sfns.update(servershare=sshare)
     if 'task' in data:
         set_task_done(data['task'])
     return HttpResponse()
@@ -286,29 +283,6 @@ def analysis_run_done(request):
     if 'task' in data:
         set_task_done(data['task'])
     am.Analysis.objects.filter(pk=data['analysis_id']).update(editable=False)
-    return HttpResponse()
-
-
-@require_POST
-def mzml_convert_or_refine_file_done(request):
-    """Converted/Refined mzML file already copied to analysis result storage 
-    server with MD5, fn, path. This function then queues a job to move it to 
-    dataset directory from the analysis dir"""
-    # FIXME need to remove the empty dir after moving all the files, how?
-    # create cleaning task queue on ana server
-    data = json.loads(request.POST['json'])
-    if ('client_id' not in data or
-            data['client_id'] != settings.ANALYSISCLIENT_APIKEY):
-        return HttpResponseForbidden()
-    sfloc = StoredFileLoc.objects.select_related('sfile__rawfile__datasetrawfile__dataset').get(pk=data['fn_id'])
-    sfloc.sfile.md5 = data['md5']
-    sfloc.sfile.checked = True
-    sfloc.sfile.save()
-    # FIXME buggy - if you remove fns from dataset, they will not have a datasetrawfile!
-    # do not use that here! instead, direct pass the storage loc from the job!
-    sfloc.save()
-    create_job('move_single_file', sfloc_id=sfloc.id, dstsharename=settings.PRIMARY_STORAGESHARENAME,
-            dst_path=sfloc.sfile.rawfile.datasetrawfile.dataset.storage_loc)
     return HttpResponse()
 
 

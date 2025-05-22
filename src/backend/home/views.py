@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta, datetime
 import json
 from base64 import b64encode
@@ -911,26 +912,47 @@ def create_mzmls(request):
         options.append('combineIonMobilitySpectra')
     num_rawfns = filemodels.RawFile.objects.filter(datasetrawfile__dataset_id=data['dsid']).count()
     mzmls_exist_any_deleted_state = filemodels.StoredFile.objects.filter(
-            rawfile__datasetrawfile__dataset=dset, storedfileloc__purged=False, checked=True,
-            mzmlfile__isnull=False)
-    mzmls_exist = mzmls_exist_any_deleted_state.filter(deleted=False)
+            rawfile__datasetrawfile__dataset=dset, checked=True, mzmlfile__isnull=False)
+    mzmls_exist = mzmls_exist_any_deleted_state.filter(deleted=False, storedfileloc__active=True)
     if num_rawfns == mzmls_exist.filter(mzmlfile__pwiz=pwiz).count():
         return JsonResponse({'error': 'This dataset already has existing mzML files of that '
             'proteowizard version'}, status=403)
+    rawsfl = filemodels.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=dset,
+            active=True, sfile__mzmlfile__isnull=True, servershare__server__is_analysis=True)
+    if not rawsfl.count():
+        return JsonResponse({'error': 'This dataset does not have its raw files on a server with '
+            'analysis capability, please make sure it is correctly stored'}, status=403)
 
     # Saving starts here
-    res_share = filemodels.ServerShare.objects.get(name=settings.MZMLINSHARENAME)
     # Remove other pwiz mzMLs
     other_pwiz_mz = mzmls_exist.exclude(mzmlfile__pwiz=pwiz)
     if other_pwiz_mz.count():
-        filemodels.StoredFile.objects.filter(pk__in=other_pwiz_mz).update(deleted=True)
+        del_sf_pk = [x['pk'] for x in other_pwiz_mz.values('pk')]
+        filemodels.StoredFile.objects.filter(pk__in=del_sf_pk).update(deleted=True)
+        del_sfl_q = filemodels.StoredFileLoc.objects.filter(sfile_id__in=del_sf_pk)
+        del_sfl_q.update(active=False)
         # redefine query since now all the mzmls to deleted are marked deleted=T
-        del_pwiz_q = mzmls_exist_any_deleted_state.exclude(mzmlfile__pwiz=pwiz).filter(deleted=True)
-        for sf in del_pwiz_q.distinct('mzmlfile__pwiz_id').values('mzmlfile__pwiz_id'):
-            create_job('delete_mzmls_dataset', dset_id=dset.pk, pwiz_id=sf['mzmlfile__pwiz_id'])
-    create_job('convert_dataset_mzml', options=options, filters=filters,
-            dset_id=data['dsid'], dstshare_id=res_share.pk, pwiz_id=pwiz.pk,
-            timestamp=datetime.strftime(datetime.now(), '%Y%m%d_%H.%M'))
+        for dss in dsmodels.DatasetServer.objects.filter(dataset=dset, active=True).values('pk',
+                'storageshare_id'):
+            sfl_pk_rm = [x['pk'] for x in del_sfl_q.filter(servershare_id=dss['storageshare_id']
+                ).values('pk')]
+            create_job('remove_dset_files_servershare', dss_id=dss['pk'], sfloc_ids=sfl_pk_rm)
+    # Now queue the convert, then queue redistribution to other places
+    # Pick any analysis server:
+    source_ssid = rawsfl.values('servershare_id').first()['servershare_id']
+    srcsfl_pk = [x['pk'] for x in rawsfl.filter(servershare_id=source_ssid).values('pk')]
+    dss_id = dsmodels.DatasetServer.objects.filter(dataset=dset,
+            storageshare_id=source_ssid).values('pk').get()['pk']
+    mzjob = create_job('convert_dataset_mzml', options=options, filters=filters, dss_id=dss_id,
+            pwiz_id=pwiz.pk, timestamp=datetime.strftime(datetime.now(), '%Y%m%d_%H.%M'),
+            sfloc_ids=srcsfl_pk)
+    if mzjob['kwargs'].get('dstsfloc_ids', False):
+        for other_dss in dsmodels.DatasetServer.objects.filter(dataset=dset, active=True).exclude(
+                pk=dss_id).values('storageshare_id', 'pk'):
+            # Put result files in all the other shares datasets
+            create_job('rsync_dset_files_to_servershare', dss_id=other_dss['pk'],
+                    sfloc_ids=mzjob['kwargs']['dstsfloc_ids'],
+                    dstshare_id=other_dss['storageshare_id'])
     return JsonResponse({})
 
 

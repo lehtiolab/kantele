@@ -2,7 +2,7 @@ import os
 from django.utils import timezone
 
 from kantele import settings
-from kantele.tests import BaseTest 
+from kantele.tests import BaseTest, BaseIntegrationTest
 from analysis import models as am
 from rawstatus import models as rm
 from datasets import models as dm
