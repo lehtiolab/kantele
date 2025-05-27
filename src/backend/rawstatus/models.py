@@ -78,8 +78,6 @@ class FileServer(models.Model):
 
 class ServerShare(models.Model):
     name = models.TextField(unique=True)  # storage, tmp,
-    server = models.ManyToManyField(FileServer)
-    share = models.TextField(help_text='Base path, e.g. /disk1/data/raw/projects')  # /home/disk1
     max_security = models.IntegerField(choices=DataSecurityClass.choices)
     description = models.TextField()
     active = models.BooleanField(default=True)
@@ -131,6 +129,11 @@ class ServerShare(models.Model):
         else:
             return self.get_non_open_dset_path(project.pk, dset.pk)
 
+
+class FileserverShare(models.Model):
+    server = models.ForeignKey(FileServer, on_delete=models.CASCADE)
+    share = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
+    path = models.TextField()
 
 
 class RawFile(models.Model):

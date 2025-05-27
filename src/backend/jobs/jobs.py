@@ -87,8 +87,11 @@ class BaseJob:
     def check_error_on_running(self, **kwargs):
         return False
 
-    def getfiles_query(self, **kwargs):
+    def oncreate_getfiles_query(self, **kwargs):
         return []
+
+    def getfiles_query(self, **kwargs):
+        return self.oncreate_getfiles_query(**kwargs).filter(purged=False)
 
     def on_create_addkwargs(self, **kwargs):
         return {}
@@ -96,7 +99,7 @@ class BaseJob:
     def get_sf_ids_for_filejobs(self, **kwargs):
         """This is run before running job, to define files used by
         the job (so it cant run if if files are in use by other job)"""
-        return [x['sfile_id'] for x in self.getfiles_query(**kwargs).values('sfile_id')]
+        return [x['sfile_id'] for x in self.oncreate_getfiles_query(**kwargs).values('sfile_id')]
 
     def get_dsids_jobrunner(self, **kwargs):
         return []
@@ -117,6 +120,9 @@ class BaseJob:
     def on_pause(self, **kwargs):
         pass
 
+    def get_server_based_queue(self, servername, queue):
+        return f'{servername}__{queue}'
+
     def queue_tasks(self):
         '''If queue is defined on job, run that queue, otherwise, get queue
         from the task (in case of variable server-dependent queues'''
@@ -126,7 +132,7 @@ class BaseJob:
                 queue = self.queue
             else:
                 args, queue = runtask
-            print(args, queue)
+            print(f'Queuing task for job {self.job_id} to queue {queue}')
             tid = self.task.apply_async(args=args, queue=queue)
             self.create_db_task(tid, *args)
 
@@ -143,10 +149,8 @@ class SingleFileJob(BaseJob):
     move_single
     '''
 
-    def getfiles_query(self, **kwargs):
-        return StoredFileLoc.objects.filter(pk=kwargs['sfloc_id']).select_related(
-                'servershare', 'sfile__rawfile')
-        # FIXME do .get and .select_related in jobs itself?
+    def oncreate_getfiles_query(self, **kwargs):
+        return StoredFileLoc.objects.filter(pk=kwargs['sfloc_id'])
         # As in multifile job (PurgeFiles)
 
     def get_dsids_jobrunner(self, **kwargs):
@@ -164,7 +168,7 @@ class MultiFileJob(BaseJob):
     - Delete empty dir
     - Register external file
     '''
-    def getfiles_query(self, **kwargs):
+    def oncreate_getfiles_query(self, **kwargs):
         return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'])
 
     def get_dsids_jobrunner(self, **kwargs):
@@ -204,7 +208,7 @@ class DatasetJob(BaseJob):
         return [x['pk'] for x in StoredFile.objects.filter(
             rawfile__datasetrawfile__dataset__datasetserver=dss).values('pk')]
 
-    def getfiles_query(self, **kwargs):
+    def oncreate_getfiles_query(self, **kwargs):
         '''Get all files which had a datasetrawfile association when this job was created/retried,
         (so get the FileJob entries). Files will either be used in the
         job itself and/or post the job in e.g. re-setting their paths etc.
@@ -216,7 +220,7 @@ class DatasetJob(BaseJob):
         When e.g. check_job_error is used, there is no job yet, and this will return the files
         of a dataset'
         '''
-        return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'], purged=False)
+        return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'])
 
 
 class ProjectJob(BaseJob):
@@ -226,8 +230,8 @@ class ProjectJob(BaseJob):
         return [x.pk for x in dm.Dataset.objects.filter(deleted=False, purged=False,
             runname__experiment__project_id=kwargs['proj_id'])]
 
-    def getfiles_query(self, **kwargs):
+    def oncreate_getfiles_query(self, **kwargs):
         '''Get all files with same path as project_dsets.storage_locs, used to update
         path of those files post-job'''
-        return StoredFileLoc.objects.filter(purged=False, sfile__deleted=False,
+        return StoredFileLoc.objects.filter(sfile__deleted=False,
                 sfile__rawfile__datasetrawfile__dataset__runname__experiment__project_id=kwargs['proj_id'])

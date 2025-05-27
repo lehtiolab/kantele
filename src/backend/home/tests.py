@@ -1,4 +1,5 @@
 import os
+from shutil import copytree
 from django.utils import timezone
 
 from kantele import settings
@@ -65,109 +66,190 @@ class TestCreateMzmls(MzmlTests):
         resp = self.cl.post(self.url, content_type='application/json', data={'hello': 'test'})
         self.assertEqual(resp.status_code, 400)
         # dset does not exist
-        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pw.pk,
+        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pwiz.pk,
             'dsid': 10000})
         self.assertEqual(resp.status_code, 403)
         self.assertIn('does not exist or is deleted', resp.json()['error'])
         # dset with diff raw files
-        timsdsr = dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=self.timsraw)
-        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pw.pk,
+        timsraw = rm.RawFile.objects.create(name='file2', producer=self.prodtims,
+                source_md5='timsmd4', size=100, date=timezone.now(), claimed=True)
+        timsdsr = dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=timsraw)
+        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pwiz.pk,
             'dsid': self.ds.pk})
         self.assertEqual(resp.status_code, 403)
         self.assertIn('contains data from multiple instrument types', resp.json()['error'])
         timsdsr.delete()
     
     def test_existing_mzmls(self):
-        exist_mzml = am.MzmlFile.objects.create(sfile=self.qesf, pwiz=self.pw)
-        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pw.pk,
+        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pwiz.pk,
             'dsid': self.ds.pk})
         self.assertEqual(resp.status_code, 403)
         self.assertIn('already has existing mzML files of that proteowizard', resp.json()['error'])
-        exist_mzml.delete()
 
-    def test_other_pwiz(self):
-        '''Test if old pwiz existing files get purge job BEFORE launching new job'''
-        newpw, _ = am.Proteowizard.objects.get_or_create(version_description='newer', container_version='', nf_version=self.nfwv)
-        exist_mzml = am.MzmlFile.objects.create(sfile=self.qesf, pwiz=newpw)
-        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pw.pk,
+    def test_other_pwiz_rsyncpull(self):
+        '''Test if old pwiz existing files get purge job BEFORE launching new job, files are
+        pulled from analysis to storage after w rsync'''
+        oldpw = am.Proteowizard.objects.create(version_description='older', container_version='',
+                nf_version=self.nfwv)
+        self.f3mzml.pwiz = oldpw
+        self.f3mzml.save()
+
+        # Second dss
+        rawfn = os.path.join(self.f3path, self.f3raw.name)
+        dss2path = 'testdss2'
+        dss2_fpath = os.path.join(settings.SHAREMAP[self.ssoldstorage.name], dss2path)
+        os.makedirs(dss2_fpath)
+        rawfn_dss2 = os.path.join(dss2_fpath, self.f3raw.name)
+        copytree(rawfn, rawfn_dss2)
+        dss2 = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.ssoldstorage,
+                storage_loc_ui=dss2path, storage_loc=dss2path, startdate=timezone.now())
+        rm.StoredFileLoc.objects.create(sfile=self.f3sf, servershare=self.ssoldstorage,
+                path=dss2path, active=True, purged=False)
+        rm.StoredFileLoc.objects.create(sfile=self.f3sfmz, servershare=self.ssoldstorage,
+                path=dss2path, active=True, purged=False)
+
+        self.storagecontroller.can_rsync, self.remoteserver.can_rsync = False, True
+        self.storagecontroller.save(), self.remoteserver.save()
+        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pwiz.pk,
             'dsid': self.ds.pk})
         self.assertEqual(resp.status_code, 200)
-        purgej = jm.Job.objects.filter(funcname='delete_mzmls_dataset').last()
-        self.assertEqual(purgej.kwargs, {'dset_id': self.ds.pk, 'pwiz_id': newpw.pk})
-        self.assertEqual(purgej.state, Jobstates.PENDING)
+        purgej = jm.Job.objects.filter(funcname='remove_dset_files_servershare').last()
         j = jm.Job.objects.filter(funcname='convert_dataset_mzml').last()
         self.assertEqual(j.state, Jobstates.PENDING)
         exp_kw  = {'options': [], 'filters': ['"peakPicking true 2"', '"precursorRefine"'], 
-                'dset_id': self.ds.pk, 'pwiz_id': self.pw.pk}
+                'dss_id': self.dss.pk, 'pwiz_id': self.pwiz.pk,
+                'sfloc_ids': [x['pk'] for x in rm.StoredFileLoc.objects.filter(
+                    servershare=self.ssnewstore, # FIXME this gets picked randomly in home/views!
+                    sfile__rawfile__datasetrawfile__dataset=self.ds, sfile__mzmlfile__isnull=True,
+                    ).values('pk')]}
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
-        self.qesf.refresh_from_db()
-        self.assertTrue(self.qesf.deleted)
-        #self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare', kwargs__dset_id=self.ds.pk).count(), 0)
-        exist_mzml.delete()
+        mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}.mzML'
+        mzmlfn1 = os.path.join(self.f3path, mzmlfn)
+        mzmlfn2 = os.path.join(dss2_fpath, mzmlfn)
+        mzml_sf = rm.StoredFile.objects.get(rawfile=self.f3raw, mzmlfile__pwiz=self.pwiz.pk)
+        oldmzml_q = rm.StoredFileLoc.objects.filter(pk=self.f3mzsss.pk, active=False)
+        self.assertTrue(oldmzml_q.filter(purged=False).exists())
+        mzml1_q = rm.StoredFileLoc.objects.filter(sfile=mzml_sf, path=self.dss.storage_loc, active=True)
+        mzml2_q = rm.StoredFileLoc.objects.filter(sfile=mzml_sf, path=dss2.storage_loc, active=True)
+        self.assertTrue(mzml1_q.filter(purged=True).exists())
+        self.assertTrue(mzml2_q.filter(purged=True).exists())
+        with open(mzmlfn1, 'w') as fp:
+            pass
+        with open(mzmlfn2, 'w') as fp:
+            pass
+        self.assertTrue(os.path.exists(mzmlfn1))
+        self.assertTrue(os.path.exists(mzmlfn2))
+        self.run_job() # delete old mzml
+        self.assertFalse(os.path.exists(mzmlfn1))
+        self.assertTrue(oldmzml_q.filter(purged=True).exists())
+        self.run_job() # delete old mzml (second dss)
+        self.assertFalse(os.path.exists(mzmlfn2))
+        self.run_job() # convert mzml
+        self.assertTrue(mzml1_q.filter(purged=False).exists())
+        self.assertTrue(mzml2_q.filter(purged=True).exists())
+        self.assertTrue(os.path.exists(mzmlfn1))
+        self.assertFalse(os.path.exists(mzmlfn2))
+        self.run_job() # running rsync
+        self.assertTrue(mzml1_q.filter(purged=False).exists())
+        self.assertTrue(mzml2_q.filter(purged=False).exists())
+        self.run_job() # setting to done
+        j2 = jm.Job.objects.last()
+        self.assertEqual(j2.state, 'done')
+        self.assertTrue(os.path.exists(mzmlfn2))
 
-    def test_create_mzml_qe(self):
-        postdata = {'pwiz_id': self.pw.pk, 'dsid': self.ds.pk}
+    def test_create_mzml_qe_rsyncpush(self):
+        '''Run conversion and then push files to other server w rsync job'''
+        rawfn = os.path.join(self.f3path, self.f3raw.name)
+        dss2path = 'testdss2'
+        dss2_fpath = os.path.join(settings.SHAREMAP[self.ssoldstorage.name], dss2path)
+        os.makedirs(dss2_fpath)
+        rawfn_dss2 = os.path.join(dss2_fpath, self.f3raw.name)
+        copytree(rawfn, rawfn_dss2)
+        dss2 = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.ssoldstorage,
+                storage_loc_ui=dss2path, storage_loc=dss2path, startdate=timezone.now())
+        rm.StoredFileLoc.objects.create(sfile=self.f3sf, servershare=self.ssoldstorage,
+                path=dss2path, active=True, purged=False)
+        self.f3sfmz.delete()
+        postdata = {'pwiz_id': self.pwiz.pk, 'dsid': self.ds.pk}
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 200)
-        j = jm.Job.objects.last()
+        j = jm.Job.objects.first()
         self.assertEqual(j.funcname, 'convert_dataset_mzml')
         exp_kw  = {'options': [], 'filters': ['"peakPicking true 2"', '"precursorRefine"'], 
-                'dset_id': self.ds.pk, 'pwiz_id': self.pw.pk}
+                'dss_id': self.dss.pk, 'pwiz_id': self.pwiz.pk,
+                'sfloc_ids': [x['pk'] for x in rm.StoredFileLoc.objects.filter(
+                    servershare=self.ssnewstore, # FIXME this gets picked randomly in home/views!
+                    sfile__rawfile__datasetrawfile__dataset=self.ds, sfile__mzmlfile__isnull=True,
+                    ).values('pk')]}
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
-        #self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
-        #    kwargs__dset_id=self.ds.pk).count(), 0)
+        mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}.mzML'
+        mzmlfn1 = os.path.join(self.f3path, mzmlfn)
+        mzmlfn2 = os.path.join(dss2_fpath, mzmlfn)
+        self.assertFalse(os.path.exists(mzmlfn1))
+        self.assertFalse(os.path.exists(mzmlfn2))
+        self.run_job()
+        self.assertTrue(os.path.exists(mzmlfn1))
+        self.assertFalse(os.path.exists(mzmlfn2))
+        self.run_job() # running rsync
+        self.run_job() # setting to done
+        j2 = jm.Job.objects.last()
+        self.assertEqual(j2.state, 'done')
+        self.assertTrue(os.path.exists(mzmlfn2))
 
-    def test_create_mzml_tims(self):
-        self.qeraw.producer = self.prodtims
-        self.qeraw.save()
-        postdata = {'pwiz_id': self.pw.pk, 'dsid': self.ds.pk}
+    def test_create_mzml_tims_rsync_sameserver(self):
+        '''Two datasetserver locations (one on ssnewstore, one on sstmp), so rsync does not use
+        SSH'''
+        self.f3raw.producer = self.prodtims
+        self.f3raw.save()
+        rawfn = os.path.join(self.f3path, self.f3raw.name)
+        dss2path = 'testdss2'
+        dss2_fpath = os.path.join(settings.SHAREMAP[self.sstmp.name], dss2path)
+        os.makedirs(dss2_fpath)
+        rawfn_dss2 = os.path.join(dss2_fpath, self.f3raw.name)
+        copytree(rawfn, rawfn_dss2)
+        dss2 = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.sstmp,
+                storage_loc_ui=dss2path, storage_loc=dss2path, startdate=timezone.now())
+        rm.StoredFileLoc.objects.create(sfile=self.f3sf, servershare=self.sstmp,
+                path=dss2path, active=True, purged=False)
+        self.f3sfmz.delete()
+        postdata = {'pwiz_id': self.pwiz.pk, 'dsid': self.ds.pk}
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 200)
-        j = jm.Job.objects.last()
+        j = jm.Job.objects.first()
         self.assertEqual(j.funcname, 'convert_dataset_mzml')
         exp_kw  = {'options': ['combineIonMobilitySpectra'], 'filters': ['"peakPicking true 2"', '"precursorRefine"', '"scanSumming precursorTol=0.02 scanTimeTol=10 ionMobilityTol=0.1"'], 
-                'dstshare_id': self.ssmzml.pk, 'dset_id': self.ds.pk, 'pwiz_id': self.pw.pk}
+                'dss_id': self.dss.pk, 'pwiz_id': self.pwiz.pk,
+                'sfloc_ids': [x['pk'] for x in rm.StoredFileLoc.objects.filter(
+                    servershare=self.ssnewstore, # FIXME this gets picked randomly in home/views!
+                    sfile__rawfile__datasetrawfile__dataset=self.ds, sfile__mzmlfile__isnull=True,
+                    ).values('pk')]}
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
-        #self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
-        #    kwargs__dset_id=self.ds.pk).count(), 0)
-
-# FIXME maybe revive this test when testing multi-storage
-#    def test_with_filemove(self):
-#        # Create new dataset on old storage proj that can be mock-"moved"
-#        ds = self.ds
-#        ds.pk = None
-#        moverun = dm.RunName.objects.create(name=self.id(), experiment=self.oldexp)
-#        ds.storageshare = self.ssoldstorage
-#        ds.runname = moverun
-#        ds.storage_loc = 'test_with_filemove'
-#        ds.save()
-#        # Add file to mzML
-#        qeraw = self.qeraw
-#        qeraw.pk, qeraw.source_md5 = None, 'test_with_filemove_bcd1234'
-#        qeraw.save()
-#        dm.DatasetRawFile.objects.update_or_create(rawfile=qeraw, defaults={'dataset': ds})
-#        qesf = self.qesf
-#        qesf.pk, qesf.md5, qeraw.source_md5
-#        qesf.path, qesf.servershare_id = ds.storage_loc, ds.storageshare_id
-#        qesf.rawfile, qesf.filename = qeraw, qeraw.name
-#        qesf.save()
-#        postdata = {'pwiz_id': self.pw.pk, 'dsid': ds.pk}
-#        resp = self.cl.post(self.url, content_type='application/json', data=postdata)
-#        self.assertEqual(resp.status_code, 200)
-#        j = jm.Job.objects.last()
-#        self.assertEqual(j.funcname, 'convert_dataset_mzml')
-#        exp_kw  = {'options': [], 'filters': ['"peakPicking true 2"', '"precursorRefine"'], 
-#                'dstshare_id': self.ssmzml.pk, 'dset_id': ds.pk, 'pwiz_id': self.pw.pk}
-#        for k, val in exp_kw.items():
-#            self.assertEqual(j.kwargs[k], val)
-#        self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
-#            kwargs__dset_id=ds.pk).count(), 1)
-#        # cleanup, this should also remove dset
-#        # FIXME why?
-#        #moverun.delete()
+        mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}.mzML'
+        mzsfl_q_stor  = rm.StoredFileLoc.objects.filter(sfile__filename=mzmlfn,
+                servershare=self.ssnewstore, path=self.dss.storage_loc, active=True)
+        mzsfl_q_tmp = rm.StoredFileLoc.objects.filter(sfile__filename=mzmlfn, servershare=self.sstmp,
+                path=dss2path, active=True)
+        self.assertTrue(mzsfl_q_stor.filter(purged=True).exists())
+        self.assertTrue(mzsfl_q_tmp.filter(purged=True).exists())
+        mzmlfn1 = os.path.join(self.f3path, mzmlfn)
+        mzmlfn2 = os.path.join(dss2_fpath, mzmlfn)
+        self.assertFalse(os.path.exists(mzmlfn1))
+        self.assertFalse(os.path.exists(mzmlfn2))
+        self.run_job()
+        self.assertTrue(os.path.exists(mzmlfn1))
+        self.assertFalse(os.path.exists(mzmlfn2))
+        self.assertTrue(mzsfl_q_stor.filter(purged=False).exists())
+        self.assertTrue(mzsfl_q_tmp.filter(purged=True).exists())
+        self.run_job() # running rsync
+        self.assertTrue(mzsfl_q_tmp.filter(purged=False).exists())
+        self.run_job() # setting to done
+        j2 = jm.Job.objects.last()
+        self.assertEqual(j2.state, 'done')
+        t = j2.task_set.first()
+        self.assertTrue(os.path.exists(mzmlfn2))
 
 
 class TestRefineMzmls(MzmlTests):

@@ -3,7 +3,13 @@ services:
         depends_on:
             - db
             - mq
-            - storage_mvfiles
+            - analysis1
+            - storage_queue_1
+            - storage_fastqueue_1
+            - storage_queue_2
+            - storage_fastqueue_2
+            - storage_ssh_1
+            - storage_ssh_2
             - storage_downloads
             - storage_web_rsync
             - tulos_ingester
@@ -60,13 +66,17 @@ services:
             file: docker-compose-base.yml
             service: mq
 
-    storage_mvfiles:
+    # Storage controller actual SSH port lives in different container,
+    # storage_ssh_1 since we need CMD service ssh start -D for that
+    # this container and that one together represent the storage controller.
+    # Same goes for controller 2
+    storage_queue_1:
         extends:
             file: ./docker-compose-dev.yml
             service: storage
         env_file:
             - testing.env
-        command: celery -A kantele worker -Q mv_md5_storage -n storage_mv.%h --concurrency=1
+        command: celery -A kantele worker -Q storage1__rsyncstorage -n storage_mv.%h --concurrency=1
         volumes:
             # Overwrite dev storage here
             - type: bind
@@ -78,6 +88,89 @@ services:
             WEBSHARE: '/storage/web'
             ANALYSISSHARE: '/storage/analysis'
             STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
+
+    storage_fastqueue_1:
+        extends:
+            file: ./docker-compose-dev.yml
+            service: storage
+        env_file:
+            - testing.env
+        command: celery -A kantele worker -Q storage1__fastfnop -n storage_mv.%h --concurrency=1
+        volumes:
+            # Overwrite dev storage here
+            - type: bind
+              source: ../../data/teststorage
+              target: /storage
+        environment:
+            KANTELEHOST: web
+            TMPSHARE: '/storage/tmp'
+            WEBSHARE: '/storage/web'
+            ANALYSISSHARE: '/storage/analysis'
+            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
+
+
+    storage_ssh_1:
+        image: rsync_stor
+        build:
+            context: ../
+            dockerfile: ./docker/Dockerfile
+            target: rsync_storage
+            args:
+                USER_ID: "${USER_ID:-You must run export USER_ID}"
+                GROUP_ID: "${GROUP_ID:-You must run export GROUP_ID}"
+        volumes:
+            - ./test_rsync_sshkey.pub:/home/kantele/.ssh/authorized_keys
+            - type: bind
+              source: ../../data/teststorage
+              target: /storage
+
+    storage_queue_2:
+        extends:
+            file: ./docker-compose-dev.yml
+            service: storage
+        env_file:
+            - testing.env
+        command: celery -A kantele worker -Q storage2__rsyncstorage -n storage_mv.%h --concurrency=1
+        volumes:
+            # Overwrite dev storage here
+            - type: bind
+              source: ../../data/teststorage
+              target: /storage
+        environment:
+            KANTELEHOST: web
+            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
+
+    storage_fastqueue_2:
+        extends:
+            file: ./docker-compose-dev.yml
+            service: storage
+        env_file:
+            - testing.env
+        command: celery -A kantele worker -Q storage2__fastfnop -n storage_mv.%h --concurrency=1
+        volumes:
+            # Overwrite dev storage here
+            - type: bind
+              source: ../../data/teststorage
+              target: /storage
+        environment:
+            KANTELEHOST: web
+            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
+
+
+    storage_ssh_2:
+        image: rsync_stor
+        build:
+            context: ../
+            dockerfile: ./docker/Dockerfile
+            target: rsync_storage
+            args:
+                USER_ID: "${USER_ID:-You must run export USER_ID}"
+                GROUP_ID: "${GROUP_ID:-You must run export GROUP_ID}"
+        volumes:
+            - ./test_rsync_sshkey.pub:/home/kantele/.ssh/authorized_keys
+            - type: bind
+              source: ../../data/teststorage
+              target: /storage
 
     tulos_ingester:
       env_file:
@@ -139,21 +232,38 @@ services:
             RSYNC_SSHPORT: "${RSYNC_SSHPORT}"
             HOST_UPLOADDIR: /storage/uploads
 
-              #    analysis:
-              #      #        extends:
-              #      #            file: docker-compose-base.yml
-              #      #            service: web
-              #        depends_on:
-              #            - web
-              #        command: celery -A kantele worker -Q test_analysis -n analysis.%h --concurrency=1
-              #        env_file:
-              #            - src/docker/testing.env
-              #        volumes:
-              #            - type: bind
-              #              source: ../backend
-              #              target: /kantele
-              #        environment:
-              #            KANTELEHOST: web
+    analysis1:
+        image: nextflow
+        build:
+            context: ../
+            dockerfile: ./docker/Dockerfile
+            target: nextflow
+            args:
+                USER_ID: "${USER_ID:-You must run export USER_ID}"
+                GROUP_ID: "${GROUP_ID:-You must run export GROUP_ID}"
+        command: celery -A kantele worker -Q analysis1__nextflow -n analysis.%h --concurrency=1
+        env_file:
+            - testing.env
+        volumes:
+            - type: bind
+              source: ../backend
+              target: /kantele
+            - type: bind
+              source: ../../data/teststorage
+              target: /storage
+        environment:
+            KANTELEHOST: web
+            PROTOCOL: http
+            RABBITHOST: mq
+            RABBIT_VHOST: "${RABBIT_VHOST}"
+            RABBITUSER: "${RABBITUSER:-guest}"
+            RABBITPASS: "${RABBITPASS:-guest}"
+            ANALYSISSHARE: '/storage/analysis'
+            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
+            NXF_COMMAND: 'python3'
+            NEXTFLOW_RUNDIR: '/storage/nf_runs'
+            APIKEY: "${APIKEY_ANALYSIS}"
+
 
     upload_bay_rsync:
         image: rsync_stor

@@ -918,7 +918,8 @@ def create_mzmls(request):
         return JsonResponse({'error': 'This dataset already has existing mzML files of that '
             'proteowizard version'}, status=403)
     rawsfl = filemodels.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=dset,
-            active=True, sfile__mzmlfile__isnull=True, servershare__server__is_analysis=True)
+            active=True, sfile__mzmlfile__isnull=True,
+            servershare__fileservershare__server__is_analysis=True)
     if not rawsfl.count():
         return JsonResponse({'error': 'This dataset does not have its raw files on a server with '
             'analysis capability, please make sure it is correctly stored'}, status=403)

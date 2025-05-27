@@ -32,10 +32,11 @@ class BaseTest(TestCase):
 
     def setUp(self):
         # Clean directory containing storage servers
-        for dirname in os.listdir('/storage'):
-            if os.path.isdir(os.path.join('/storage', dirname)):
-                shutil.rmtree(os.path.join('/storage', dirname))
-        shutil.copytree('/fixtures', '/storage', dirs_exist_ok=True)
+        rootdir = '/storage'
+        for dirname in os.listdir(rootdir):
+            if os.path.isdir(os.path.join(rootdir, dirname)):
+                shutil.rmtree(os.path.join(rootdir, dirname))
+        shutil.copytree('/fixtures', rootdir, dirs_exist_ok=True)
         self.cl = Client()
         username='testuser'
         email = 'test@test.com'
@@ -43,20 +44,31 @@ class BaseTest(TestCase):
         self.user = User(username=username, email=email)
         self.user.set_password(password)
         self.user.save() 
+        dm.Operator.objects.create(user=self.user) # need operator for QC jobs, analysis check-in
         self.cl.login(username=username, password=password)
         # storage backend
-        self.newfserver, _ = rm.FileServer.objects.get_or_create(name='server1', uri='s1.test',
-                fqdn='sameserver')
-        self.sstmp = rm.ServerShare.objects.create(name=settings.TMPSHARENAME, server=self.newfserver,
-                share='/home/testtmp', max_security=1)
+        self.storagecontroller = rm.FileServer.objects.create(name='storage1', uri='s1.test',
+                fqdn='storage_ssh_1', can_rsync=True, is_analysis=False, rsyncusername='kantele',
+                rsynckeyfile='/kantelessh/rsync_key')
+        self.anaserver = rm.FileServer.objects.create(name='analysis1', uri='ana.test',
+                fqdn='analysis', is_analysis=True, rsyncusername='kantele')
+        self.sstmp = rm.ServerShare.objects.create(name=settings.TMPSHARENAME, max_security=1)
+        rm.FileserverShare.objects.create(server=self.storagecontroller, share=self.sstmp,
+                path=os.path.join(rootdir, 'tmp'))
         self.ssnewstore = rm.ServerShare.objects.create(name=settings.PRIMARY_STORAGESHARENAME,
-                server=self.newfserver, share='/home/storage', max_security=1)
-        self.archivestore = rm.ServerShare.objects.create(name=settings.ARCHIVESHARENAME,
-                server=self.newfserver, share='/home/archive', max_security=1)
-        self.oldfserver = rm.FileServer.objects.create(name='oldserver', uri='s0.test',
-                fqdn='sameserver')
+                max_security=1)
+        self.newstorctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
+                share=self.ssnewstore, path=os.path.join(rootdir, 'newstorage'))
+        rm.FileserverShare.objects.create(server=self.anaserver, share=self.ssnewstore,
+                path=os.path.join(rootdir, 'newstorage'))
+
+        self.remoteserver = rm.FileServer.objects.create(name='storage2', uri='s0.test',
+                fqdn='storage_ssh_2', can_rsync=False, is_analysis=False, rsyncusername='kantele',
+                rsynckeyfile='/kantelessh/rsync_key')
         self.ssoldstorage = rm.ServerShare.objects.create(name=settings.STORAGESHARENAMES[0],
-                server=self.oldfserver, share='/home/storage', max_security=1)
+                max_security=1)
+        self.oldstorctrl = rm.FileserverShare.objects.create(server=self.remoteserver,
+                share=self.ssoldstorage, path=os.path.join(rootdir, 'oldstorage'))
 
         # Species / sampletype fill
         self.spec1, _ = dm.Species.objects.get_or_create(linnean='species1', popname='Spec1')

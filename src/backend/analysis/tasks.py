@@ -96,7 +96,7 @@ def run_nextflow(run, params, rundir, gitwfdir, profiles, nf_version, scratchdir
     print('Checked out repo {} at commit {}'.format(run['repo'], run['wf_commit']))
     # There will be files inside data dir of WF repo so we must be in
     # that dir for WF to find them
-    cmd = [settings.NXF_COMMAND, 'run', run['nxf_wf_fn'], *params, '--outdir', outdir, '-profile', profiles, '-with-trace', '-resume']
+    cmd = [*settings.NXF_COMMAND, run['nxf_wf_fn'], *params, '--outdir', outdir, '-profile', profiles, '-with-trace', '-resume']
     env = os.environ
     env['NXF_VER'] = nf_version
     if scratchdir:
@@ -131,7 +131,7 @@ def log_analysis(analysis_id, message):
 
 
 @shared_task(bind=True)
-def run_nextflow_workflow(self, run, params, stagefiles, profiles, nf_version):
+def run_nextflow_workflow(self, run, params, paramfiles, stagefiles, profiles, nf_version, scratchdir):
     print('Got message to run nextflow workflow, preparing')
     # Init
     postdata = {'client_id': settings.APIKEY,
@@ -141,7 +141,7 @@ def run_nextflow_workflow(self, run, params, stagefiles, profiles, nf_version):
 
     # stage files, create dirs etc
     params, gitwfdir, infiledir_or_nostage = prepare_nextflow_run(run, self.request.id, rundir,
-            stagefiles, run['infiles'], params)
+            stagefiles, params, scratchdir)
     if infiledir_or_nostage:
         stagedir_to_rm = os.path.split(infiledir_or_nostage)[0]
     else:
@@ -176,7 +176,7 @@ def run_nextflow_workflow(self, run, params, stagefiles, profiles, nf_version):
                 fp.write(f'\n{fn}')
         params.extend(['--oldmzmldef', os.path.join(rundir, 'oldinputdef.txt')])
     params = [x if x != 'RUNNAME__PLACEHOLDER' else run['runname'] for x in params]
-    outfiles = execute_normal_nf(run, params, rundir, gitwfdir, self.request.id, nf_version, profiles)
+    outfiles = execute_normal_nf(run, params, rundir, gitwfdir, self.request.id, nf_version, profiles, scratchdir)
     postdata.update({'state': 'ok'})
 
     fileurl = urljoin(settings.KANTELEHOST, reverse('jobs:internalfiledone'))
@@ -320,7 +320,7 @@ def prepare_nextflow_run(run, taskid, rundir, stageparamfiles, params, stagescra
                 raise
         else:
             try:
-                copy_stage_files(stage_or_linkdir, files)
+                link_stage_files(stage_or_linkdir, files)
             except Exception:
                 taskfail_update_db(taskid, f'Could not stage files for {flag} for analysis')
                 raise
@@ -595,5 +595,5 @@ def transfer_resultfile(outfullpath, dstpath, fn, dstsharename, url, token, task
                 'json': (None, json.dumps(postdata), 'application/json')})
     # Also here, somewhat complex POST to get JSON and files in same request
     else:
-        response = update_db(url, files={'json': (None, json.dumps(postdata), 'application/json')})
+        response = update_db(url, json=postdata)
     response.raise_for_status()

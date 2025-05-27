@@ -383,7 +383,6 @@ class TestUploadScript(BaseIntegrationTest):
         self.uploadtoken = rm.UploadToken.objects.create(user=self.user, token=self.token,
                 expires=timezone.now() + timedelta(settings.TOKEN_RENEWAL_WINDOW_DAYS + 1), expired=False,
                 producer=self.prod, filetype=self.ft, uploadtype=rm.UploadFileType.RAWFILE)
-        dm.Operator.objects.create(user=self.user) # need operator for QC jobs
         fpath = os.path.join(settings.SHAREMAP[self.f3sss.servershare.name], self.f3sss.path)
         fullp = os.path.join(fpath, self.f3sf.filename)
         with open(os.path.join(fullp, 'HyStarMetadata_template.xml')) as fp:

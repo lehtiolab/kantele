@@ -32,6 +32,16 @@ $DOCKERCMD up --detach db mq
 echo Created db container and started it
 sleep 5
 
+echo Init fixture repo
+if [ ! -e data/test/nfrepo/.git ]
+then
+	cd data/test/nfrepo
+	git init
+	git add *.py
+	git commit -m 'test fixtures'
+	cd ../../../
+fi
+
 echo Running tests
 # Run tests
 

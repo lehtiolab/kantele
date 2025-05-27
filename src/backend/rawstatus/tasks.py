@@ -122,33 +122,43 @@ def download_px_file_raw(self, ftpurl, ftpnetloc, sf_id, raw_id, shasum, size, s
 
 
 @shared_task(bind=True)
-def rsync_files_to_servershares(self, srcsharename, srcpath, srcserver_url, dstserver_url,
-        dstsharename, dstpath, dstshare_remote_path, dst_rsync_user, dst_rsync_key, fns, upd_sfl_ids):
-    '''Uses rsync to copy a dataset to other servershare. Files are rsynced
+def rsync_files_to_servershares(self, src_user, srcserver_url, srcpath, dst_user, dstserver_url,
+        dstbasepath, dstpath, rsync_key, fns, upd_sfl_ids):
+    '''Uses rsync to copy a dataset to other servershare. Can push or pull, depending
+    on where file is,   
+    Files are rsynced
     one at a time, for more control in case there's some anomaly in the dataset folder.
     This is always run on the storage controller, which has access to local but not
     external cluster shares - so an only transfer files FROM the local storage.
     Clarification:
+    dstbasepath - /mnt/rawdata, /hpc/stor/proj123/raw
     dstpath - proj/exp/run (dset path)
-    dstshare_remote_path - /crex/proj/abc2025-123/raw (base remote path in case on SSH remote)
     '''
     for srcfn in fns:
         # Dont compress, tests with raw data just make it slower and likely
         # the raw data is already fairly well compressed.
         cmd = ['rsync', '-av', '--mkpath']
-        if srcserver_url != dstserver_url:
-            # two different controllers -> rsync over ssh
-            cmd.extend(['-e', f'ssh -l {dst_rsync_user} -i {dst_rsync_key}'])
-            dstfpath = f'{dstserver_url}:{os.path.join(dstshare_remote_path, dstpath, srcfn)}'
-        else:
+        if srcserver_url == dstserver_url:
             # same controller on src and dst -> rsync over mounts
-            dstfpath = os.path.join(settings.SHAREMAP[dstsharename], dstpath, srcfn)
-        srcfpath = os.path.join(settings.SHAREMAP[srcsharename], srcpath, srcfn)
+            srcfpath = os.path.join(srcpath, srcfn)
+            dstfpath = os.path.join(dstbasepath, dstpath, srcfn)
+        elif src_user:
+            # two different controllers -> rsync over ssh, src is remote, pull from src
+            cmd.extend(['-e', f'ssh -l {src_user} -i {rsync_key} -o StrictHostKeyChecking=no'])
+            srcfpath = f'{srcserver_url}:{os.path.join(srcpath, srcfn)}'
+            dstfpath = os.path.join(dstbasepath, dstpath, srcfn)
+        elif dst_user:
+            # two different controllers -> rsync over ssh, dst is remote, push to dst
+            cmd.extend(['-e', f'ssh -l {dst_user} -i {rsync_key} -o StrictHostKeyChecking=no'])
+            srcfpath = os.path.join(srcpath, srcfn)
+            dstfpath = f'{dstserver_url}:{os.path.join(dstbasepath, dstpath, srcfn)}'
+        else:
+            raise RuntimeError('Rsync demanded but neither src not dst user specified')
         cmd.extend([srcfpath, dstfpath])
         try:
             subprocess.run(cmd, check=True)
-        except subprocess.CalledProcessError:
-            print('Failed to run', cmd)
+        except subprocess.CalledProcessError as e:
+            print('Failed to run:', cmd)
             try:
                 self.retry(countdown=60)
             except MaxRetriesExceededError:
@@ -158,8 +168,8 @@ def rsync_files_to_servershares(self, srcsharename, srcpath, srcserver_url, dsts
     # controller server
 
     # report finished
-    fnpostdata = {'sfloc_ids': upd_sfl_ids, 'servershare': dstsharename,
-            'dst_path': dstpath, 'client_id': settings.APIKEY, 'task': self.request.id}
+    fnpostdata = {'sfloc_ids': upd_sfl_ids, 'dst_path': dstpath, 'client_id': settings.APIKEY,
+            'task': self.request.id}
     fnurl = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
     update_db(fnurl, json=fnpostdata)
 
@@ -272,7 +282,6 @@ def delete_file(self, servershare, path, fname, sfloc_id, is_dir=False):
     msg = f'after succesful deletion of fn {path}/{fname}. {{}}'
     url = urljoin(settings.KANTELEHOST, reverse('jobs:deletefile'))
     postdata = {'sfloc_id': sfloc_id, 'task': self.request.id, 'client_id': settings.APIKEY}
-    print(postdata)
     try:
         update_db(url, postdata, msg)
     except RuntimeError:
