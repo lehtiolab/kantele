@@ -137,7 +137,7 @@ def run_nextflow_workflow(self, run, params, paramfiles, stagefiles, profiles, n
     postdata = {'client_id': settings.APIKEY,
                 'analysis_id': run['analysis_id'], 'task': self.request.id,
                 'name': run['runname'], 'user': run['outdir']}
-    rundir = create_runname_dir(run)
+    rundir = create_runname_dirname(run)
 
     # stage files, create dirs etc
     params, gitwfdir, infiledir_or_nostage = prepare_nextflow_run(run, self.request.id, rundir,
@@ -204,70 +204,48 @@ def run_nextflow_workflow(self, run, params, paramfiles, stagefiles, profiles, n
 
 
 @shared_task(bind=True)
-def refine_mzmls(self, run, params, mzmls, stagefiles, profiles, nf_version):
+def refine_mzmls(self, run, params, mzmls, stagefiles, profiles, nf_version, stagescratchdir):
     print('Got message to run mzRefine workflow, preparing')
-    rundir = create_runname_dir(run)
-    params, gitwfdir, infiledir_or_nostage = prepare_nextflow_run(run, self.request.id, rundir, stagefiles, mzmls, params)
-    if infiledir_or_nostage:
-        stagedir_to_rm = os.path.split(infiledir_or_nostage)[0]
-        infile_target_dir = infiledir_or_nostage
+    rundir = create_runname_dirname(run)
+    params, gitwfdir, stagedir, scratchdir = prepare_nextflow_run(run, self.request.id, rundir,
+            stagefiles, params, stagescratchdir)
+    if stagedir:
+        mzmldir = os.path.join(stagedir, 'mzmls')
+        try:
+            os.makedirs(mzmldir, exist_ok=True)
+        except (OSError, PermissionError):
+            taskfail_update_db(taskid, 'Could not create stage dir on analysis server')
+            raise
+        stage_mzmls = [[x['srcpath'], x['fn']] for x in mzmls]
+        copy_stage_files(mzmldir, stage_mzmls)
+        mzmls_def = [os.path.join(mzmldir, x['fn']) for x in mzmls]
     else:
-        stagedir_to_rm = False
-        # No stageing on system -> we need to copy mzml to rundir, symlinks made below
-        # will not be accessible to container. We could also change the names
-        # of the actual mzML files temporarily in a pre-refine-job
-        infile_target_dir = os.path.join(rundir, 'infile_links')
-        os.makedirs(infile_target_dir, exist_ok=True)
+        mzmls_def = [os.path.join(x['srcpath'], x['fn']) for x in mzmls]
+
     with open(os.path.join(rundir, 'mzmldef.txt'), 'w') as fp:
-        for fn in mzmls:
-            fntarget = os.path.join(infile_target_dir, f'{fn["mzsflocid"]}___{fn["fn"]}')
-            fp.write(f'{fntarget}\n')
-            # Create link or staged mzML:
-            if infiledir_or_nostage:
-                fnpath = os.path.join(infiledir_or_nostage, fn['fn'])
-                if not os.path.exists(fntarget):
-                    os.symlink(fnpath, fntarget)
-            else:
-                # if not stageing but direct pulling from server, files will not
-                # be accessible to container if we make links to the rundir, so we 
-                # will copy them here, "stage them anyway"
-                fnpath = os.path.join(settings.SHAREMAP[fn['servershare']], fn['path'], fn['fn'])
-                if os.path.exists(fntarget) and os.path.getsize(fntarget) != os.path.getsize(fnpath):
-                    # file exists but is not correct, delete first
-                    os.remove(fntarget)
-                if not os.path.exists(fntarget):
-                    try:
-                        shutil.copy(fnpath, fntarget)
-                    except FileNotFoundError:
-                        taskfail_update_db(self.request.id, f'Could not stage mzML files for refine, '
-                                'file {fn["fn"]} does not exist with path {fnpath}')
-                    except Exception:
-                        taskfail_update_db(self.request.id, f'Unknown error, could not stage mzML files '
-                                'for refine')
+        for fn in mzmls_def:
+            fp.write(f'{fn}\n')
     params.extend(['--input', os.path.join(rundir, 'mzmldef.txt')])
-    outfiles = execute_normal_nf(run, params, rundir, gitwfdir, self.request.id, nf_version, profiles)
+    outfiles = execute_normal_nf(run, params, rundir, gitwfdir, self.request.id, nf_version, profiles, scratchdir)
     outfiles_db = {}
-    fileurl = urljoin(settings.KANTELEHOST, reverse('jobs:mzmlfiledone'))
-    outfullpath = os.path.join(settings.SHAREMAP[run['dstsharename']], run['runname'])
-    try:
-        os.makedirs(outfullpath, exist_ok=True)
-    except (OSError, PermissionError):
-        taskfail_update_db(self.request.id, 'Could not create output directory for analysis results')
-        raise
+    for outfn in outfiles:
+        path, fn = os.path.split(outfn)
+        outfiles_db[fn] = outfn
+    fileurl = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
     token = False
-    for fn in outfiles:
+    print(outfiles_db)
+    for fn in mzmls:
         token = check_in_transfer_client(self.request.id, token, settings.ANALYSIS_FT_NAME)
-        mzsfloc_id, newname = os.path.basename(fn).split('___')
-        transfer_resultfile(outfullpath, run['runname'], fn, run['dstsharename'], fileurl, token,
-                self.request.id, mzsfloc_id, calc_md5(fn), newname)
+        transfer_resultfile(run['dstsharepath'], run['dstpath'], outfiles_db[fn['refinedname']], 
+                fileurl, token, self.request.id, fn['refinedpk'], calc_md5(outfiles_db[fn['refinedname']]), fn['refinedname'])
     reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:analysisdone'))
     postdata = {'client_id': settings.APIKEY, 'analysis_id': run['analysis_id'],
             'task': self.request.id, 'name': run['runname'], 'user': run['user'], 'state': 'ok'}
-    report_finished_run(reporturl, postdata, stagedir_to_rm, rundir, run['analysis_id'])
+    report_finished_run(reporturl, postdata, stagedir, rundir, run['analysis_id'])
     return run
 
 
-def create_runname_dir(run):
+def create_runname_dirname(run):
     return os.path.join(settings.NF_RUNDIR, run['runname']).replace(' ', '_')
 
 
@@ -294,36 +272,27 @@ def prepare_nextflow_run(run, taskid, rundir, stageparamfiles, params, stagescra
             taskfail_update_db(taskid, 'Could not create stage/scratch dirs on analysis server')
             raise
     else:
-        stagedir, scratchdir = False, False
+        stagedir = os.path.join(rundir, 'stage')
+        scratchdir = False
     for flag, files in stageparamfiles.items():
         # Always stage these so they end up in workdirs of their own. In case of multifile
         # on a param, or when having a scratchdir in place
-        if stagedir:
-            stage_or_linkdir = os.path.join(stagedir, flag.replace('--', ''))
-        else:
-            stage_or_linkdir = os.path.join(rundir, 'stage', flag.replace('--', ''))
+        stagedir_param = os.path.join(stagedir, flag.replace('--', ''))
         if len(files) > 1:
-            dst = os.path.join(stage_or_linkdir, '*')
+            dst = os.path.join(stagedir_param, '*')
         else:
-            dst = os.path.join(stage_or_linkdir, files[0][2])
+            dst = os.path.join(stagedir_param, files[0][1])
         params.extend([flag, dst])
         try:
-            os.makedirs(stage_or_linkdir, exist_ok=True)
+            os.makedirs(stagedir_param, exist_ok=True)
         except Exception:
             taskfail_update_db(taskid, f'Could not create dir to stage files for {flag}')
             raise
-        if stagedir:
-            try:
-                copy_stage_files(stage_or_linkdir, files)
-            except Exception:
-                taskfail_update_db(taskid, f'Could not stage files for {flag} for analysis')
-                raise
-        else:
-            try:
-                link_stage_files(stage_or_linkdir, files)
-            except Exception:
-                taskfail_update_db(taskid, f'Could not stage files for {flag} for analysis')
-                raise
+        try:
+            copy_stage_files(stagedir_param, files)
+        except Exception:
+            taskfail_update_db(taskid, f'Could not stage files for {flag} for analysis')
+            raise
 
 #    if len(infiles) and settings.ANALYSIS_STAGESHARE:
 #        # If we run with a stageing disk, use it for all files, else
@@ -347,44 +316,13 @@ def prepare_nextflow_run(run, taskid, rundir, stageparamfiles, params, stagescra
     return params, gitwfdir, stagedir, scratchdir #, infiledir 
 
 
-def link_stage_files(linkdir, files):
-    not_needed_files = set(os.listdir(linkdir))
-    for fdata in files:
-        fpath = os.path.join(settings.SHAREMAP[fdata[0]], fdata[1], fdata[2])
-        fdst = os.path.join(linkdir, fdata[2])
-        try:
-            not_needed_files.remove(fdata[2])
-        except KeyError:
-            pass
-        if not os.path.exists(fdst):
-            os.symlink(fpath, fdst)
-        elif os.path.abspath(os.path.readlink(fdst)) != fpath:
-            # file/dir exists but is not correct, delete first
-            if not os.path.islink(fdst) and os.path.isdir(fdst):
-                shutil.rmtree(fdst)
-            else:
-                os.remove(fdst)
-            os.symlink(fpath, fdst)
-    # Remove obsolete files from linkdir
-    for fn in not_needed_files:
-        fpath = os.path.join(linkdir, fn)
-        # Defensive checking if exist, they come from a listdir op above
-        if os.path.exists(fpath) and not os.path.islink(fpath) and os.path.isdir(fpath):
-            shutil.rmtree(fpath)
-        elif os.path.exists(fpath):
-            os.remove(fpath)
-
-
 def copy_stage_files(stagefiledir, files):
-    '''
-    '''
     not_needed_files = set(os.listdir(stagefiledir))
-    # now actually copy
     for fdata in files:
-        fpath = os.path.join(settings.SHAREMAP[fdata[0]], fdata[1], fdata[2])
-        fdst = os.path.join(stagefiledir, fdata[2])
+        fpath = os.path.join(fdata[0], fdata[1])
+        fdst = os.path.join(stagefiledir, fdata[1])
         try:
-            not_needed_files.remove(fdata[2])
+            not_needed_files.remove(fdata[1])
         except KeyError:
             pass
         if os.path.exists(fdst) and not os.path.isdir(fpath) and os.path.getsize(fdst) == os.path.getsize(fpath):
@@ -442,12 +380,12 @@ def process_error_from_nf_log(logfile):
         return '\n'.join(errorlines)
 
 
-def execute_normal_nf(run, params, rundir, gitwfdir, taskid, nf_version, profiles):
+def execute_normal_nf(run, params, rundir, gitwfdir, taskid, nf_version, profiles, scratchdir):
     log_analysis(run['analysis_id'], 'Staging files finished, starting analysis')
     if not profiles:
         profiles = 'standard'
     try:
-        outdir = run_nextflow(run, params, rundir, gitwfdir, profiles, nf_version)
+        outdir = run_nextflow(run, params, rundir, gitwfdir, profiles, nf_version, scratchdir)
     except subprocess.CalledProcessError as e:
         errmsg = process_error_from_nf_log(os.path.join(gitwfdir, '.nextflow.log'))
         log_analysis(run['analysis_id'], 'Workflow crashed, reporting errors')
@@ -462,7 +400,7 @@ def execute_normal_nf(run, params, rundir, gitwfdir, taskid, nf_version, profile
     env['NXF_VER'] = nf_version
     logfields = ('task_id,hash,native_id,name,status,exit,submit,duration,realtime,pcpu,peak_rss'
             ',peak_vmem,rchar,wchar')
-    cmd = [settings.NXF_COMMAND, 'log', run['token'], '-f', logfields]
+    cmd = [settings.NXF_COMMAND[0], 'log', run['token'], '-f', logfields]
     nxf_log = subprocess.run(cmd, capture_output=True, text=True, cwd=gitwfdir, env=env)
     log_analysis(run['analysis_id'], 'Workflow finished, transferring result and'
                  f' cleaning. Full NF trace log: \n{nxf_log.stdout}')
@@ -556,22 +494,23 @@ def register_resultfile(fname, fpath, token):
         return False
 
 
-def transfer_resultfile(outfullpath, dstpath, fn, dstsharename, url, token, task_id,
+def transfer_resultfile(dstsharepath, dstpath, fn, url, token, task_id,
         sfl_id, reg_md5, newname, analysis_id=False, checksrvurl=False, is_fasta=False):
     '''Copies files from analyses to outdir on result storage.
     outfullpath is absolute destination dir for file
     dstpath is the path stored in Kantele DB (for users on the share of outfullpath)
     fn is absolute path to src file
     '''
-    dst = os.path.join(outfullpath, newname)
+    dst = os.path.join(dstsharepath, dstpath, newname)
     try:
         shutil.copy(fn, dst)
     except:
         taskfail_update_db(task_id, 'Errored when trying to copy files to analysis result destination')
         raise
     os.chmod(dst, 0o640)
+
     postdata = {'client_id': settings.APIKEY, 'sfloc_id': sfl_id, 'dst_path': dstpath,
-            'filename': newname, 'token': token, 'dstsharename': dstsharename,
+            'filename': newname, 'token': token, 
             'analysis_id': analysis_id, 'is_fasta': is_fasta}
     if calc_md5(dst) != reg_md5:
         msg = 'Copying error, MD5 of src and dst are different'

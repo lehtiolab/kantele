@@ -246,8 +246,9 @@ class ConvertDatasetMzml(DatasetJob):
     def process(self, **kwargs):
         dss = DatasetServer.objects.values('storageshare__name', 'storageshare_id', 'storage_loc',
                 'dataset_id').get(pk=kwargs['dss_id'])
-        ana_server = FileServer.objects.filter(is_analysis=True,
-                fileservershare__share__id=dss['storageshare_id']).values('name', 'scratchdir').first()
+        anashareserver = FileserverShare.objects.filter(server__is_analysis=True,
+                share_id=dss['storageshare_id']).values('server__name', 'server__scratchdir',
+                        'path').first()
         pwiz = Proteowizard.objects.get(pk=kwargs['pwiz_id'])
         runpath = f'{dss["dataset_id"]}_convert_mzml_{kwargs["timestamp"]}'
         nf_raws = []
@@ -255,8 +256,8 @@ class ConvertDatasetMzml(DatasetJob):
             # Have to line up the sfl with their dst mzml sfl ids, so we cant just oneline it
             mzsfl = StoredFileLoc.objects.values('pk', 'sfile__filename', 'sfile__filetype__name'
                     ).get(pk__in=kwargs['dstsfloc_ids'], sfile__rawfile_id=fn['sfile__rawfile_id'])
-            nf_raws.append((dss['storageshare__name'], dss['storage_loc'], fn['sfile__filename'],
-                mzsfl['pk'], mzsfl['sfile__filename']))
+            srcpath = os.path.join(anashareserver['path'], dss['storage_loc'])
+            nf_raws.append((srcpath, fn['sfile__filename'], mzsfl['pk'], mzsfl['sfile__filename']))
         if not nf_raws:
             return
         print(f'Queuing {len(nf_raws)} raw files for conversion')
@@ -266,7 +267,7 @@ class ConvertDatasetMzml(DatasetJob):
                'wf_commit': nfwf.commit,
                'nxf_wf_fn': nfwf.filename,
                'repo': nfwf.nfworkflow.repo,
-               'dstsharename': dss['storageshare__name'],
+               'dstsharepath': anashareserver['path'],
                'dstpath': dss['storage_loc'],
                'runname': runpath,
                }
@@ -275,9 +276,9 @@ class ConvertDatasetMzml(DatasetJob):
             p2parse = kwargs.get(pname, [])
             if len(p2parse):
                 params.extend(['--{}'.format(pname), ';'.join(p2parse)])
-        self.queue = self.get_server_based_queue(ana_server['name'], settings.QUEUE_NXF)
+        self.queue = self.get_server_based_queue(anashareserver['server__name'], settings.QUEUE_NXF)
         self.run_tasks.append((run, params, nf_raws, mzsfl['sfile__filetype__name'],
-            nfwf.nfversion, ','.join(nfwf.profiles), ana_server['scratchdir']))
+            nfwf.nfversion, ','.join(nfwf.profiles), anashareserver['server__scratchdir']))
 
 
 class DeleteDatasetPDCBackup(DatasetJob):

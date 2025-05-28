@@ -9,7 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_GET, require_POST
 from django.contrib.auth.models import User
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
-from django.db.models import Q, Sum, Count, F
+from django.db.models import Q, Sum, Count, F, Value
 from django.db.models.functions import Trunc
 from collections import OrderedDict, defaultdict
 
@@ -19,7 +19,7 @@ from analysis import models as anmodels
 from analysis import views as av
 from analysis import jobs as aj
 from datasets import jobs as dsjobs
-from datasets.views import check_ownership, get_dset_storestate, fill_sampleprepparam, populate_proj
+from datasets.views import check_ownership, get_dset_storestate, fill_sampleprepparam, populate_proj, get_source_sfloc_for_transfers
 from rawstatus import models as filemodels
 from rawstatus import views as rv
 from jobs import jobs as jj
@@ -917,6 +917,7 @@ def create_mzmls(request):
     if num_rawfns == mzmls_exist.filter(mzmlfile__pwiz=pwiz).count():
         return JsonResponse({'error': 'This dataset already has existing mzML files of that '
             'proteowizard version'}, status=403)
+    # Get all sfl which are on a share attached to analysis server
     rawsfl = filemodels.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=dset,
             active=True, sfile__mzmlfile__isnull=True,
             servershare__fileservershare__server__is_analysis=True)
@@ -939,15 +940,18 @@ def create_mzmls(request):
                 ).values('pk')]
             create_job('remove_dset_files_servershare', dss_id=dss['pk'], sfloc_ids=sfl_pk_rm)
     # Now queue the convert, then queue redistribution to other places
-    # Pick any analysis server:
+    # Pick one but any servershare which is reachable on an analysis server:
     source_ssid = rawsfl.values('servershare_id').first()['servershare_id']
     srcsfl_pk = [x['pk'] for x in rawsfl.filter(servershare_id=source_ssid).values('pk')]
     dss_id = dsmodels.DatasetServer.objects.filter(dataset=dset,
             storageshare_id=source_ssid).values('pk').get()['pk']
+    # we dont do error checking earlier, before deleting old mzML, because deleting those is fine
     mzjob = create_job('convert_dataset_mzml', options=options, filters=filters, dss_id=dss_id,
             pwiz_id=pwiz.pk, timestamp=datetime.strftime(datetime.now(), '%Y%m%d_%H.%M'),
             sfloc_ids=srcsfl_pk)
-    if mzjob['kwargs'].get('dstsfloc_ids', False):
+    if mzjob['error']:
+        pass
+    elif mzjob['kwargs'].get('dstsfloc_ids', False):
         for other_dss in dsmodels.DatasetServer.objects.filter(dataset=dset, active=True).exclude(
                 pk=dss_id).values('storageshare_id', 'pk'):
             # Put result files in all the other shares datasets
@@ -969,12 +973,16 @@ def refine_mzmls(request):
         return JsonResponse({'error': 'Dataset does not exist or is deleted'}, status=403)
     except KeyError:
         return JsonResponse({'error': 'Bad request data'}, status=400)
+
     # TODO qe and qehf are sort of same instrument type really for MSGF (but not qehfx)
-    ds_instype = dset.datasetrawfile_set.distinct('rawfile__producer__msinstrument__instrumenttype')
-    if ds_instype.count() > 1:
-        insts = ','.join(x.rawfile.producer.msinstrument.instrumenttype.name for x in ds_instype)
+    ds_instype_q = dset.datasetrawfile_set.distinct('rawfile__producer__msinstrument__instrumenttype')
+    if ds_instype_q.count() > 1:
+        insts = ','.join(x.rawfile.producer.msinstrument.instrumenttype.name for x in ds_instype_q)
         return JsonResponse({'error': 'Dataset contains data from multiple instrument types: '
             f'{insts} cannot convert all in the same way, separate them'}, status=403)
+    else:
+        instrument = ds_instype_q.values(name=Value('rawfile__producer__msinstrument__instrumenttype__name')
+                ).get()['name']
 
     # Check if existing normal/refined mzMLs (normal mzMLs can be deleted for this 
     # due to age, its just the number we need, but refined mzMLs should not be)
@@ -988,7 +996,21 @@ def refine_mzmls(request):
     if nr_mzml and nr_mzml == nr_refined:
         return JsonResponse({'error': 'Refined data already exists'}, status=403)
     elif not nr_exist_mzml or nr_exist_mzml < nr_dsrs:
+        # This also checks for accidental identical names of the files (shouldnt be possible
+        # inside a dataset, but still)
         return JsonResponse({'error': 'Need to create normal mzMLs before refining'}, status=403)
+
+    # Check if we have files on a server with analysis
+    mzmlsfl = filemodels.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=dset,
+            active=True, sfile__mzmlfile__isnull=False,
+            servershare__fileservershare__server__is_analysis=True)
+    # FIXME check if already exist refined files (active=True, same pipeline)
+    if not mzmlsfl.count():
+        return JsonResponse({'error': 'This dataset does not have its input mzML files on a server '
+            'with analysis capability, please make sure it is correctly stored'}, status=403)
+    # Pick one but any servershare which is reachable on an analysis server:
+    source_ssid = mzmlsfl.values('servershare_id').first()['servershare_id']
+
     # Check DB
     if dbid := data.get('dbid'):
         if filemodels.StoredFile.objects.filter(pk=dbid, filetype__name=settings.DBFA_FT_NAME).count() != 1:
@@ -1004,11 +1026,24 @@ def refine_mzmls(request):
     # Checks done, refine data, now we can start storing POST data
     # Move entire project if not on same file server (403 is checked before saving anything
     # or queueing jobs)
-    res_share = filemodels.ServerShare.objects.get(name=settings.MZMLINSHARENAME)
     # FIXME get analysis if it does exist, in case someone reruns?
-    analysis = anmodels.Analysis.objects.create(user=request.user, name=f'refine_dataset_{dset.pk}', editable=False)
-    job = create_job('refine_mzmls', dset_id=dset.pk, analysis_id=analysis.id, wfv_id=data['wfid'],
-            dstshare_id=res_share.pk, dbfn_id=dbid, qtype=dset.quantdataset.quanttype.shortname)
+    analysis = anmodels.Analysis.objects.create(user=request.user, name=f'refine_dataset_{dset.pk}',
+            editable=False)
+    srcsfl_pk = [x['pk'] for x in mzmlsfl.filter(servershare_id=source_ssid).values('pk')]
+    dss_id = dsmodels.DatasetServer.objects.filter(dataset=dset,
+            storageshare_id=source_ssid).values('pk').get()['pk']
+    job = create_job('refine_mzmls', dss_id=dss_id, analysis_id=analysis.id, wfv_id=data['wfid'],
+            sfloc_ids=srcsfl_pk, dbfn_id=dbid, qtype=dset.quantdataset.quanttype.shortname,
+            instrument=instrument)
+    if job['error']:
+        pass
+    elif job['kwargs'].get('dstsfloc_ids', False):
+        for other_dss in dsmodels.DatasetServer.objects.filter(dataset=dset, active=True).exclude(
+                pk=dss_id).values('storageshare_id', 'pk'):
+            # Put result files in all the other shares datasets
+            create_job('rsync_dset_files_to_servershare', dss_id=other_dss['pk'],
+                    sfloc_ids=job['kwargs']['dstsfloc_ids'],
+                    dstshare_id=other_dss['storageshare_id'])
     uwf = anmodels.UserWorkflow.objects.get(nfwfversionparamsets=data['wfid'],
             wftype=anmodels.UserWorkflow.WFTypeChoices.SPEC)
     anmodels.NextflowSearch.objects.update_or_create(analysis=analysis, defaults={

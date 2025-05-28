@@ -138,17 +138,17 @@ class BaseTest(TestCase):
         # Pwiz/mzml
         self.pset = am.ParameterSet.objects.create(name='pset_base')
         self.nfw = am.NextflowWorkflowRepo.objects.create(
-                description='repo_base desc', repo='repo_base')
-        wfv = am.NextflowWfVersionParamset.objects.create(update='pwiz wfv base',
-                commit='pwiz ci base', filename='pwiz.nf', nfworkflow=self.nfw,
+                description='repo_base desc', repo='/storage/nfrepo')
+        self.nfwv = am.NextflowWfVersionParamset.objects.create(update='pwiz wfv base',
+                commit='master', filename='pwiz.py', nfworkflow=self.nfw,
                 paramset=self.pset, nfversion='', active=True)
         self.pwiz = am.Proteowizard.objects.create(version_description='pwversion desc1',
-                container_version='', nf_version=wfv)
-        self.f3sfmz = rm.StoredFile.objects.create(rawfile=self.f3raw, filename=f'{fn3}.mzML',
+                container_version='0', nf_version=self.nfwv)
+        self.f3sfmz = rm.StoredFile.objects.create(rawfile=self.f3raw, filename=f'{os.path.splitext(fn3)[0]}.mzML',
                 md5='md5_for_f3sf_mzml', filetype=self.ft, checked=True)
         self.f3mzsss = rm.StoredFileLoc.objects.create(sfile=self.f3sfmz, servershare=self.ssnewstore,
                 path=self.storloc, active=True, purged=False)
-        am.MzmlFile.objects.create(sfile=self.f3sfmz, pwiz=self.pwiz)
+        self.f3mzml = am.MzmlFile.objects.create(sfile=self.f3sfmz, pwiz=self.pwiz)
 
         # Project/dataset/files on old storage
         oldfn = 'raw1'
@@ -192,12 +192,13 @@ class BaseTest(TestCase):
                 path='', active=True, purged=False)
 
         # Library files, for use as input, so claimed and ready
-        self.libraw = rm.RawFile.objects.create(name='libfiledone', producer=self.prod,
+        lft = rm.StoredFileType.objects.create(name=settings.DBFA_FT_NAME, filetype='fasta',
+                is_rawdata=False)
+        self.libraw = rm.RawFile.objects.create(name='db.fa', producer=self.prod,
                 source_md5='libfilemd5', size=100, claimed=True, date=timezone.now())
-
         self.sflib = rm.StoredFile.objects.create(rawfile=self.libraw, md5=self.libraw.source_md5,
-        filetype=self.ft, checked=True, filename=self.libraw.name)
-        rm.StoredFileLoc.objects.create(sfile=self.sflib, servershare=self.ssnewstore, path='',
+                filetype=lft, checked=True, filename=self.libraw.name)
+        rm.StoredFileLoc.objects.create(sfile=self.sflib, servershare=self.ssnewstore, path='libfiles',
                 active=True, purged=False)
         self.lf = am.LibraryFile.objects.create(sfile=self.sflib, description='This is a libfile')
 
@@ -205,10 +206,12 @@ class BaseTest(TestCase):
         self.uft = rm.StoredFileType.objects.create(name='ufileft', filetype='tst', is_rawdata=False)
 
         # Analysis files
+        anaft = rm.StoredFileType.objects.create(name=settings.ANALYSIS_FT_NAME, filetype='ana',
+                is_rawdata=False)
         self.anaprod = rm.Producer.objects.create(name='analysisprod', client_id=settings.ANALYSISCLIENT_APIKEY, shortname=settings.PRODUCER_ANALYSIS_NAME)
         self.ana_raw, _ = rm.RawFile.objects.get_or_create(name='ana_file', producer=self.anaprod, source_md5='kjlmnop1234',
                 size=100, defaults={'date': timezone.now(), 'claimed': True})
-        self.anasfile = rm.StoredFile.objects.create(rawfile=self.ana_raw, filetype_id=self.ft.id,
+        self.anasfile = rm.StoredFile.objects.create(rawfile=self.ana_raw, filetype=anaft, #self.ft.id,
 
                 filename=self.ana_raw.name, md5=self.ana_raw.source_md5)
         rm.StoredFileLoc.objects.create(sfile=self.anasfile, servershare=self.sstmp, path='',
@@ -216,7 +219,7 @@ class BaseTest(TestCase):
         self.ana_raw2, _ = rm.RawFile.objects.get_or_create(name='ana_file2', producer=self.anaprod,
                 source_md5='anarawabc1234', size=100, defaults={'date': timezone.now(), 'claimed': True})
         self.anasfile2 = rm.StoredFile.objects.create(rawfile=self.ana_raw2,
-                filetype_id=self.ft.id, filename=self.ana_raw2.name, filetype=self.ft,
+                filetype_id=self.ft.id, filename=self.ana_raw2.name, filetype=anaft, #self.ft,
                     md5=self.ana_raw2.source_md5)
         rm.StoredFileLoc.objects.create(sfile=self.anasfile2, servershare=self.sstmp, path='',
                 active=True, purged=False)

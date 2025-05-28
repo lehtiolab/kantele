@@ -11,20 +11,9 @@ from jobs import models as jm
 from jobs.jobs import Jobstates
 
 
-class MzmlTests(BaseTest):
+class MzmlTests(BaseIntegrationTest):
     def setUp(self):
         super().setUp()
-        # workflow stuff
-        ps = am.ParameterSet.objects.create(name='')
-        nfw = am.NextflowWorkflowRepo.objects.create(description='', repo='')
-        self.nfwv = am.NextflowWfVersionParamset.objects.create(update='', commit='', filename='',
-                nfworkflow=nfw, paramset=ps, nfversion='', active=True)
-        self.pw = am.Proteowizard.objects.create(version_description='',
-                container_version='', nf_version=self.nfwv, is_docker=True)
-
-        # Stored files input
-        self.ssmzml = rm.ServerShare.objects.create(name=settings.MZMLINSHARENAME, 
-                server=self.newfserver, share='/home/mzmls', max_security=1)
         self.ft = rm.StoredFileType.objects.create(name='Thermo raw', filetype='raw')
         self.prodqe = rm.Producer.objects.create(name='qe_prod', client_id='qe_abcdefg',
                 shortname='qep1')
@@ -36,23 +25,12 @@ class MzmlTests(BaseTest):
                 instrumenttype=self.qe, filetype=self.ft)
         insttims = rm.MSInstrument.objects.create(producer=self.prodtims,
                 instrumenttype=self.tims, filetype=self.ft)
-        own1, _ = dm.DatasetOwner.objects.get_or_create(dataset=self.ds, user=self.user)
-        self.run = dm.RunName.objects.create(name=self.id(), experiment=self.exp1)
-        self.storloc = os.path.join(self.p1.name, self.exp1.name, self.run.name) 
-        self.ds = dm.Dataset.objects.create(date=self.p1.registered, runname=self.run,
-                datatype=self.dtype, storageshare=self.ssnewstore, storage_loc=self.storloc,
-                securityclass=1)
-        dm.QuantDataset.objects.get_or_create(dataset=self.ds, quanttype=self.qt)
-        self.qeraw, _ = rm.RawFile.objects.update_or_create(name='file1', defaults={
-            'producer': self.prodqe, 'source_md5': '52416cc60390c66e875ee6ed8e03103a',
-            'size': 100, 'date': timezone.now(), 'claimed': True})
-        self.qesf = rm.StoredFile.objects.create(rawfile=self.qeraw, filename=self.qeraw.name,
-                md5=self.qeraw.source_md5, checked=True, filetype=self.ft)
-        self.qesss = rm.StoredFileLoc.objects.create(sfile=self.qesf,
-                servershare=self.ds.storageshare, path=self.storloc, purged=False, active=True)
-        self.timsraw = rm.RawFile.objects.create(name='file2', producer=self.prodtims,
-                source_md5='timsmd4', size=100, date=timezone.now(), claimed=True)
-        dm.DatasetRawFile.objects.update_or_create(rawfile=self.qeraw, defaults={'dataset': self.ds})
+        self.refinewf = am.NextflowWfVersionParamset.objects.create(update='refine wf',
+                commit='master', filename='refine.py', nfworkflow=self.nfw, paramset=self.pset, 
+                nfversion='', active=True)
+        wf = am.UserWorkflow.objects.create(name='refine', wftype=am.UserWorkflow.WFTypeChoices.SPEC,
+                public=False)
+        wf.nfwfversionparamsets.add(self.refinewf)
 
 
 class TestCreateMzmls(MzmlTests):
@@ -190,6 +168,32 @@ class TestCreateMzmls(MzmlTests):
         self.assertFalse(os.path.exists(mzmlfn1))
         self.assertFalse(os.path.exists(mzmlfn2))
         self.run_job()
+        self.assertTrue(os.path.exists(mzmlfn1))
+        self.assertFalse(os.path.exists(mzmlfn2))
+        self.run_job() # running rsync
+        self.run_job() # setting to done
+        j2 = jm.Job.objects.last()
+        self.assertEqual(j2.state, 'done')
+        self.assertTrue(os.path.exists(mzmlfn2))
+        refineurl = '/refinemzml/'
+        resp = self.cl.post(refineurl, content_type='application/json', data={'dsid': self.ds.pk,
+            'dbid': self.sflib.pk, 'wfid': self.refinewf.pk})
+        self.assertEqual(resp.status_code, 200)
+        jq = jm.Job.objects.filter(funcname='refine_mzmls')
+        self.assertTrue(jq.exists())
+        j = jq.get()
+        exp_kw = {'dss_id': self.dss.pk, 'wfv_id': self.refinewf.pk,
+                'dbfn_id': self.sflib.pk, 
+                #'dstshare_id': self.ssmzml.pk,
+                'qtype': self.ds.quantdataset.quanttype.shortname}
+        for k, val in exp_kw.items():
+            self.assertEqual(j.kwargs[k], val)
+        mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}_refined.mzML'
+        mzmlfn1 = os.path.join(self.f3path, mzmlfn)
+        mzmlfn2 = os.path.join(dss2_fpath, mzmlfn)
+        self.assertFalse(os.path.exists(mzmlfn1))
+        self.assertFalse(os.path.exists(mzmlfn2))
+        self.run_job() # refining
         self.assertTrue(os.path.exists(mzmlfn1))
         self.assertFalse(os.path.exists(mzmlfn2))
         self.run_job() # running rsync

@@ -54,3 +54,5 @@ else
     $DOCKERCMD run --use-aliases web $TESTCMD $1|| ($DOCKERCMD logs web storage_mvfiles storage_web_rsync storage_downloads tulos_ingester && exit 1)
 fi
 $DOCKERCMD down
+
+rm -rf data/test/nfrepo/.git
