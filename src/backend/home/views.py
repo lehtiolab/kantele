@@ -19,7 +19,7 @@ from analysis import models as anmodels
 from analysis import views as av
 from analysis import jobs as aj
 from datasets import jobs as dsjobs
-from datasets.views import check_ownership, get_dset_storestate, fill_sampleprepparam, populate_proj, get_source_sfloc_for_transfers
+from datasets.views import check_ownership, get_dset_storestate, fill_sampleprepparam, populate_proj
 from rawstatus import models as filemodels
 from rawstatus import views as rv
 from jobs import jobs as jj

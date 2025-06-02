@@ -136,7 +136,7 @@ class TestCreateMzmls(MzmlTests):
         self.assertEqual(j2.state, 'done')
         self.assertTrue(os.path.exists(mzmlfn2))
 
-    def test_create_mzml_qe_rsyncpush(self):
+    def test_create_mzml_qe_rsyncpush_and_refine(self):
         '''Run conversion and then push files to other server w rsync job'''
         rawfn = os.path.join(self.f3path, self.f3raw.name)
         dss2path = 'testdss2'
@@ -183,9 +183,7 @@ class TestCreateMzmls(MzmlTests):
         self.assertTrue(jq.exists())
         j = jq.get()
         exp_kw = {'dss_id': self.dss.pk, 'wfv_id': self.refinewf.pk,
-                'dbfn_id': self.sflib.pk, 
-                #'dstshare_id': self.ssmzml.pk,
-                'qtype': self.ds.quantdataset.quanttype.shortname}
+                'dbfn_id': self.sflib.pk, 'qtype': self.ds.quantdataset.quanttype.shortname}
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
         mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}_refined.mzML'
@@ -261,15 +259,8 @@ class TestRefineMzmls(MzmlTests):
 
     def setUp(self):
         super().setUp()
-        dbft = rm.StoredFileType.objects.create(name='database', filetype='tst', is_rawdata=False)
-        dbraw = rm.RawFile.objects.create(name='db.fa', producer=self.prod, source_md5='db.famd5',
-                size=100, date=timezone.now(), claimed=True)
-        self.dbsf = rm.StoredFile.objects.create(rawfile=dbraw, filename=dbraw.name,
-                    md5=dbraw.source_md5, filetype=dbft, checked=True)
-        rm.StoredFileLoc.objects.create(sfile=self.dbsf, servershare=self.ssnewstore, path=self.storloc,
-                purged=False, active=True)
         self.refinewf = am.NextflowWfVersionParamset.objects.create(update='refine wf',
-                commit='refine ci', filename='refine.nf', nfworkflow=self.nfw, paramset=self.pset, 
+                commit='master', filename='refine.py', nfworkflow=self.nfw, paramset=self.pset, 
                 nfversion='', active=True)
         wf = am.UserWorkflow.objects.create(name='refine', wftype=am.UserWorkflow.WFTypeChoices.SPEC,
                 public=False)
@@ -286,76 +277,64 @@ class TestRefineMzmls(MzmlTests):
         resp = self.cl.post(self.url, content_type='application/json', data={'dsid': 10000})
         self.assertEqual(resp.status_code, 403)
         self.assertIn('does not exist or is deleted', resp.json()['error'])
-        dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=self.timsraw)
-        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pw.pk,
+        timsraw = rm.RawFile.objects.create(name='file2', producer=self.prodtims,
+                source_md5='timsmd4', size=100, date=timezone.now(), claimed=True)
+        dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=timsraw)
+        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pwiz.pk,
             'dsid': self.ds.pk, 'dbid': self.sflib.pk})
         self.assertEqual(resp.status_code, 403)
         self.assertIn('contains data from multiple instrument types', resp.json()['error'])
 
     def test_existing_mzmls_no_db(self):
-        # no mzMLs exist yet
-        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pw.pk,
-            'dsid': self.ds.pk})
-        self.assertEqual(resp.status_code, 403)
-        self.assertIn('Need to create normal mzMLs', resp.json()['error'])
-
         # Not passed a db
-        am.MzmlFile.objects.create(sfile=self.qesf, pwiz=self.pw)
-        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pw.pk,
+        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pwiz.pk,
             'dsid': self.ds.pk})
         self.assertEqual(resp.status_code, 400)
         self.assertEqual('Must pass a database to refine with', resp.json()['error'])
 
+        # no mzMLs exist yet
+        self.f3mzml.delete()
+        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pwiz.pk,
+            'dsid': self.ds.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn('Need to create normal mzMLs', resp.json()['error'])
+
         # refined exists already
-        refinedsf = rm.StoredFile.objects.create(rawfile=self.qeraw, filename=f'{self.qeraw.name}_refined',
+        refinedsf = rm.StoredFile.objects.create(rawfile=self.f3raw, filename=f'{self.f3raw.name}_refined',
                 md5='refined_md5', checked=True, filetype=self.ft)
-        rm.StoredFileLoc.objects.create(sfile=refinedsf, servershare=self.ds.storageshare, path=self.storloc,
+        rm.StoredFileLoc.objects.create(sfile=refinedsf, servershare=self.dss.storageshare, path=self.storloc,
                 purged=False, active=True)
-        am.MzmlFile.objects.create(sfile=refinedsf, pwiz=self.pw, refined=True)
+        am.MzmlFile.objects.create(sfile=refinedsf, pwiz=self.pwiz, refined=True)
         resp = self.cl.post(self.url, content_type='application/json', data={'dsid': self.ds.pk})
         self.assertEqual(resp.status_code, 403)
 
-    def do_refine(self, ds):
-        resp = self.cl.post(self.url, content_type='application/json', data={'dsid': ds.pk,
-            'dbid': self.dbsf.pk, 'wfid': self.refinewf.pk})
+    def test_refine_mzml_move_dbfile(self):
+        '''Do a refine, test its correctness, then make sure there is no dataset servershare
+        move on the current dataset, unlike the test_with_filemove (old data to new share)'''
+        dbraw = rm.RawFile.objects.create(name='db2.fa', producer=self.prod,
+                source_md5='db2md5', size=100, claimed=True, date=timezone.now())
+        dbsf = rm.StoredFile.objects.create(rawfile=dbraw, md5=dbraw.source_md5,
+                filetype=self.lft, checked=True, filename=dbraw.name)
+        rm.StoredFileLoc.objects.create(sfile=dbsf, servershare=self.ssoldstorage, path='libfiles',
+                active=True, purged=False)
+        # Create a real mzML file to refine
+        with open(os.path.join(self.newstorctrl.path, self.f3mzsss.path, self.f3sfmz.filename), 'w') as fp:
+            pass
+        resp = self.cl.post(self.url, content_type='application/json', data={'dsid': self.ds.pk,
+            'dbid': dbsf.pk, 'wfid': self.refinewf.pk})
         self.assertEqual(resp.status_code, 200)
+        jdb = jm.Job.objects.first()
+        self.assertEqual(jdb.funcname, 'rsync_otherfiles_to_servershare')
         j = jm.Job.objects.last()
         self.assertEqual(j.funcname, 'refine_mzmls')
-        exp_kw = {'dset_id': self.ds.pk, 'wfv_id': self.refinewf.pk,
-                'dbfn_id': self.dbsf.pk, 'dstshare_id': self.ssmzml.pk,
+        exp_kw = {'dss_id': self.dss.pk, 'wfv_id': self.refinewf.pk, 'dbfn_id': dbsf.pk, 
                 'qtype': self.ds.quantdataset.quanttype.shortname}
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
-
-    def test_refine_mzml(self):
-        '''Do a refine, test its correctness, then make sure there is no dataset servershare
-        move on the current dataset, unlike the test_with_filemove (old data to new share)'''
-        am.MzmlFile.objects.create(sfile=self.qesf, pwiz=self.pw)
-        self.do_refine(self.ds)
-#        self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
-#            kwargs__dset_id=self.ds.pk).count(), 0)
-
-#    def test_with_filemove(self):
-#        # Create new dataset on old storage proj that can be mock-"moved"
-#        moverun = dm.RunName.objects.create(name='test_with_filemove_loc', experiment=self.oldexp)
-#        ds = self.ds
-#        ds.storage_loc = moverun.name
-#        ds.pk = None
-#        ds.storageshare = self.ssoldstorage
-#        ds.runname = moverun
-#        ds.save()
-#        dm.QuantDataset.objects.get_or_create(dataset=ds, quanttype=self.qt)
-#        # Add raw files (pk=None, save -> copy original object)
-#        qeraw = self.qeraw
-#        qeraw.pk, qeraw.source_md5 = None, 'refine_test_with_filemove'
-#        qeraw.save()
-#        dm.DatasetRawFile.objects.create(rawfile=qeraw, dataset=ds)
-#        qesf = self.qesf
-#        qesf.pk, qesf.md5 = None, qeraw.source_md5
-#        qesf.rawfile, qesf.filename = qeraw, qeraw.name
-#        qesf.save()
-#        rm.StoredFileLoc.objects.create(sfile=qesf, path=ds.storage_loc, servershare=ds.storageshare)
-#        am.MzmlFile.objects.create(sfile=qesf, pwiz=self.pw)
-#        self.do_refine(ds)
-#        self.assertEqual(jm.Job.objects.filter(funcname='move_dset_servershare',
-#            kwargs__dset_id=ds.pk).count(), 1)
+        self.run_job() # rsync db
+        mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}_refined.mzML'
+        mzmlfn1 = os.path.join(self.f3path, mzmlfn)
+        self.assertFalse(os.path.exists(mzmlfn1))
+        self.run_job() # refining
+        self.assertTrue(os.path.exists(mzmlfn1))
+        self.run_job() # setting to done

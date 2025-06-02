@@ -4,7 +4,8 @@ from urllib.parse import urlsplit, urlparse, urljoin
 import ftplib
 from datetime import datetime
 
-from rawstatus import tasks, models
+from rawstatus import tasks
+from rawstatus import models as rm
 from datasets import tasks as dstasks
 from datasets import models as dm
 from datasets.jobs import RsyncDatasetServershare, RemoveDatasetFilesFromServershare
@@ -21,12 +22,15 @@ def get_host_upload_dst(web_dst):
     return web_dst.replace(settings.TMP_UPLOADPATH, settings.HOST_UPLOADDIR, 1)
 
 
-class RsyncFileTransfer(RsyncDatasetServershare):
+class RsyncOtherFileServershare(SingleFileJob):
     '''Does the same as rsync dset, but for when files are not in a dataset
+
+    Dst path will be identical to src path, so it is not like for datasets, which can
+    have some elaborate path structure on researcher-accessible shares
     '''
-    refname = 'rsync_transfer_files'
+    refname = 'rsync_otherfiles_to_servershare'
+    queue = False
     task = tasks.rsync_files_to_servershares
-    queue = settings.QUEUE_FILE_DOWNLOAD
 
     def get_dsids_jobrunner(self, **kwargs):
         return []
@@ -35,6 +39,101 @@ class RsyncFileTransfer(RsyncDatasetServershare):
         """This is run before running job, to define files used by
         the job (so it cant run if if files are in use by other job)"""
         return [x['sfile_id'] for x in self.getfiles_query(**kwargs).values('sfile_id')]
+
+    def on_create_addkwargs(self, **kwargs):
+        '''Create destination sfloc db rows'''
+        sfl = self.oncreate_getfiles_query(**kwargs).values('sfile_id', 'path').get()
+        dstsfl, _ = rm.StoredFileLoc.objects.update_or_create(sfile_id=sfl['sfile_id'],
+                servershare_id=kwargs['dstshare_id'], defaults={'path': sfl['path'], 'active': True})
+        return {'dstsfloc_id': dstsfl.pk}
+
+    def check_error_on_creation(self, **kwargs):
+        '''This should check errors on creation, i.e. files crashing with other files etc,
+        which means we cannot check for database fields reflecting an immediate current state (e.g. purged sfl)
+        '''
+        srcsfl = self.getfiles_query(**kwargs).values('sfile__filename', 'path').get()
+        if rm.StoredFileLoc.objects.filter(sfile__filename=srcsfl['sfile__filename'],
+                path=srcsfl['path'], servershare_id=kwargs['dstshare_id'], active=True).exists():
+            return ('There is already a file existing with the same name as a the target file'
+                    f' in path {dstpath}')
+        return self._check_error_either(srcsfl, **kwargs)
+
+    def _check_error_either(self, srcsfl, **kwargs):
+        # Check for storage_loc_ui in the on_creation error check
+        err_fpath = os.path.join(srcsfl['path'], srcsfl['sfile__filename'])
+        err_dss = dm.DatasetServer.objects.filter(storageshare_id=kwargs['dstshare_id'],
+                storage_loc_ui=err_fpath)
+        if err_dss.exists():
+            return (f'There is already a dataset with the exact path as the target file {err_fpath}, '
+                    f'namely dataset {err_dss.values("pk").get()["pk"]}. Consider renaming the dataset.')
+        else:
+            return False
+            
+    def check_error_on_running(self, **kwargs):
+        srcsfl = self.getfiles_query(**kwargs).values('sfile__filename', 'path').get()
+        if rm.StoredFileLoc.objects.exclude(pk=kwargs['dstsfloc_id']).filter(
+                sfile__filename=srcsfl['sfile__filename'], path=srcsfl['path'],
+                servershare_id=kwargs['dstshare_id'], active=True).exists():
+            return ('There is already a file existing with the same name as a the target file'
+                    f' in path {srcsfl["path"]}')
+        return self._check_error_either(srcsfl, **kwargs)
+
+    def process(self, **kwargs):
+        srcsfl = self.getfiles_query(**kwargs).values('sfile__filename', 'path', 'servershare_id').get()
+        dstshare = rm.ServerShare.objects.values('pk', 'name').get(pk=kwargs['dstshare_id'])
+
+        # Check if target sflocs already exist in a nonpurged state in wrong path?
+        dstsfl = rm.StoredFileLoc.objects.filter(pk=kwargs['dstsfloc_id'])
+        if dstsfl.filter(purged=False).exclude(servershare_id=dstshare['pk']).exists():
+            raise RuntimeError('There is an existing target file in another location than the '
+            'dataset'
+                    ' - contact admin, make sure files are consolidated before sync to a new location')
+        if not dstsfl.exists():
+            # skip FIXME is this ok? please document why
+            return
+
+        # Select file servers to rsync from/to - FIXME share!
+        servers = rm.FileserverShare.objects.filter(share_id__in=[srcsfl['servershare_id'],
+                kwargs['dstshare_id']])
+        rsync_server_q = servers.filter(server__can_rsync=True)
+        if singleserver := rm.FileServer.objects.filter(fileservershare__share=kwargs['dstshare_id']
+                ).filter(fileservershare__share=srcsfl['servershare_id'], can_rsync=True):
+            # Try to get both shares from same server? (Rsync can skip SSH then)
+            srcserver = rm.FileserverShare.objects.filter(server_id__in=singleserver,
+                    share=srcsfl['servershare_id']
+                    ).values('server__fqdn', 'server__name', 'path').first()
+            dstserver = rm.FileserverShare.objects.filter(server_id__in=singleserver,
+                    share=kwargs['dstshare_id']
+                    ).values('server__fqdn', 'server__name', 'path').first()
+            src_user = dst_user = rskey = False
+            rsyncservername = srcserver['server__name']
+        elif rsync_server_q.filter(share_id=srcsfl['servershare_id']).exists():
+            # rsyncing server has src file, push to remote
+            srcserver = rsync_server_q.filter(share_id=srcsfl['servershare_id']).values(
+                    'server__fqdn', 'path', 'server__name').first()
+            dstserver = servers.filter(share_id=kwargs['dstshare_id']).values('server__fqdn'
+                    , 'path', 'server__rsynckeyfile', 'server__rsyncusername', 'pk').first()
+            rsyncservername = srcserver['server__name']
+            dst_user, rskey = dstserver['server__rsyncusername'], dstserver['server__rsynckeyfile']
+            src_user = False
+        elif rsync_server_q.filter(share_id=kwargs['dstshare_id']).exists():
+            # rsyncing server is the dst, pull from remote
+            dstserver = rsync_server_q.values('server__fqdn', 'path', 'server__name', 'pk').first()
+            srcserver = servers.filter(share_id=srcsfl['servershare_id']).values('server__fqdn',
+                    'path', 'server__rsynckeyfile', 'server__rsyncusername').first()
+            rsyncservername = dstserver['server__name']
+            src_user, rskey = srcserver['server__rsyncusername'], srcserver['server__rsynckeyfile']
+            dst_user = False
+        else:
+            # FIXME error needs finding in error check already
+            raise RuntimeError('Could not get file share on any rsync capable controller server')
+        self.queue = self.get_server_based_queue(rsyncservername, settings.QUEUE_STORAGE)
+        # Now run job
+        srcpath = os.path.join(srcserver['path'], srcsfl['path'])
+        #dstpath = os.path.join(dstserver['path'], srcsfl['path'])
+        self.run_tasks.append((src_user, srcserver['server__fqdn'], srcpath, dst_user,
+            dstserver['server__fqdn'], dstserver['path'], srcsfl['path'], rskey,
+            [srcsfl['sfile__filename']], [kwargs['dstsfloc_id']]))
 
 
 class RemoveFilesFromServershare(RemoveDatasetFilesFromServershare):
@@ -63,7 +162,7 @@ class RsyncFileTransferFromWeb(SingleFileJob):
 
     def check_error(self, **kwargs):
         src_sfloc = self.getfiles_query(**kwargs)
-        if models.StoredFileLoc.objects.exclude(pk=src_sfloc.pk).filter(
+        if rm.StoredFileLoc.objects.exclude(pk=src_sfloc.pk).filter(
                 sfile__filename=src_sfloc.sfile.filename, path=src_sfloc.path,
                 servershare=src_sfloc.servershare).exists():
             return (f'Cannot rsync file {src_sfloc.pk} to location {src_sfloc.servershare.name} / '
@@ -125,7 +224,7 @@ class RenameFile(SingleFileJob):
         fn_ext = os.path.splitext(src_sf.sfile.filename)[1]
         fullnewname = f'{kwargs["newname"]}{fn_ext}'
         fullnewpath = os.path.join(src_sf.path, f'{kwargs["newname"]}{fn_ext}')
-        if models.StoredFileLoc.objects.filter(sfile__filename=fullnewname, path=src_sf.path,
+        if rm.StoredFileLoc.objects.filter(sfile__filename=fullnewname, path=src_sf.path,
                 servershare_id=src_sf.servershare_id).exists():
             return f'A file in path {src_sf.path} with name {fullnewname} already exists. Please choose another name.'
         elif dm.Dataset.objects.filter(storage_loc=fullnewpath,
@@ -140,7 +239,7 @@ class RenameFile(SingleFileJob):
         fn_ext = os.path.splitext(sfloc.sfile.filename)[1]
         sfloc.sfile.rawfile.name = newname + fn_ext
         sfloc.sfile.rawfile.save()
-        for changefn in models.StoredFileLoc.objects.filter(sfile__rawfile=sfloc.sfile.rawfile):
+        for changefn in rm.StoredFileLoc.objects.filter(sfile__rawfile=sfloc.sfile.rawfile):
             # FIXME deleted etc? Run the sfloc selection in view instead
             oldname, ext = os.path.splitext(changefn.sfile.filename)
             special_type = '_refined' if hasattr(changefn.sfile, 'mzmlfile') and changefn.sfile.mzmlfile.refined else ''
@@ -173,12 +272,12 @@ class MoveSingleFile(SingleFileJob):
         '''Check for file name collisions'''
         src_sfloc = self.getfiles_query(**kwargs)
         if dstsharename := kwargs.get('dstsharename'):
-            sshare = models.ServerShare.objects.filter(name=dstsharename).get()
+            sshare = rm.ServerShare.objects.filter(name=dstsharename).get()
         else:
             sshare = src_sfloc.servershare
         newfn = kwargs.get('newname', src_sfloc.sfile.filename)
         fullnewpath = os.path.join(kwargs['dst_path'], newfn)
-        if models.StoredFileLoc.objects.filter(sfile__filename=newfn, path=kwargs['dst_path'],
+        if rm.StoredFileLoc.objects.filter(sfile__filename=newfn, path=kwargs['dst_path'],
                 servershare=sshare, sfile__deleted=False, purged=False).exists():
             return (f'A file in path {kwargs["dst_path"]} with name {src_sfloc.sfile.filename} '
                     'already exists. Please choose another name.')
@@ -212,7 +311,7 @@ class PurgeFiles(MultiFileJob):
         # Safety check:
         # First check if files have been archived if that is a demand
         if kwargs.get('need_archive', False):
-            if models.PDCBackedupFile.objects.filter(storedfile_id__in=kwargs['sf_ids'],
+            if rm.PDCBackedupFile.objects.filter(storedfile_id__in=kwargs['sf_ids'],
                     success=True, deleted=False).count() != len(kwargs['sf_ids']):
                 raise RuntimeError('Cannot purge these files which are dependent on an archive job '
                         'to have occurred, cannot find records of archived files in DB')
@@ -335,7 +434,7 @@ class ReactivateDeletedDataset(DatasetJob):
 
 
 def restore_file_pdc_runtask(sfloc):
-    backupfile = models.PDCBackedupFile.objects.get(storedfile=sfloc.sfile)
+    backupfile = rm.PDCBackedupFile.objects.get(storedfile=sfloc.sfile)
     fnpath = os.path.join(sfloc.path, sfloc.sfile.filename)
     yearmonth = datetime.strftime(sfloc.sfile.regdate, '%Y%m')
     return (settings.PRIMARY_STORAGESHARENAME, fnpath, backupfile.pdcpath, sfloc.id, backupfile.is_dir)

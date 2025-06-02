@@ -13,6 +13,7 @@ from rawstatus import tasks as filetasks
 from datasets import models as dm
 from datasets.jobs import get_or_create_mzmlentry
 from jobs.jobs import DatasetJob, SingleFileJob, BaseJob, MultiFileJob
+from jobs import models as jm
 
 # TODO
 # rerun qc data and displaying qcdata for a given qc file, how? 
@@ -40,6 +41,7 @@ class RefineMzmls(DatasetJob):
     revokable = True
 
     def on_create_addkwargs(self, **kwargs):
+        '''Create target SFL'''
         dst_sfls = []
         for sfl in self.getfiles_query(**kwargs).select_related('sfile__mzmlfile__pwiz', 'sfile'):
             mzmlfilename = f'{os.path.splitext(sfl.sfile.filename)[0]}_refined.mzML'
@@ -48,6 +50,27 @@ class RefineMzmls(DatasetJob):
             if mzsf:
                 dst_sfls.append(mzsfl.pk)
         return {'dstsfloc_ids': dst_sfls}
+
+    def on_create_extrajobs(self, **kwargs):
+        '''If needed, rsync the DB which is not on the analysis share'''
+        sfl = self.getfiles_query(**kwargs).values('servershare_id').first()
+        dbsfl_q = rm.StoredFileLoc.objects.filter(sfile_id=kwargs['dbfn_id'], active=True)
+        if not dbsfl_q.filter(servershare_id=sfl['servershare_id']).exists():
+            dbsfl = rm.get_source_sfloc_for_transfers(dbsfl_q)
+            newjobs = [{'name': 'rsync_otherfiles_to_servershare', 'kwargs': {'sfloc_id': dbsfl.pk,
+                'dstshare_id': sfl['servershare_id']}}]
+        else:
+            newjobs = []
+        return newjobs
+
+    def get_jobs_with_single_sfloc_to_wait_for(self, **kwargs):
+        sfl_q = self.getfiles_query(**kwargs)
+        dbsfl = rm.StoredFileLoc.objects.filter(sfile_id=kwargs['dbfn_id'], active=True,
+                servershare_id=sfl_q.values('servershare_id').first()['servershare_id'])
+        return jm.Job.objects.filter(kwargs__sfloc_id=dbsfl.values('sfile_id').get()['sfile_id'])
+
+    def rsync_analysis_files(self):
+        pass
 
     def process(self, **kwargs):
         """Return all a dset mzMLs but not those that have a refined mzML associated, to not do extra work."""
@@ -90,12 +113,6 @@ class RefineMzmls(DatasetJob):
                 ):
             ref_sfl = rm.StoredFileLoc.objects.values('pk', 'sfile__filename').get(
                     pk__in=kwargs['dstsfloc_ids'], sfile__rawfile_id=x['sfile__rawfile_id'])
-            #mzmlz.append((srcpath, fn['sfile__filename'], mzsfl['pk'], mzsfl['sfile__filename']))
-            # FIXME In task: ln -s {dbid}___{fn}_refined.mzML name as input, leave out that part
-            # from NF pipeline, process that name in task also, keep out of job and NF
-            #ref_mzml_fname = f'{os.path.splitext(x.sfile.filename)[0]}_refined.mzML'
-            #refi_sf, refi_sfloc = get_or_create_mzmlentry(x, x.sfile.mzmlfile.pwiz, refined=True,
-            #        servershare_id=dstshare.pk, path=runpath, mzmlfilename=ref_mzml_fname)
             mzmls.append({'srcpath': srcpath, 'fn': x['sfile__filename'], 'refinedpk': ref_sfl['pk'],
                 'refinedname': ref_sfl['sfile__filename']})
         if not mzmls:

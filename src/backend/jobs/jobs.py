@@ -60,6 +60,8 @@ JOBSTATES_WAIT = [Jobstates.WAITING, Jobstates.PENDING, Jobstates.QUEUED, Jobsta
 # Jobs retryable / startable
 JOBSTATES_RETRYABLE = [Jobstates.WAITING, Jobstates.HOLD, Jobstates.PROCESSING, Jobstates.ERROR, Jobstates.REVOKING, Jobstates.CANCELED]
 
+# Jobrunner filters using this for get_jobs_with_single_sfloc_to_wait_for
+JOBSTATES_RUNNER_WAIT = [Jobstates.HOLD, Jobstates.QUEUED, Jobstates.PROCESSING, Jobstates.ERROR, Jobstates.REVOKING]
 # FIXME Deprecate below line, is not used:
 JOBSTATES_PRE_OK_JOB = [Jobstates.WAITING, Jobstates.ERROR, Jobstates.REVOKING, Jobstates.CANCELED, Jobstates.HOLD]
 
@@ -95,6 +97,18 @@ class BaseJob:
 
     def on_create_addkwargs(self, **kwargs):
         return {}
+
+    def on_create_extrajobs(self, **kwargs):
+        return []
+
+    def get_jobs_with_single_sfloc_to_wait_for(self, **kwargs):
+        '''Need to wait for non-dataset jobs on files involved in this job. One could
+        add those to the get_sf_ids_for_filejobs but then you wouldnt be able to run two
+        analyses in parallel if theyd use the same DB. However, a problem now is that
+        such a file could be deleted mid-analysis - make sure these files are fairly stable
+        '''
+        # FIXME make sure any single file job checks for these jobs as well.
+        return Job.objects.none()
 
     def get_sf_ids_for_filejobs(self, **kwargs):
         """This is run before running job, to define files used by

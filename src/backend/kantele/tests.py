@@ -192,12 +192,12 @@ class BaseTest(TestCase):
                 path='', active=True, purged=False)
 
         # Library files, for use as input, so claimed and ready
-        lft = rm.StoredFileType.objects.create(name=settings.DBFA_FT_NAME, filetype='fasta',
+        self.lft = rm.StoredFileType.objects.create(name=settings.DBFA_FT_NAME, filetype='fasta',
                 is_rawdata=False)
         self.libraw = rm.RawFile.objects.create(name='db.fa', producer=self.prod,
                 source_md5='libfilemd5', size=100, claimed=True, date=timezone.now())
         self.sflib = rm.StoredFile.objects.create(rawfile=self.libraw, md5=self.libraw.source_md5,
-                filetype=lft, checked=True, filename=self.libraw.name)
+                filetype=self.lft, checked=True, filename=self.libraw.name)
         rm.StoredFileLoc.objects.create(sfile=self.sflib, servershare=self.ssnewstore, path='libfiles',
                 active=True, purged=False)
         self.lf = am.LibraryFile.objects.create(sfile=self.sflib, description='This is a libfile')

@@ -54,10 +54,14 @@ def create_job(name, state=False, **kwargs):
     if not state:
         state = Jobstates.PENDING
     jwrap = jobmap[name](False)
-    kwargs.update(jwrap.on_create_addkwargs(**kwargs))
     if error := check_job_error(name, **kwargs):
         jobdata = {'id': False, 'kwargs': kwargs, 'error': error}
     else:
+        # addkwargs should be here, after error check, otehrwise
+        # new SFL will be created at error check even when its failing
+        kwargs.update(jwrap.on_create_addkwargs(**kwargs))
+        for extrajob in jwrap.on_create_extrajobs(**kwargs):
+            create_job(extrajob['name'], **extrajob['kwargs'])
         job = Job.objects.create(funcname=name, timestamp=timezone.now(),
             state=state, kwargs=kwargs)
         jobdata = {'id': job.id, 'kwargs': kwargs, 'error': False}
@@ -73,6 +77,8 @@ def create_job_without_check(name, state=False, **kwargs):
         state = Jobstates.PENDING
     jwrap = jobmap[name](False)
     kwargs.update(jwrap.on_create_addkwargs(**kwargs))
+    for extrajob in jwrap.on_create_extrajobs(**kwargs):
+        create_job(extrajob['name'], **extrajob['kwargs'])
     job = Job.objects.create(funcname=name, timestamp=timezone.now(),
             state=state, kwargs=kwargs)
     FileJob.objects.bulk_create([FileJob(storedfile_id=sf_id, job_id=job.id) for sf_id in 
