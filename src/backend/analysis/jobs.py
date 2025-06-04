@@ -12,7 +12,7 @@ from rawstatus import models as rm
 from rawstatus import tasks as filetasks
 from datasets import models as dm
 from datasets.jobs import get_or_create_mzmlentry
-from jobs.jobs import DatasetJob, SingleFileJob, BaseJob, MultiFileJob
+from jobs.jobs import DatasetJob, SingleFileJob, BaseJob, MultiDatasetJob, MultiFileJob
 from jobs import models as jm
 
 # TODO
@@ -51,26 +51,8 @@ class RefineMzmls(DatasetJob):
                 dst_sfls.append(mzsfl.pk)
         return {'dstsfloc_ids': dst_sfls}
 
-    def on_create_extrajobs(self, **kwargs):
-        '''If needed, rsync the DB which is not on the analysis share'''
-        sfl = self.getfiles_query(**kwargs).values('servershare_id').first()
-        dbsfl_q = rm.StoredFileLoc.objects.filter(sfile_id=kwargs['dbfn_id'], active=True)
-        if not dbsfl_q.filter(servershare_id=sfl['servershare_id']).exists():
-            dbsfl = rm.get_source_sfloc_for_transfers(dbsfl_q)
-            newjobs = [{'name': 'rsync_otherfiles_to_servershare', 'kwargs': {'sfloc_id': dbsfl.pk,
-                'dstshare_id': sfl['servershare_id']}}]
-        else:
-            newjobs = []
-        return newjobs
-
-    def get_jobs_with_single_sfloc_to_wait_for(self, **kwargs):
-        sfl_q = self.getfiles_query(**kwargs)
-        dbsfl = rm.StoredFileLoc.objects.filter(sfile_id=kwargs['dbfn_id'], active=True,
-                servershare_id=sfl_q.values('servershare_id').first()['servershare_id'])
-        return jm.Job.objects.filter(kwargs__sfloc_id=dbsfl.values('sfile_id').get()['sfile_id'])
-
-    def rsync_analysis_files(self):
-        pass
+    def _get_extrafiles_to_rsync(self, **kwargs):
+        return [kwargs['dbfn_id']]
 
     def process(self, **kwargs):
         """Return all a dset mzMLs but not those that have a refined mzML associated, to not do extra work."""
@@ -236,10 +218,11 @@ def recurse_nrdsets_baseanalysis(aba):
     return old_mzmls, old_dsets
 
 
-class RunNextflowWorkflow(MultiFileJob):
+class RunNextflowWorkflow(MultiDatasetJob):
+    # FIXME MultiDatasetJob for the waiting thing in runner!
     refname = 'run_nf_search_workflow'
     task = tasks.run_nextflow_workflow
-    queue = settings.QUEUE_NXF
+    queue = False
     revokable = True
 
     """
@@ -250,11 +233,9 @@ class RunNextflowWorkflow(MultiFileJob):
 ], 'mzml': ('--mzmls', '{sdir}/*.mzML'), 'singlefiles': {'--tdb': 42659, '--dbsnp': 42665, '--genome': 42666, '--snpfa': 42662, '--cosmic': 42663, '--ddb': 42664, '--blastdb': 42661, '--knownproteins': 42408, '--gtf': 42658, '--mods': 42667}}
     """
 
-    def getfiles_query(self, **kwargs):
-        return super().getfiles_query(**kwargs).values('servershare__name', 'path', 'sfile__filename', 'sfile_id',
-                'sfile__rawfile__producer__msinstrument__instrumenttype__name',
-                'sfile__rawfile__datasetrawfile__dataset_id',
-                'sfile__rawfile__datasetrawfile__quantfilechannel__channel__channel__name')
+    def _get_extrafiles_to_rsync(self, **kwargs):
+        return [*kwargs['inputs']['singlefiles'].values(),
+                *[x for y in kwargs['inputs']['multifiles'].values() for x in y]]
 
     def set_error(self, job, *, errmsg):
         super().set_error(job, errmsg=errmsg)
@@ -267,18 +248,42 @@ class RunNextflowWorkflow(MultiFileJob):
         analysis = models.Analysis.objects.select_related('user', 'nextflowsearch__workflow').get(pk=kwargs['analysis_id'])
         nfwf = models.NextflowWfVersionParamset.objects.select_related('nfworkflow').get(
             pk=kwargs['wfv_id'])
+        fserver = rm.FileServer.objects.get(pk=kwargs['fserver_id'])
+        self.queue = self.get_server_based_queue(fserver.name, settings.QUEUE_NXF)
+        sharemap = {fss['share_id']: fss['path'] for fss in
+                fserver.fileservershare_set.values('share_id', 'path')}
         stagefiles = {}
-        for flag, sfloc_id in kwargs['inputs']['singlefiles'].items():
-            sfl = rm.StoredFileLoc.objects.select_related('servershare', 'sfile').get(pk=sfloc_id)
-            stagefiles[flag] = [(sfl.servershare.name, sfl.path, sfl.sfile.filename)]
-        for flag, sfloc_ids in kwargs['inputs']['multifiles'].items():
+        for flag, sfid in kwargs['inputs']['singlefiles'].items():
+            #stagefiles = {'--tdb': [(os.path.join(sharemap[dbfn['servershare_id']], dbfn['path']),
+            #    dbfn['sfile__filename'])]}
+            sfl_q = rm.StoredFileLoc.objects.filter(sfile_id=sfid,
+                    servershare__fileservershare__server_id=kwargs['fserver_id'], active=True).values(
+                            'servershare_id', 'path', 'sfile__filename')
+            #.select_related('servershare', 'sfile').get(pk=sfloc_id)
+            if sfl_q.exists():
+                sfl = sfl_q.first()
+                stagefiles[flag] = [(os.path.join(sharemap[sfl['servershare_id']], sfl['path']),
+                    sfl['sfile__filename'])]
+            else:
+                raise RuntimeError(f'No file on analysis disk for {flag}')
+        for flag, sfids in kwargs['inputs']['multifiles'].items():
             stagefiles[flag] = []
-            for sfloc_id in sfloc_ids:
-                sfl = rm.StoredFileLoc.objects.select_related('servershare', 'sfile').get(pk=sfloc_id)
-                stagefiles[flag].append((sfl.servershare.name, sfl.path, sfl.sfile.filename)) 
+            for sfids in sfids:
+                if sfl_q := rm.StoredFileLoc.objects.filter(sfile_id=sfid,
+                        servershare__fileservershare__server_id=kwargs['fserver_id'],
+                        active=True).values('servershare_id', 'path', 'sfile__filename'):
+                    sfl = sfl_q.first()
+                    stagefiles[flag].append((os.path.join(sharemap[sfl['servershare_id']], sfl['path']),
+                        sfl['sfile__filename']))
+                else:
+                    raise RuntimeError(f'Missing file on analysis disk for {flag}')
         # re-filter dset input files in case files are removed or added to dataset
         # between a stop/error and rerun of job
-        sflocs_passed = self.getfiles_query(**kwargs)
+        sflocs_passed = self.getfiles_query(**kwargs).values('servershare_id', 'path',
+                'sfile__filename', 'sfile_id',
+                'sfile__rawfile__producer__msinstrument__instrumenttype__name',
+                'sfile__rawfile__datasetrawfile__dataset_id',
+                'sfile__rawfile__datasetrawfile__quantfilechannel__channel__channel__name')
         is_msdata = sflocs_passed.distinct('sfile__rawfile__producer__msinstrument').count()
         job = analysis.nextflowsearch.job
         dsa = analysis.datasetanalysis_set.all()
@@ -337,8 +342,8 @@ class RunNextflowWorkflow(MultiFileJob):
         # INPUTDEF is either False or [fn, set, fraction, etc]
         if inputdef_fields := run['components']['INPUTDEF']:
             for fn in sflocs_passed:
-                infile = {'servershare': fn['servershare__name'], 'path': fn['path'],
-                    'fn': fn['sfile__filename']}
+                infile = {'path': os.path.join(sharemap[fn['servershare_id']], fn['path']),
+                        'fn': fn['sfile__filename']}
                 if 'setname' in inputdef_fields:
                     infile['setname'] = kwargs['filesamples'].get(str(fn['sfile_id']), '')
                 if 'plate' in inputdef_fields:
@@ -391,7 +396,8 @@ class RunNextflowWorkflow(MultiFileJob):
         # RunID is probably only used in a couple of pipelines but it's nice to use "our" analysis ID here
         # and needs to be coupled here, cannot have user make it
         params.extend(['--name', 'RUNNAME__PLACEHOLDER', '--runid', f'run_{analysis.pk}'])
-        self.run_tasks.append(((run, params, stagefiles, ','.join(profiles), nfwf.nfversion), {}))
+        self.run_tasks.append((run, params, {}, stagefiles, ','.join(profiles), nfwf.nfversion, fserver.scratchdir))
+
         analysis.log.append('[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S')))
         analysis.save()
 

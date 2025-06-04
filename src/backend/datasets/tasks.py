@@ -25,8 +25,8 @@ def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profile
             {}, params, stagescratchdir)
     # Stage raws if there is a stagedir
     print(f'Stagedir is {stagedir}')
-    if stagedir:
-        rawdir = os.path.join(stagedir, 'raws')
+    if scratchdir:
+        rawdir = os.path.join(scratchdir, 'raws')
         try:
             os.makedirs(rawdir, exist_ok=True)
         except (OSError, PermissionError):
@@ -57,8 +57,8 @@ def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profile
     # for that.
     url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
     update_db(url, json=postdata)
-    if stagedir:
-        shutil.rmtree(stagedir)
+    if scratchdir:
+        shutil.rmtree(scratchdir)
     shutil.rmtree(rundir)
 
 

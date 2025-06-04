@@ -131,7 +131,7 @@ def log_analysis(analysis_id, message):
 
 
 @shared_task(bind=True)
-def run_nextflow_workflow(self, run, params, paramfiles, stagefiles, profiles, nf_version, scratchdir):
+def run_nextflow_workflow(self, run, params, paramfiles, stagefiles, profiles, nf_version, scratchbasedir):
     print('Got message to run nextflow workflow, preparing')
     # Init
     postdata = {'client_id': settings.APIKEY,
@@ -140,12 +140,8 @@ def run_nextflow_workflow(self, run, params, paramfiles, stagefiles, profiles, n
     rundir = create_runname_dirname(run)
 
     # stage files, create dirs etc
-    params, gitwfdir, infiledir_or_nostage = prepare_nextflow_run(run, self.request.id, rundir,
-            stagefiles, params, scratchdir)
-    if infiledir_or_nostage:
-        stagedir_to_rm = os.path.split(infiledir_or_nostage)[0]
-    else:
-        stagedir_to_rm = False
+    params, gitwfdir, stagedir, scratchdir = prepare_nextflow_run(run, self.request.id, rundir,
+            stagefiles, params, scratchbasedir)
     if sampletable := run['components']['ISOQUANT_SAMPLETABLE']:
         sampletable_fn = os.path.join(rundir, 'sampletable.txt')
         with open(sampletable_fn, 'w') as fp:
@@ -160,11 +156,7 @@ def run_nextflow_workflow(self, run, params, paramfiles, stagefiles, profiles, n
         with open(os.path.join(rundir, 'inputdef.txt'), 'w') as fp:
             fp.write('\t'.join(run['components']['INPUTDEF']))
             for fn in run['infiles']:
-                if infiledir_or_nostage:
-                    fndir = infiledir_or_nostage
-                else:
-                    fndir = os.path.join(settings.SHAREMAP[fn['servershare']], fn['path'])
-                fnpath = os.path.join(fndir, fn['fn'])
+                fnpath = os.path.join(fn['path'], fn['fn'])
                 fn_metadata = '\t'.join(fn[x] or '' for x in run['components']['INPUTDEF'][1:])
                 fp.write(f'\n{fnpath}\t{fn_metadata}')
         params.extend(['--input', os.path.join(rundir, 'inputdef.txt')])
@@ -196,10 +188,10 @@ def run_nextflow_workflow(self, run, params, paramfiles, stagefiles, profiles, n
         regfile = register_resultfile(os.path.basename(ofile), ofile, token)
         if not regfile:
             continue
-        transfer_resultfile(outdir, outpath, ofile, run['dstsharename'], fileurl, token, 
-                self.request.id, regfile['fnid'], regfile['md5'], regfile['newname'], 
+        transfer_resultfile(outdir, outpath, ofile, fileurl, token, self.request.id,
+                regfile['fnid'], regfile['md5'], regfile['newname'], 
                 analysis_id=run['analysis_id'], checksrvurl=checksrvurl)
-    report_finished_run(reporturl, postdata, stagedir_to_rm, rundir, run['analysis_id'])
+    report_finished_run(reporturl, postdata, stagedir, rundir, run['analysis_id'])
     return run
 
 
@@ -209,18 +201,7 @@ def refine_mzmls(self, run, params, mzmls, stagefiles, profiles, nf_version, sta
     rundir = create_runname_dirname(run)
     params, gitwfdir, stagedir, scratchdir = prepare_nextflow_run(run, self.request.id, rundir,
             stagefiles, params, stagescratchdir)
-    if stagedir:
-        mzmldir = os.path.join(stagedir, 'mzmls')
-        try:
-            os.makedirs(mzmldir, exist_ok=True)
-        except (OSError, PermissionError):
-            taskfail_update_db(taskid, 'Could not create stage dir on analysis server')
-            raise
-        stage_mzmls = [[x['srcpath'], x['fn']] for x in mzmls]
-        copy_stage_files(mzmldir, stage_mzmls)
-        mzmls_def = [os.path.join(mzmldir, x['fn']) for x in mzmls]
-    else:
-        mzmls_def = [os.path.join(x['srcpath'], x['fn']) for x in mzmls]
+    mzmls_def = [os.path.join(x['srcpath'], x['fn']) for x in mzmls]
 
     with open(os.path.join(rundir, 'mzmldef.txt'), 'w') as fp:
         for fn in mzmls_def:
@@ -241,7 +222,7 @@ def refine_mzmls(self, run, params, mzmls, stagefiles, profiles, nf_version, sta
     reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:analysisdone'))
     postdata = {'client_id': settings.APIKEY, 'analysis_id': run['analysis_id'],
             'task': self.request.id, 'name': run['runname'], 'user': run['user'], 'state': 'ok'}
-    report_finished_run(reporturl, postdata, stagedir, rundir, run['analysis_id'])
+    report_finished_run(reporturl, postdata, scratchdir, rundir, run['analysis_id'])
     return run
 
 
@@ -249,8 +230,12 @@ def create_runname_dirname(run):
     return os.path.join(settings.NF_RUNDIR, run['runname']).replace(' ', '_')
 
 
-def prepare_nextflow_run(run, taskid, rundir, stageparamfiles, params, stagescratchdir):
+def prepare_nextflow_run(run, taskid, rundir, stageparamfiles, params, stagescratch_basedir):
     '''Creates run dirs, stage dir if needed, and stages files to either of those.
+    IF a stagescratch_basedir is passed (e.g. /opt/nfruns, we will output
+    a stagedir and a scratchdir there /opt/nfruns/stage /opt/nfruns/scratch
+    ELSE we will have /path/to/run/stage and False
+    
     '''
     if 'analysis_id' in run:
         log_analysis(run['analysis_id'], 'Got message to run workflow, preparing')
@@ -262,12 +247,10 @@ def prepare_nextflow_run(run, taskid, rundir, stageparamfiles, params, stagescra
         raise
     if 'analysis_id' in run:
         log_analysis(run['analysis_id'], 'Staging files')
-    if stagescratchdir:
-        stagedir = os.path.join(stagescratchdir, os.path.basename(rundir), 'stage')
-        scratchdir = os.path.join(stagescratchdir, os.path.basename(rundir), 'scratch')
+    if stagescratch_basedir:
+        stagedir = scratchdir = os.path.join(stagescratch_basedir, os.path.basename(rundir))
         try:
             os.makedirs(stagedir, exist_ok=True)
-            os.makedirs(scratchdir, exist_ok=True)
         except (OSError, PermissionError):
             taskfail_update_db(taskid, 'Could not create stage/scratch dirs on analysis server')
             raise
@@ -293,27 +276,7 @@ def prepare_nextflow_run(run, taskid, rundir, stageparamfiles, params, stagescra
         except Exception:
             taskfail_update_db(taskid, f'Could not stage files for {flag} for analysis')
             raise
-
-#    if len(infiles) and settings.ANALYSIS_STAGESHARE:
-#        # If we run with a stageing disk, use it for all files, else
-#        # only stage the "small files", i.e. non --input files (no mzML, BAM etc)
-#        infilestagedir = os.path.join(settings.ANALYSIS_STAGESHARE, run['runname'])
-#        # Files which will be defined in some kind of input.txt file (no --param filename)
-#        infiledir = os.path.join(infilestagedir, 'infiles')
-#        try:
-#            os.makedirs(infiledir, exist_ok=True)
-#        except Exception:
-#            taskfail_update_db(taskid, f'Could not create dir to stage files for input')
-#            raise
-#        try:
-#            copy_stage_files(infiledir, [(x['servershare'], x['path'], x['fn']) for x in infiles])
-#        except Exception:
-#            taskfail_update_db(taskid, f'Could not stage files for {flag} for analysis')
-#            raise
-#    else:
-#        # No infiles or no stage disk used, no need to remove later
-#        infiledir = False
-    return params, gitwfdir, stagedir, scratchdir #, infiledir 
+    return params, gitwfdir, stagedir, scratchdir
 
 
 def copy_stage_files(stagefiledir, files):
@@ -450,14 +413,14 @@ def run_nextflow_longitude_qc(self, run, params, stagefiles, profiles, nf_versio
     return run
 
 
-def report_finished_run(url, postdata, stagedir, rundir, analysis_id):
+def report_finished_run(url, postdata, stagescratchdir, rundir, analysis_id):
     print('Reporting and cleaning up after workflow in {}'.format(rundir))
     # If deletion fails, rerunning will be a problem? TODO wrap in a try/taskfail block
     postdata.update({'log': 'Analysis task completed.', 'analysis_id': analysis_id})
     update_db(url, json=postdata)
     shutil.rmtree(rundir)
-    if stagedir and os.path.exists(stagedir):
-        shutil.rmtree(stagedir)
+    if scratchdir and os.path.exists(stagescratchdir):
+        shutil.rmtree(stagescratchdir)
 
 
 def check_in_transfer_client(task_id, token, filetype):

@@ -194,20 +194,6 @@ class StoredFileLoc(models.Model):
             name='uni_storedfile')]
 
 
-def get_source_sfloc_for_transfers(allsfl):
-    # FIXME - need to error when False (file not available)
-    sfl_primshare = allsfl.filter(servershare__name=settings.TMPSHARENAME)
-    open_sfl = allsfl.filter(servershare__max_security=DataSecurityClass.NOSECURITY)
-    if sfl_primshare.exists():
-        srcsfl = sfl_primshare.get()
-    elif open_sfl.exists():
-        srcsfl = open_sfl.first()
-    else:
-        # FIXME fetch from backup to primshare if needed (when job queuing)!
-        srcsfl = False # keep linter happy until we have fixed backup retrieval
-    return srcsfl
-
-
 class MSFileData(models.Model):
     rawfile = models.OneToOneField(RawFile, on_delete=models.CASCADE)
     mstime = models.FloatField()
