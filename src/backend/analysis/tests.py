@@ -26,7 +26,8 @@ class AnalysisPageTest(BaseIntegrationTest):
                 source_md5='usrfmd5', size=100, claimed=True, date=timezone.now())
         self.sfusr = rm.StoredFile.objects.create(rawfile=self.usrfraw, md5=self.usrfraw.source_md5,
                 filetype=self.uft, filename=self.usrfraw.name, checked=True)
-        rm.StoredFileLoc.objects.create(sfile=self.sfusr, servershare=self.ssnewstore, path='')
+        rm.StoredFileLoc.objects.create(sfile=self.sfusr, servershare=self.ssnewstore, path='',
+                purged=False, active=True)
         self.usedtoken = rm.UploadToken.objects.create(user=self.user, token='usrffailtoken',
                 expired=False, producer=self.prod, filetype=self.uft,
                 uploadtype=rm.UploadFileType.USERFILE, expires=timezone.now() + timedelta(1))
@@ -42,7 +43,7 @@ class AnalysisPageTest(BaseIntegrationTest):
         self.popt2 = am.ParamOption.objects.create(param=self.param2, name='opt 2', value='nr2')
         self.popt3 = am.ParamOption.objects.create(param=self.param4, name='opt 3', value='nr3')
         self.popt4 = am.ParamOption.objects.create(param=self.param4, name='opt 4', value='nr4')
-        self.pfn1 = am.FileParam.objects.create(name='fp1', nfparam='--fp1', filetype=self.ft, help='help')
+        self.pfn1 = am.FileParam.objects.create(name='fp1', nfparam='--fp1', filetype=self.lft, help='help')
 
         self.ft2 = rm.StoredFileType.objects.create(name='result ft', filetype='txt')
         self.pfn2 = am.FileParam.objects.create(name='fp1', nfparam='--fp2', filetype=self.ft2, help='helppi')
@@ -50,7 +51,8 @@ class AnalysisPageTest(BaseIntegrationTest):
                 source_md5='txtraw_fakemd5', size=1234, date=timezone.now(), claimed=False)
         self.txtsf = rm.StoredFile.objects.create(rawfile=self.txtraw, md5=self.txtraw.source_md5,
                 filename=self.txtraw.name, checked=True, filetype=self.ft2)
-        rm.StoredFileLoc.objects.create(sfile=self.txtsf, servershare=self.sstmp, path='')
+        rm.StoredFileLoc.objects.create(sfile=self.txtsf, servershare=self.sstmp, path='',
+                purged=False, active=True)
 
         c_ch = am.PsetComponent.ComponentChoices
         self.inputdef = am.PsetComponent.objects.create(pset=self.pset, component=c_ch.INPUTDEF, value=['file_path', 'plate', 'setname', 'instrument', 'fake'])
@@ -69,6 +71,18 @@ class AnalysisPageTest(BaseIntegrationTest):
         self.wftype = am.UserWorkflow.WFTypeChoices.STD
         self.wf = am.UserWorkflow.objects.create(name='testwf', wftype=self.wftype, public=True)
         self.wf.nfwfversionparamsets.add(self.nfwf)
+
+        # Server infra
+        self.ssanaruns = rm.ServerShare.objects.create(name='analysisruns', max_security=1)
+        self.nfrunshare = rm.FileserverShare.objects.create(server=self.anaserver,
+                share=self.ssanaruns, path=os.path.join(self.rootdir, 'nf_runs'))
+        self.ssweb = rm.ServerShare.objects.create(name='web', max_security=1)
+        webserver = rm.FileServer.objects.create(name='web', uri='kantele.test',
+                fqdn='web', can_rsync=False, is_analysis=False, rsyncusername='',
+                rsynckeyfile='')
+        self.webshare = rm.FileserverShare.objects.create(server=webserver,
+                share=self.ssweb, path=os.path.join(self.rootdir, 'web'))
+
         # Create analysis for isoquant:
         self.ana = am.Analysis.objects.create(user=self.user, name='testana_iso', storage_dir='testdir_iso')
         self.dsa = am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.ds)
@@ -124,7 +138,7 @@ class AnalysisPageTest(BaseIntegrationTest):
                 samples=[[self.qch.name, self.anaset.setname, self.projsam1.sample, 'thegroup']])
 
 
-class AnalysisLabelfreeSamples(AnalysisTest):
+class AnalysisLabelfreeSamples(AnalysisPageTest):
     '''For preloaded LF analysis (base or new) we load file/sample annotations'''
 
     def setUp(self):
@@ -145,7 +159,7 @@ class TestNewAnalysis(BaseTest):
         self.assertEqual(resp.status_code, 405)
 
 
-class LoadBaseAnaTestIso(AnalysisTest):
+class LoadBaseAnaTestIso(AnalysisPageTest):
     url = '/analysis/baseanalysis/load/'
 
     def setUp(self):
@@ -279,7 +293,7 @@ class LoadBaseAnaTestLF(AnalysisLabelfreeSamples):
         self.assertJSONEqual(resp.content.decode('utf-8'), json.dumps(checkjson))
 
 
-class TestGetAnalysis(AnalysisTest):
+class TestGetAnalysis(AnalysisPageTest):
     url = '/analysis/'
 
     # FIXME load_base and get_analysis do the same serialization on the inputs I think,
@@ -324,7 +338,7 @@ class TestGetAnalysis(AnalysisTest):
         self.assertInHTML(html_ana, resphtml)
 
 
-class TestGetDatasetsBad(AnalysisTest):
+class TestGetDatasetsBad(AnalysisPageTest):
     url = '/analysis/dsets/'
 
     def test_bad_req(self):
@@ -539,7 +553,7 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
 
 
-class TestGetWorkflowVersionDetails(AnalysisTest):
+class TestGetWorkflowVersionDetails(AnalysisPageTest):
     url = '/analysis/workflow/'
 
     def test_bad_req(self):
@@ -684,17 +698,30 @@ class TestStoreAnalysis(AnalysisPageTest):
                     PT.FLAG: 'flags'}[ap.param.ptype]
             self.assertEqual(ap.value, params[pt][ap.param_id])
         self.assertEqual(ana.name, postdata['analysisname'])
-        fullname = f'{ana.pk}_{self.wftype.name}_{ana.name}_{timestamp}'
-        # This test flakes if executed right at midnight due to timestamp in assert string
-        self.assertEqual(ana.storage_dir[:-5], f'{ana.user.username}/{fullname}')
+        self.assertEqual(ana.storage_dir, ana.get_public_output_dir())
         checkjson = {'error': False, 'analysis_id': ana.pk, 'token': False}
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
-        print(jm.Job.objects.last().kwargs)
-        print(jm.Job.objects.last().funcname)
         self.cl.post('/analysis/start/', content_type='application/json',
                 data={'analysis_id': resp.json()['analysis_id']})
-        self.run_job()
-        self.fail()
+        self.run_job() # run the analysis
+        self.run_job() # rsync the results
+        reports = rm.StoredFileLoc.objects.filter(sfile__filename='report.html', purged=False)
+        self.assertEqual(reports.count(), 3) # analysisruns, web, analysis storage
+        x = os.path.join(self.nfrunshare.path, ana.get_run_base_dir())
+        nfrunsfl = reports.filter(servershare=self.ssanaruns,
+                path=os.path.join(ana.get_run_base_dir(), 'output')).get()
+        self.assertTrue(os.path.exists(os.path.join(self.nfrunshare.path, nfrunsfl.path,
+            'report.html')))
+
+        anasfl = reports.filter(servershare=self.ssana, path=ana.storage_dir).get()
+        self.assertTrue(os.path.exists(os.path.join(self.anashare.path, anasfl.path, 'report.html')))
+
+        websfl = reports.filter(servershare=self.ssweb, path=ana.get_run_base_dir()).get()
+        self.assertTrue(os.path.exists(os.path.join(self.webshare.path, websfl.path, 'report.html')))
+
+        self.run_job() # Queue backup (no task for it)
+        j = jm.Job.objects.last()
+        self.assertEqual(j.kwargs, {'sfloc_id': anasfl.pk, 'isdir': False})
 
 
 class TestStoreExistingIsoAnalysis(AnalysisPageTest):

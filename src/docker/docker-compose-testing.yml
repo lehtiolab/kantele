@@ -4,6 +4,7 @@ services:
             - db
             - mq
             - analysis1
+            - analysis_ssh_1
             - storage_queue_1
             - storage_fastqueue_1
             - storage_queue_2
@@ -46,6 +47,7 @@ services:
             DB_HOST: db
             RABBITHOST: mq
             TMPSHARE: /storage/tmp
+            SERVABLE_FILE_PATH: /storage/web
             STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
             TMP_UPLOADPATH: /storage/uploads
             HOST_UPLOADDIR: /storage/uploads
@@ -263,6 +265,22 @@ services:
             NXF_COMMAND: 'python3'
             NEXTFLOW_RUNDIR: '/storage/nf_runs'
             APIKEY: "${APIKEY_ANALYSIS}"
+
+    analysis_ssh_1:
+        image: rsync_stor
+        build:
+            context: ../
+            dockerfile: ./docker/Dockerfile
+            target: rsync_storage
+            args:
+                USER_ID: "${USER_ID:-You must run export USER_ID}"
+                GROUP_ID: "${GROUP_ID:-You must run export GROUP_ID}"
+        volumes:
+            - ./test_rsync_sshkey.pub:/home/kantele/.ssh/authorized_keys
+            - type: bind
+              source: ../../data/teststorage
+              target: /storage
+
 
 
     upload_bay_rsync:

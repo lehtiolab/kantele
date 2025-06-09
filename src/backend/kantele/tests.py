@@ -32,11 +32,11 @@ class BaseTest(TestCase):
 
     def setUp(self):
         # Clean directory containing storage servers
-        rootdir = '/storage'
-        for dirname in os.listdir(rootdir):
-            if os.path.isdir(os.path.join(rootdir, dirname)):
-                shutil.rmtree(os.path.join(rootdir, dirname))
-        shutil.copytree('/fixtures', rootdir, dirs_exist_ok=True)
+        self.rootdir = '/storage'
+        for dirname in os.listdir(self.rootdir):
+            if os.path.isdir(os.path.join(self.rootdir, dirname)):
+                shutil.rmtree(os.path.join(self.rootdir, dirname))
+        shutil.copytree('/fixtures', self.rootdir, dirs_exist_ok=True)
         self.cl = Client()
         username='testuser'
         email = 'test@test.com'
@@ -51,16 +51,19 @@ class BaseTest(TestCase):
                 fqdn='storage_ssh_1', can_rsync=True, is_analysis=False, rsyncusername='kantele',
                 rsynckeyfile='/kantelessh/rsync_key')
         self.anaserver = rm.FileServer.objects.create(name='analysis1', uri='ana.test',
-                fqdn='analysis', is_analysis=True, rsyncusername='kantele')
+                fqdn='analysis_ssh_1', is_analysis=True, rsyncusername='kantele', rsynckeyfile='/kantelessh/rsync_key')
         self.sstmp = rm.ServerShare.objects.create(name=settings.TMPSHARENAME, max_security=1)
         rm.FileserverShare.objects.create(server=self.storagecontroller, share=self.sstmp,
-                path=os.path.join(rootdir, 'tmp'))
+                path=os.path.join(self.rootdir, 'tmp'))
         self.ssnewstore = rm.ServerShare.objects.create(name=settings.PRIMARY_STORAGESHARENAME,
                 max_security=1)
         self.newstorctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
-                share=self.ssnewstore, path=os.path.join(rootdir, 'newstorage'))
+                share=self.ssnewstore, path=os.path.join(self.rootdir, 'newstorage'))
         rm.FileserverShare.objects.create(server=self.anaserver, share=self.ssnewstore,
-                path=os.path.join(rootdir, 'newstorage'))
+                path=os.path.join(self.rootdir, 'newstorage'))
+        self.ssana = rm.ServerShare.objects.create(name=settings.ANALYSISSHARENAME, max_security=1)
+        self.anashare = rm.FileserverShare.objects.create(server=self.storagecontroller, share=self.ssana,
+                path=os.path.join(self.rootdir, 'analysis'))
 
         self.remoteserver = rm.FileServer.objects.create(name='storage2', uri='s0.test',
                 fqdn='storage_ssh_2', can_rsync=False, is_analysis=False, rsyncusername='kantele',
@@ -68,7 +71,7 @@ class BaseTest(TestCase):
         self.ssoldstorage = rm.ServerShare.objects.create(name=settings.STORAGESHARENAMES[0],
                 max_security=1)
         self.oldstorctrl = rm.FileserverShare.objects.create(server=self.remoteserver,
-                share=self.ssoldstorage, path=os.path.join(rootdir, 'oldstorage'))
+                share=self.ssoldstorage, path=os.path.join(self.rootdir, 'oldstorage'))
 
         # Species / sampletype fill
         self.spec1, _ = dm.Species.objects.get_or_create(linnean='species1', popname='Spec1')

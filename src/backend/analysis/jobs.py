@@ -17,11 +17,6 @@ from jobs import models as jm
 
 # TODO
 # rerun qc data and displaying qcdata for a given qc file, how? 
-def get_ana_fullname(analysis, wftype):
-    shortname = models.UserWorkflow.WFTypeChoices(wftype).name
-    return f'{shortname}_{analysis.name}'
-
-
 class DownloadFastaFromRepos(BaseJob):
     '''Checks ENSEMBL and uniprot if they have new versions of fasta proteome databases 
     that we havent downloaded  yet. If so, queue tasks'''
@@ -329,11 +324,11 @@ class RunNextflowWorkflow(MultiDatasetJob):
                'wf_commit': nfwf.commit,
                'nxf_wf_fn': nfwf.filename,
                'repo': nfwf.nfworkflow.repo,
-               'runname': kwargs['fullname'],
+               'runname': analysis.get_run_base_dir(),
                'outdir': analysis.user.username,
                'infiles': [],
                'old_infiles': False,
-               'dstsharename': kwargs['dstsharename'],
+               'server_id': fserver.pk,
                'components': kwargs['inputs']['components'],
                }
         

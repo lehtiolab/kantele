@@ -25,8 +25,7 @@ def get_host_upload_dst(web_dst):
 class RsyncOtherFileServershare(SingleFileJob):
     '''Does the same as rsync dset, but for when files are not in a dataset
 
-    Dst path will be identical to src path, so it is not like for datasets, which can
-    have some elaborate path structure on researcher-accessible shares
+    Dst path will be identical to src path, if not given.
     '''
     refname = 'rsync_otherfiles_to_servershare'
     queue = False
@@ -43,15 +42,16 @@ class RsyncOtherFileServershare(SingleFileJob):
     def on_create_addkwargs(self, **kwargs):
         '''Create destination sfloc db rows'''
         sfl = self.oncreate_getfiles_query(**kwargs).values('sfile_id', 'path').get()
+        dstpath = kwargs.get('dstpath', sfl['path'])
         dstsfl, _ = rm.StoredFileLoc.objects.update_or_create(sfile_id=sfl['sfile_id'],
-                servershare_id=kwargs['dstshare_id'], defaults={'path': sfl['path'], 'active': True})
+                servershare_id=kwargs['dstshare_id'], defaults={'path': dstpath, 'active': True})
         return {'dstsfloc_id': dstsfl.pk}
 
     def check_error_on_creation(self, **kwargs):
         '''This should check errors on creation, i.e. files crashing with other files etc,
         which means we cannot check for database fields reflecting an immediate current state (e.g. purged sfl)
         '''
-        srcsfl = self.getfiles_query(**kwargs).values('sfile__filename', 'path').get()
+        srcsfl = self.oncreate_getfiles_query(**kwargs).values('sfile__filename', 'path').get()
         if rm.StoredFileLoc.objects.filter(sfile__filename=srcsfl['sfile__filename'],
                 path=srcsfl['path'], servershare_id=kwargs['dstshare_id'], active=True).exists():
             return ('There is already a file existing with the same name as a the target file'
@@ -92,13 +92,13 @@ class RsyncOtherFileServershare(SingleFileJob):
             # skip FIXME is this ok? please document why
             return
 
-        # Select file servers to rsync from/to - FIXME share!
+        # Select file servers to rsync from/to - FIXME share code!
         servers = rm.FileserverShare.objects.filter(share_id__in=[srcsfl['servershare_id'],
                 kwargs['dstshare_id']])
         rsync_server_q = servers.filter(server__can_rsync=True)
         if singleserver := rm.FileServer.objects.filter(fileservershare__share=kwargs['dstshare_id']
                 ).filter(fileservershare__share=srcsfl['servershare_id'], can_rsync=True):
-            # Try to get both shares from same server? (Rsync can skip SSH then)
+            # Try to get both shares from same server, rsync can skip SSH then
             srcserver = rm.FileserverShare.objects.filter(server_id__in=singleserver,
                     share=srcsfl['servershare_id']
                     ).values('server__fqdn', 'server__name', 'path').first()
@@ -130,9 +130,9 @@ class RsyncOtherFileServershare(SingleFileJob):
         self.queue = self.get_server_based_queue(rsyncservername, settings.QUEUE_STORAGE)
         # Now run job
         srcpath = os.path.join(srcserver['path'], srcsfl['path'])
-        #dstpath = os.path.join(dstserver['path'], srcsfl['path'])
+        dstpath = dstsfl.values('path').get()['path']
         self.run_tasks.append((src_user, srcserver['server__fqdn'], srcpath, dst_user,
-            dstserver['server__fqdn'], dstserver['path'], srcsfl['path'], rskey,
+            dstserver['server__fqdn'], dstserver['path'], dstpath, rskey,
             [srcsfl['sfile__filename']], [kwargs['dstsfloc_id']]))
 
 
@@ -186,10 +186,9 @@ class CreatePDCArchive(SingleFileJob):
     queue = settings.QUEUE_BACKUP
 
     def process(self, **kwargs):
-        # FIXME should we not check if we already have a DB row w success=1 here?
-        taskargs = upload_file_pdc_runtask(self.getfiles_query(**kwargs), isdir=kwargs['isdir'])
+        taskargs = upload_file_pdc_runtask(self.getfiles_query(**kwargs).get(), isdir=kwargs['isdir'])
         if taskargs:
-            self.run_tasks.append((taskargs, {}))
+            self.run_tasks.append(taskargs)
             print('PDC archival task queued')
 
 

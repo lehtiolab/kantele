@@ -353,8 +353,16 @@ def get_ana_actions(analysis, user):
                 actions.append('stop job')
     return actions
 
+
+class FakeAnalysis:
+    def __init__(self, name, nextflowsearch):
+        self.name = name
+
+
 class Throwaway:
-    pass
+    def __init__(self, kws):
+        for kw,val in kws:
+            setattr(self, kw, value)
 
 
 def populate_analysis(analyses, user):
@@ -365,12 +373,14 @@ def populate_analysis(analyses, user):
             'nextflowsearch__workflow__wftype', 'nextflowsearch__workflow__name',
             'nextflowsearch__nfwfversionparamset__nfworkflow__repo',
             'nextflowsearch__nfwfversionparamset__update'):
-        ananame = Throwaway()
-        ananame.name = ana['name'] # for get_ana_fullname
+        wf = Throwaway({'wftype': ana['nextflowsearch__workflow__wftype']})
+        nfsearch = Throwaway({'workflow': wf})
+        ananame = Throwaway({'name': ana['name'], 'nextflowsearch': nfsearch})
+        ananame.get_fullname = anmodels.Analysis.get_fullname
         if ana['nextflowsearch__job_id']:
             fjobs = filemodels.FileJob.objects.filter(job_id=ana['nextflowsearch__job_id']).values('storedfile_id')
             fjobdsets = dsmodels.Dataset.objects.filter(datasetrawfile__rawfile__storedfile__in=[x['storedfile_id'] for x in fjobs]).distinct('pk').values('pk')
-            nfs = {'name': aj.get_ana_fullname(ananame, ana['nextflowsearch__workflow__wftype']),
+            nfs = {'name': ananame.get_fullname(),
                     'jobstate': ana['nextflowsearch__job__state'],
                     'jobid': ana['nextflowsearch__job_id'],
                     'wf': f'{ana["nextflowsearch__workflow__name"]} - {ana["nextflowsearch__nfwfversionparamset__update"]}',
@@ -612,8 +622,7 @@ def get_analysis_info(request, anid):
                 and request.user.is_staff and
                 ana.nextflowsearch.workflow.wftype == anmodels.UserWorkflow.WFTypeChoices.STD and
                 ana.nextflowsearch.nfwfversionparamset.pipelineversionoutput_set.count())
-        nfs_info = {'name': aj.get_ana_fullname(ana, ana.nextflowsearch.workflow.wftype),
-            'addToResults': result_parse_ok,
+        nfs_info = {'name': ana.get_fullname(), 'addToResults': result_parse_ok,
             'wf': {'fn': ana.nextflowsearch.nfwfversionparamset.filename, 
                    'name': ana.nextflowsearch.nfwfversionparamset.nfworkflow.description,
                    'update': ana.nextflowsearch.nfwfversionparamset.update,

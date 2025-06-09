@@ -1,3 +1,7 @@
+import os
+import re
+from datetime import datetime
+
 from django.db import models
 from django.contrib.auth.models import User
 
@@ -270,6 +274,23 @@ class Analysis(models.Model):
     purged = models.BooleanField(default=False)
     storage_dir = models.TextField()
     editable = models.BooleanField(default=True)
+
+    def get_fullname(self):
+        if hasattr(self, 'nextflowsearch'):
+            wftype = self.nextflowsearch.workflow.wftype
+        else:
+            wftype = UserWorkflow.WFTypeChoices.USER
+        shortname = UserWorkflow.WFTypeChoices(wftype).name
+        return f'{shortname}_{self.name}'
+
+    def get_run_base_dir(self):
+       cleanname = re.sub('[^a-zA-Z0-9\.\-_]', '_', self.get_fullname())
+       return (f'{self.pk}_{cleanname}_{datetime.strftime(self.date, "%Y%m%d_%H.%M")}')
+
+    def get_public_output_dir(self):
+        return os.path.join(self.user.username, self.get_run_base_dir())
+
+
 
 
 # Can this be generalized to deleted log for also files?

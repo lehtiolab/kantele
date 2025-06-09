@@ -135,6 +135,12 @@ class FileserverShare(models.Model):
     share = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
     path = models.TextField()
 
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['server', 'share'], name='uni_fsshare')]
+        constraints = [models.UniqueConstraint(fields=['server', 'path'], name='uni_fspath')]
+
+
+
 
 class RawFile(models.Model):
     """Data (raw) files as reported by instrument"""

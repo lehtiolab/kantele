@@ -128,11 +128,12 @@ def rsync_files_to_servershares(self, src_user, srcserver_url, srcpath, dst_user
     on where file is,   
     Files are rsynced
     one at a time, for more control in case there's some anomaly in the dataset folder.
-    This is always run on the storage controller, which has access to local but not
-    external cluster shares - so an only transfer files FROM the local storage.
+    This is always run on the storage controller
     Clarification:
     dstbasepath - /mnt/rawdata, /hpc/stor/proj123/raw
     dstpath - proj/exp/run (dset path)
+    We dont supply these joined since the dstpath is used to update the
+    DB after the rsync
     '''
     for srcfn in fns:
         # Dont compress, tests with raw data just make it slower and likely

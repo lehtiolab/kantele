@@ -1,8 +1,10 @@
 import re
 import os
 import json
+import shutil
 from datetime import datetime, timedelta
 from collections import defaultdict
+from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
 from django.utils import timezone
@@ -77,7 +79,7 @@ def load_analysis_resultfiles(request, anid):
         wftype = ana.nextflowsearch.workflow.wftype
     else:
         wftype = am.UserWorkflow.WFTypeChoices.USER
-    ananame = aj.get_ana_fullname(ana, wftype)
+    ananame = ana.get_fullname()
     anadate = datetime.strftime(ana.date, '%Y-%m-%d')
     resultfiles = [{'id': x.sfile_id, 'fn': x.sfile.filename, 'ana': ananame, 'date': anadate}
         for x in ana.analysisresultfile_set.exclude(sfile__pk__in=already_loaded_files)]
@@ -219,7 +221,7 @@ def load_base_analysis(request, wfversion_id, baseanid):
         analysis_id__in=added_ana_ids).exclude(sfile_id__in=analysis_prev_resfiles_ids)]
     already_loaded_files = analysis_prev_resfiles_ids + added_files_ids
     base_resfiles = [{'id': x.sfile_id, 'fn': x.sfile.filename,
-        'ana': aj.get_ana_fullname(ana, ana.nextflowsearch.workflow.wftype),
+        'ana': ana.get_fullname(),
         'date': datetime.strftime(ana.date, '%Y-%m-%d')}
         for x in ana.analysisresultfile_set.exclude(sfile__pk__in=already_loaded_files)]
     return JsonResponse({'base_analysis': analysis, 'datasets': dsets, 'resultfiles': base_resfiles})
@@ -284,8 +286,7 @@ def get_analysis(request, anid):
         if ana_base.exists():
             ana_base = ana_base.get()
             base_dsids = [x.dataset_id for x in ana_base.base_analysis.datasetanalysis_set.all()]
-            baname = aj.get_ana_fullname(ana_base.base_analysis,
-                    ana_base.base_analysis.nextflowsearch.workflow.wftype)
+            baname = ana_base.base_analysis.get_fullname()
             badate = datetime.strftime(ana_base.base_analysis.date, '%Y-%m-%d')
             analysis['base_analysis'] = {
                     #### these are repeated in ana/wf if same dsets
@@ -407,11 +408,11 @@ def get_base_analyses(request):
                 'nextflowsearch__nfwfversionparamset').filter(query, deleted=False):
                         # nextflowsearch__isnull=False, 
             if hasattr(x, 'nextflowsearch'):
-                txt = (f'{aj.get_ana_fullname(x, x.nextflowsearch.workflow.wftype)} - '
+                txt = (f'{x.get_fullname} - '
                         f'{x.nextflowsearch.workflow.name, x.nextflowsearch.nfwfversionparamset.update}')
             else:
 
-                txt = f'{aj.get_ana_fullname(x, am.UserWorkflow.WFTypeChoices.USER)}'
+                txt = x.get_fullname()
             resp[x.id] = {'id': x.id,
             'name': f'{txt} - {x.user.username} - {datetime.strftime(x.date, "%Y%m%d")}'}
         return JsonResponse(resp)
@@ -701,7 +702,7 @@ def get_prev_resultfiles(dsids, only_ids=False):
         prev_resultfiles = [x['sfile_id'] for x in qset_arf.values('sfile_id')]
     else:
         prev_resultfiles = [{'id': x.sfile.id, 'fn': x.sfile.filename,
-            'ana': aj.get_ana_fullname(x.analysis, x.analysis.nextflowsearch.workflow.wftype),
+            'ana': x.analysis.get_fullname(),
             'date': datetime.strftime(x.analysis.date, '%Y-%m-%d')}
         for x in qset_arf.select_related('analysis__nextflowsearch__workflow')]
     return prev_resultfiles
@@ -717,7 +718,7 @@ def get_added_analysis_contents(afp, prev_or_base_resultfns, added_results):
             wftype = arf.analysis.nextflowsearch.workflow.wftype
         else:
             wftype = am.UserWorkflow.WFTypeChoices.USER
-        arf_ananame = aj.get_ana_fullname(arf.analysis, wftype)
+        arf_ananame = arf.analysis.get_fullname()
         arf_fns = [{'id': x.sfile_id, 'fn': x.sfile.filename, 'ana': arf_ananame,
             'date': arf_date} for x in arf.analysis.analysisresultfile_set.all()]
         added_results[arf.analysis_id] = {'analysisname': arf_ananame, 'date': arf_date, 'fns': arf_fns}
@@ -957,10 +958,6 @@ def store_analysis(request):
         dsa = am.DatasetAnalysis.objects.bulk_create([am.DatasetAnalysis(dataset_id=dsid,
             analysis=analysis) for dsid in dsids])
         dsa_map = {x.dataset_id: x.pk for x in dsa}
-    ana_storpathname = (f'{analysis.pk}_{aj.get_ana_fullname(analysis, wftype)}_'
-            f'{datetime.strftime(analysis.date, "%Y%m%d_%H.%M")}')
-    analysis.storage_dir = f'{analysis.user.username}/{ana_storpathname}'
-    analysis.save()
 
     if req['upload_external']:
         # Generate new upload token if it does not already exist
@@ -1175,9 +1172,8 @@ def store_analysis(request):
         fname = 'run_nf_search_workflow'
         jobinputs['params'] = [x for nf, vals in jobparams.items() for x in [nf, ';'.join([str(v) for v in vals])] if x]
         #param_args = {'wfv_id': req['nfwfvid'], 'inputs': jobinputs}
-        kwargs = {'analysis_id': analysis.id, 'dstsharename': settings.ANALYSISSHARENAME,
-                'wfv_id': req['nfwfvid'], 'inputs': jobinputs, 'fullname': ana_storpathname,
-                'storagepath': analysis.storage_dir, **data_args, **server_dss_args}
+        kwargs = {'analysis_id': analysis.id, 'wfv_id': req['nfwfvid'], 'inputs': jobinputs,
+                **data_args, **server_dss_args}
         if req['analysis_id'] and hasattr(analysis, 'nextflowsearch'):
             jobq = jm.Job.objects.filter(nextflowsearch__analysis=analysis)
             jobq.update(kwargs=kwargs, state=jj.Jobstates.WAITING)
@@ -1185,6 +1181,8 @@ def store_analysis(request):
         else:
             jobid = create_job(fname, state=jj.Jobstates.WAITING, **kwargs)['id']
         am.NextflowSearch.objects.update_or_create(defaults={'nfwfversionparamset_id': req['nfwfvid'], 'job_id': jobid, 'workflow_id': req['wfid'], 'token': ''}, analysis=analysis)
+        analysis.storage_dir = analysis.get_public_output_dir()
+        analysis.save()
     return JsonResponse({'error': False, 'analysis_id': analysis.id, 'token': api_token})
 
 
@@ -1394,13 +1392,11 @@ def unfreeze_analysis(request):
 
 @login_required
 def serve_analysis_file(request, arf_id):
-    # FIXME this will possibly have multiple files on get() call -> error 500
-    # since we moved to storedfileloc
-    # THERE IS NO ACTUAL STOREDFILELOC YET FOR WEB SERVED FILES!
+    # FIXME old report files have sfloc, so they cannot be deleted
     try:
         arf = get_servable_files(am.AnalysisResultFile.objects.filter(pk=arf_id,
             sfile__deleted=False)).values('sfile__storedfileloc__path',
-                    'sfile__filename').get()
+                    'sfile__filename').distinct('sfile').get()
     except am.AnalysisResultFile.DoesNotExist:
         return HttpResponseForbidden()
     resp = HttpResponse()
@@ -1410,11 +1406,39 @@ def serve_analysis_file(request, arf_id):
 
 @require_POST
 def upload_servable_file(request):
-    data = json.loads(request.body.decode('utf-8'))
+    try:
+        data = json.loads(request.body.decode('utf-8'))
+    except json.decoder.JSONDecodeError:
+        data =  json.loads(request.POST['json'])
     if 'client_id' not in data or data['client_id'] !=settings.ANALYSISCLIENT_APIKEY:
         return JsonResponse({'msg': 'Forbidden'}, status=403)
     elif 'fname' not in data or data['fname'] not in settings.SERVABLE_FILENAMES:
         return JsonResponse({'msg': 'File is not servable'}, status=406)
+    elif request.FILES:
+        # store any potential servable file on share on web server
+        # FIXME web files are not currently tracked by an sfloc (or previously by an sf)
+        # need to setup a controller on the webshare :( for deleting
+        webshare = rm.ServerShare.objects.get(name=settings.WEBSHARENAME)
+        #srvfile, _cr = StoredFileLoc.objects.get_or_create(sfile=sfile, servershare=webshare, path=data['outdir'])
+        sfloc, _ = rm.StoredFileLoc.objects.get_or_create(sfile_id=data['sfid'], servershare=webshare,
+                path=data['path'])
+        # FIXME servershare path can be gotten from db
+        srvpath = os.path.join(settings.WEBSHARE, sfloc.path)
+        srvdst = os.path.join(srvpath, sfloc.sfile.filename)
+        try:
+            os.makedirs(srvpath, exist_ok=True)
+        except FileExistsError:
+            pass
+        with NamedTemporaryFile(mode='wb+') as fp:
+            for chunk in request.FILES['ana_file']:
+                fp.write(chunk)
+            fp.flush()
+            os.fsync(fp.fileno())
+            shutil.copy(fp.name, srvdst)
+            os.chmod(srvdst, 0o644)
+        sfloc.purged = False
+        sfloc.save()
+        return JsonResponse({})
     else:
         return JsonResponse({'msg': 'File can be uploaded and served'}, status=200)
 

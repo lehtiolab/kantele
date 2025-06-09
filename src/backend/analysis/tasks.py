@@ -134,16 +134,13 @@ def log_analysis(analysis_id, message):
 def run_nextflow_workflow(self, run, params, paramfiles, stagefiles, profiles, nf_version, scratchbasedir):
     print('Got message to run nextflow workflow, preparing')
     # Init
-    postdata = {'client_id': settings.APIKEY,
-                'analysis_id': run['analysis_id'], 'task': self.request.id,
-                'name': run['runname'], 'user': run['outdir']}
     rundir = create_runname_dirname(run)
 
     # stage files, create dirs etc
     params, gitwfdir, stagedir, scratchdir = prepare_nextflow_run(run, self.request.id, rundir,
             stagefiles, params, scratchbasedir)
     if sampletable := run['components']['ISOQUANT_SAMPLETABLE']:
-        sampletable_fn = os.path.join(rundir, 'sampletable.txt')
+        sampletable_fn = os.path.join(stagedir, 'sampletable.txt')
         with open(sampletable_fn, 'w') as fp:
             for sample in sampletable:
                 fp.write('\t'.join(sample))
@@ -153,45 +150,46 @@ def run_nextflow_workflow(self, run, params, paramfiles, stagefiles, profiles, n
     # create input file of filenames
     # depends on inputdef component, which is always in ours but maybe not in other pipelines
     if run['components']['INPUTDEF'] and len(run['infiles']):
-        with open(os.path.join(rundir, 'inputdef.txt'), 'w') as fp:
+        with open(os.path.join(stagedir, 'inputdef.txt'), 'w') as fp:
             fp.write('\t'.join(run['components']['INPUTDEF']))
             for fn in run['infiles']:
                 fnpath = os.path.join(fn['path'], fn['fn'])
                 fn_metadata = '\t'.join(fn[x] or '' for x in run['components']['INPUTDEF'][1:])
                 fp.write(f'\n{fnpath}\t{fn_metadata}')
-        params.extend(['--input', os.path.join(rundir, 'inputdef.txt')])
+        params.extend(['--input', os.path.join(stagedir, 'inputdef.txt')])
 
     if 'COMPLEMENT_ANALYSIS' in run['components'] and run['old_infiles']:
-        with open(os.path.join(rundir, 'oldinputdef.txt'), 'w') as fp:
+        with open(os.path.join(stagedir, 'oldinputdef.txt'), 'w') as fp:
             fp.write('\t'.join(run['components']['INPUTDEF']))
             for fn in run['old_infiles']:
                 fp.write(f'\n{fn}')
-        params.extend(['--oldmzmldef', os.path.join(rundir, 'oldinputdef.txt')])
+        params.extend(['--oldmzmldef', os.path.join(stagedir, 'oldinputdef.txt')])
     params = [x if x != 'RUNNAME__PLACEHOLDER' else run['runname'] for x in params]
     outfiles = execute_normal_nf(run, params, rundir, gitwfdir, self.request.id, nf_version, profiles, scratchdir)
-    postdata.update({'state': 'ok'})
 
-    fileurl = urljoin(settings.KANTELEHOST, reverse('jobs:internalfiledone'))
-    reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:analysisdone'))
-    checksrvurl = urljoin(settings.KANTELEHOST, reverse('analysis:checkfileupload'))
-
-    outpath = os.path.join(run['outdir'], os.path.split(rundir)[-1])
-    outdir = os.path.join(settings.SHAREMAP[run['dstsharename']], outpath)
-    try:
-        os.makedirs(outdir, exist_ok=True)
-    except (OSError, PermissionError):
-        taskfail_update_db(self.request.id, 'Could not create output directory for analysis results')
-        raise
+    # Register output files to web host
     token = False
     for ofile in outfiles:
-        token = check_in_transfer_client(self.request.id, token, settings.ANALYSIS_FT_NAME)
-        regfile = register_resultfile(os.path.basename(ofile), ofile, token)
+        path, fn = os.path.split(ofile)
+        regfile = new_register_resultfile(fn, path, run['server_id'], run['analysis_id'])
+        # FIXME this also, sometimes files with same MD5 arrive twice - can that be handled??:
+        # Yes - analysis/sfile can possibly have multiple analysis per sfile
         if not regfile:
             continue
-        transfer_resultfile(outdir, outpath, ofile, fileurl, token, self.request.id,
-                regfile['fnid'], regfile['md5'], regfile['newname'], 
-                analysis_id=run['analysis_id'], checksrvurl=checksrvurl)
-    report_finished_run(reporturl, postdata, stagedir, rundir, run['analysis_id'])
+        checksrvurl = urljoin(settings.KANTELEHOST, reverse('analysis:checkfileupload'))
+        resp = requests.post(checksrvurl, json={'fname': fn, 'client_id': settings.APIKEY})
+        if resp.status_code == 200:
+            # Servable file found, upload also to web server
+            # Somewhat complex POST to get JSON and files in same request
+            postdata = {'client_id': settings.APIKEY, 'sfid': regfile['sfid'], 'fname': fn,
+                    'path': os.path.basename(rundir)}
+            response = requests.post(checksrvurl, files={
+                'ana_file': (fn, open(ofile, 'rb'), 'application/octet-stream'),
+                'json': (None, json.dumps(postdata), 'application/json')})
+    reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:analysisdone'))
+    postdata = {'client_id': settings.APIKEY, 'analysis_id': run['analysis_id'],
+            'task': self.request.id}
+    report_finished_run_and_cleanup(reporturl, postdata, stagedir, gitwfdir, run['analysis_id'])
     return run
 
 
@@ -413,14 +411,14 @@ def run_nextflow_longitude_qc(self, run, params, stagefiles, profiles, nf_versio
     return run
 
 
-def report_finished_run(url, postdata, stagescratchdir, rundir, analysis_id):
-    print('Reporting and cleaning up after workflow in {}'.format(rundir))
+def report_finished_run_and_cleanup(url, postdata, stagedir, rundir, analysis_id):
+    print(f'Reporting and cleaning up after workflow in {rundir}')
     # If deletion fails, rerunning will be a problem? TODO wrap in a try/taskfail block
     postdata.update({'log': 'Analysis task completed.', 'analysis_id': analysis_id})
     update_db(url, json=postdata)
     shutil.rmtree(rundir)
-    if scratchdir and os.path.exists(stagescratchdir):
-        shutil.rmtree(stagescratchdir)
+    if stagedir and os.path.exists(stagedir):
+        shutil.rmtree(stagedir)
 
 
 def check_in_transfer_client(task_id, token, filetype):
@@ -456,6 +454,29 @@ def register_resultfile(fname, fpath, token):
     else:
         return False
 
+
+def new_register_resultfile(fname, path, server_id, analysis_id):
+    fullpath = os.path.join(path, fname)
+    reg_url = urljoin(settings.KANTELEHOST, reverse('files:uploaded_file'))
+    postdata = {'fn': fname,
+                'client_id': settings.APIKEY,
+                'md5': calc_md5(fullpath),
+                'size': os.path.getsize(fullpath),
+                'date': str(os.path.getctime(fullpath)),
+                'claimed': True,
+                'sharepath': settings.NF_RUNDIR,
+                'path': os.path.relpath(path, settings.NF_RUNDIR),
+                'server_id': server_id,
+                'analysis_id': analysis_id,
+                }
+    resp = requests.post(url=reg_url, json=postdata)
+    if resp.status_code != 500:
+        rj = resp.json()
+    else:
+        rj = False
+    resp.raise_for_status()
+    return rj
+ 
 
 def transfer_resultfile(dstsharepath, dstpath, fn, url, token, task_id,
         sfl_id, reg_md5, newname, analysis_id=False, checksrvurl=False, is_fasta=False):

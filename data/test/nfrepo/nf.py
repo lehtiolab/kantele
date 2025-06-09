@@ -34,5 +34,9 @@ with open(args.input) as fp:
     for line in fp:
         lines.append(line.strip().split('\t'))
 
-with open(os.path.join(args.outdir, '.nextflow.log'), 'w') as fp:
+with open(os.path.join(args.outdir, 'report.html'), 'w') as fp:
+    pass
+
+
+with open(os.path.join(os.getcwd(), '.nextflow.log'), 'w') as fp:
     pass

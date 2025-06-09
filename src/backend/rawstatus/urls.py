@@ -6,6 +6,7 @@ app_name = 'files'
 urlpatterns = [
    path('token/', views.request_upload_token, name='req_token'),
    path('instruments/check/', views.instrument_check_in, name='check_in'),
+   path('uploaded/', views.new_file_uploaded, name='uploaded_file'),
    path('upload/userfile/', views.browser_userupload, name='upload_browserfile'),
    path('transfer/', views.transfer_file, name='transfer'),
    path('transferstate/', views.get_files_transferstate, name='reg_trfstate'),

@@ -537,6 +537,90 @@ def classified_rawfile_treatment(request):
     return HttpResponse()
 
 
+# /files/uploaded
+@require_POST
+def new_file_uploaded(request):
+    '''This is for uploading files from an instrument, so not from a user using the
+    upload script. We dont use a token since the scripts run on our own server.
+    '''
+    data =  json.loads(request.body.decode('utf-8'))
+    try:
+        fn, size, md5, filedate_raw = data['fn'], data['size'], data['md5'], data['date']
+        instrument_id = data['client_id']
+        file_date = datetime.strftime(
+            datetime.fromtimestamp(float(filedate_raw)), '%Y-%m-%d %H:%M')
+        sfl_sharepath, sfl_path = data['sharepath'], data['path']
+    except ValueError as error:
+        return JsonResponse({'error': 'Date passed to registration incorrectly formatted'}, status=400)
+    except KeyError as error:
+        print(f'Request to upload instrument file with missing parameter, {error}')
+        return JsonResponse({'error': 'Bad request'}, status=400)
+
+    claimed = data.get('claimed')
+    # For analysis we have the server in the run, otherwise this ID is from env var 
+    # in MS prod upload script:
+    server_id = data.get('server_id')
+    analysis_id = data.get('analysis_id')
+
+    fileserver_share = FileserverShare.objects.values('share__name', 'share_id').get(
+            server_id=server_id, path=sfl_sharepath)
+    producer = Producer.objects.values('pk', 'internal', 'msinstrument__filetype',
+            'msinstrument__active').get(client_id=instrument_id)
+    if producer['msinstrument__filetype'] is not None:
+        filetype = producer['msinstrument__filetype']
+        is_active_ms = producer['internal'] and producer['msinstrument__active']
+    elif instrument_id == settings.ANALYSISCLIENT_APIKEY:
+        is_active_ms = False
+        filetype = StoredFileType.objects.get(name=settings.ANALYSIS_FT_NAME)
+    else:
+        return JsonResponse({'error': f'Could not identify uploading client for file {fn} on '
+            'server {fileserver_share["share__name"]}'}, status=403)
+
+    # Create file entries
+    rfn, raw_created = RawFile.objects.get_or_create(source_md5=md5, defaults={
+        'name': fn, 'producer_id': producer['pk'], 'size': size, 'date': file_date, 'claimed': claimed})
+    if not raw_created:
+        # FIXME if it somehow crashed, maybe theres a rawfile but not
+        # a backup? - make sure to check also backups and sflocs available
+        return JsonResponse({'error': 'This file is already in the '
+            f'system: {rfn.name}, if you are re-uploading a previously '
+            'deleted file, consider reactivating from backup, or contact admin',
+            'problem': 'ALREADY_EXISTS'}, status=409)
+    sf, _ = StoredFile.objects.get_or_create(rawfile=rfn, filetype=filetype, md5=rfn.source_md5,
+            defaults={'filename': fn, 'checked': True})
+    sfl, _ = StoredFileLoc.objects.get_or_create(sfile=sf, servershare_id=fileserver_share['share_id'],
+            path=sfl_path, defaults={'purged': False})
+
+    if is_active_ms:
+        # FIXME do more things here!
+        create_job('classify_msrawfile', sfloc_id=sfloc.pk, token=upload.token)
+        # No backup before the classify job etc
+    elif instrument_id == settings.ANALYSISCLIENT_APIKEY:
+        AnalysisResultFile.objects.get_or_create(sfile=sf, analysis_id=analysis_id)
+        sensitive_data = False
+        if sensitive_data:
+            # Only dump in sens OK data storage, if that is set up, to do backups from
+            # and in the delivery storage if needed
+            # TODO
+            #rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sfl.pk,
+            #    dstshare_id=dstshare['pk'], dstpath=analysis.get_public_output_dir())
+            #create_job('create_pdc_archive', sfloc_id=rsjob['kwargs']['dstsfloc_id'],
+            #        isdir=sf.filetype.is_folder)
+            pass
+        else:
+            # Rsync non-sensitive data to the public data storage
+            analysis = Analysis.objects.get(pk=analysis_id)
+            dstshare = ServerShare.objects.values('pk').get(name=settings.ANALYSISSHARENAME)
+            rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sfl.pk,
+                dstshare_id=dstshare['pk'], dstpath=analysis.get_public_output_dir())
+            create_job('create_pdc_archive', sfloc_id=rsjob['kwargs']['dstsfloc_id'],
+                    isdir=sf.filetype.is_folder)
+
+    # FIXME pdc transfer should be done from either open area or a closed one
+    #create_job('create_pdc_archive', sfloc_id=sfl.pk, isdir=sf.filetype.is_folder)
+    return JsonResponse({'rfid': rfn.pk, 'sfid': sf.pk, 'sflid': sfl.pk, 'path': sfl.path})
+
+
 def process_file_confirmed_ready(rfn, sfn, sfloc, upload, desc):
     """Processing of backup, QC, library/userfile after transfer has succeeded
     (MD5 checked) for newly arrived MS other raw data files (not for analysis etc)
