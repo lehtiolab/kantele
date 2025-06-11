@@ -38,5 +38,5 @@ with open(os.path.join(args.outdir, 'report.html'), 'w') as fp:
     pass
 
 
-with open(os.path.join(os.getcwd(), '.nextflow.log'), 'w') as fp:
+with open('.nextflow.log', 'w') as fp:
     pass

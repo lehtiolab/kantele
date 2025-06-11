@@ -1046,12 +1046,12 @@ def refine_mzmls(request):
             instrument=instrument)
     if job['error']:
         pass
-    elif job['kwargs'].get('dstsfloc_ids', False):
+    elif job['kwargs']['dstsfloc_ids']:
         for other_dss in dsmodels.DatasetServer.objects.filter(dataset=dset, active=True).exclude(
                 pk=dss_id).values('storageshare_id', 'pk'):
             # Put result files in all the other shares datasets
             create_job('rsync_dset_files_to_servershare', dss_id=other_dss['pk'],
-                    sfloc_ids=job['kwargs']['dstsfloc_ids'],
+                    sfloc_ids=job['kwargs']['dstsfloc_ids'].values(),
                     dstshare_id=other_dss['storageshare_id'])
     uwf = anmodels.UserWorkflow.objects.get(nfwfversionparamsets=data['wfid'],
             wftype=anmodels.UserWorkflow.WFTypeChoices.SPEC)

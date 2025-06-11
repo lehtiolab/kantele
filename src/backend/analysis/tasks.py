@@ -189,38 +189,34 @@ def run_nextflow_workflow(self, run, params, paramfiles, stagefiles, profiles, n
     reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:analysisdone'))
     postdata = {'client_id': settings.APIKEY, 'analysis_id': run['analysis_id'],
             'task': self.request.id}
-    report_finished_run_and_cleanup(reporturl, postdata, stagedir, gitwfdir, run['analysis_id'])
+    report_finished_run_and_cleanup(reporturl, postdata, scratchdir, stagedir, gitwfdir, run['analysis_id'])
     return run
 
 
 @shared_task(bind=True)
 def refine_mzmls(self, run, params, mzmls, stagefiles, profiles, nf_version, stagescratchdir):
     print('Got message to run mzRefine workflow, preparing')
-    rundir = create_runname_dirname(run)
-    params, gitwfdir, stagedir, scratchdir = prepare_nextflow_run(run, self.request.id, rundir,
+    basedir = create_runname_dirname(run)
+    params, gitwfdir, stagedir, scratchdir = prepare_nextflow_run(run, self.request.id, basedir,
             stagefiles, params, stagescratchdir)
     mzmls_def = [os.path.join(x['srcpath'], x['fn']) for x in mzmls]
 
-    with open(os.path.join(rundir, 'mzmldef.txt'), 'w') as fp:
+    with open(os.path.join(stagedir, 'mzmldef.txt'), 'w') as fp:
         for fn in mzmls_def:
             fp.write(f'{fn}\n')
-    params.extend(['--input', os.path.join(rundir, 'mzmldef.txt')])
-    outfiles = execute_normal_nf(run, params, rundir, gitwfdir, self.request.id, nf_version, profiles, scratchdir)
+    params.extend(['--input', os.path.join(stagedir, 'mzmldef.txt')])
+    outfiles = execute_normal_nf(run, params, basedir, gitwfdir, self.request.id, nf_version, profiles, scratchdir)
     outfiles_db = {}
     for outfn in outfiles:
         path, fn = os.path.split(outfn)
-        outfiles_db[fn] = outfn
-    fileurl = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
-    token = False
-    print(outfiles_db)
-    for fn in mzmls:
-        token = check_in_transfer_client(self.request.id, token, settings.ANALYSIS_FT_NAME)
-        transfer_resultfile(run['dstsharepath'], run['dstpath'], outfiles_db[fn['refinedname']], 
-                fileurl, token, self.request.id, fn['refinedpk'], calc_md5(outfiles_db[fn['refinedname']]), fn['refinedname'])
+        outfiles_db[fn] = (path, outfn)
+    for non_ref_mzfn in mzmls:
+        path, reffn = outfiles_db[non_ref_mzfn['refinedname']]
+        regfile = new_register_mzmlfile(non_ref_mzfn['refinedpk'], non_ref_mzfn['final_sflpk'], reffn, path, run['server_id'], run['analysis_id'])
     reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:analysisdone'))
     postdata = {'client_id': settings.APIKEY, 'analysis_id': run['analysis_id'],
-            'task': self.request.id, 'name': run['runname'], 'user': run['user'], 'state': 'ok'}
-    report_finished_run(reporturl, postdata, scratchdir, rundir, run['analysis_id'])
+            'task': self.request.id}
+    report_finished_run_and_cleanup(reporturl, postdata, scratchdir, stagedir, gitwfdir, run['analysis_id'])
     return run
 
 
@@ -411,7 +407,7 @@ def run_nextflow_longitude_qc(self, run, params, stagefiles, profiles, nf_versio
     return run
 
 
-def report_finished_run_and_cleanup(url, postdata, stagedir, rundir, analysis_id):
+def report_finished_run_and_cleanup(url, postdata, scratchdir, stagedir, rundir, analysis_id):
     print(f'Reporting and cleaning up after workflow in {rundir}')
     # If deletion fails, rerunning will be a problem? TODO wrap in a try/taskfail block
     postdata.update({'log': 'Analysis task completed.', 'analysis_id': analysis_id})
@@ -419,6 +415,8 @@ def report_finished_run_and_cleanup(url, postdata, stagedir, rundir, analysis_id
     shutil.rmtree(rundir)
     if stagedir and os.path.exists(stagedir):
         shutil.rmtree(stagedir)
+    if scratchdir and os.path.exists(scratchdir):
+        shutil.rmtree(scratchdir)
 
 
 def check_in_transfer_client(task_id, token, filetype):
@@ -459,6 +457,30 @@ def new_register_resultfile(fname, path, server_id, analysis_id):
     fullpath = os.path.join(path, fname)
     reg_url = urljoin(settings.KANTELEHOST, reverse('files:uploaded_file'))
     postdata = {'fn': fname,
+                'client_id': settings.APIKEY,
+                'md5': calc_md5(fullpath),
+                'size': os.path.getsize(fullpath),
+                'date': str(os.path.getctime(fullpath)),
+                'claimed': True,
+                'sharepath': settings.NF_RUNDIR,
+                'path': os.path.relpath(path, settings.NF_RUNDIR),
+                'server_id': server_id,
+                'analysis_id': analysis_id,
+                }
+    resp = requests.post(url=reg_url, json=postdata)
+    if resp.status_code != 500:
+        rj = resp.json()
+    else:
+        rj = False
+    resp.raise_for_status()
+    return rj
+ 
+
+def new_register_mzmlfile(sflpk, dstsflpk, fname, path, server_id, analysis_id):
+    fullpath = os.path.join(path, fname)
+    reg_url = urljoin(settings.KANTELEHOST, reverse('files:uploaded_mzml'))
+    postdata = {'sflpk': sflpk,
+                'dst_sflpk': dstsflpk,
                 'client_id': settings.APIKEY,
                 'md5': calc_md5(fullpath),
                 'size': os.path.getsize(fullpath),

@@ -52,24 +52,30 @@ class BaseTest(TestCase):
                 rsynckeyfile='/kantelessh/rsync_key')
         self.anaserver = rm.FileServer.objects.create(name='analysis1', uri='ana.test',
                 fqdn='analysis_ssh_1', is_analysis=True, rsyncusername='kantele', rsynckeyfile='/kantelessh/rsync_key')
-        self.sstmp = rm.ServerShare.objects.create(name=settings.TMPSHARENAME, max_security=1)
+        self.sstmp = rm.ServerShare.objects.create(name=settings.TMPSHARENAME, max_security=1,
+                function=rm.ShareFunction.RAWDATA)
         rm.FileserverShare.objects.create(server=self.storagecontroller, share=self.sstmp,
                 path=os.path.join(self.rootdir, 'tmp'))
         self.ssnewstore = rm.ServerShare.objects.create(name=settings.PRIMARY_STORAGESHARENAME,
-                max_security=1)
+                max_security=1, function=rm.ShareFunction.RAWDATA)
         self.newstorctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
                 share=self.ssnewstore, path=os.path.join(self.rootdir, 'newstorage'))
         rm.FileserverShare.objects.create(server=self.anaserver, share=self.ssnewstore,
                 path=os.path.join(self.rootdir, 'newstorage'))
-        self.ssana = rm.ServerShare.objects.create(name=settings.ANALYSISSHARENAME, max_security=1)
+        self.ssana = rm.ServerShare.objects.create(name=settings.ANALYSISSHARENAME, max_security=1,
+                function=rm.ShareFunction.ANALYSISRESULTS)
         self.anashare = rm.FileserverShare.objects.create(server=self.storagecontroller, share=self.ssana,
                 path=os.path.join(self.rootdir, 'analysis'))
+        self.ssanaruns = rm.ServerShare.objects.create(name='analysisruns', max_security=1,
+                function=rm.ShareFunction.NFRUNS)
+        self.nfrunshare = rm.FileserverShare.objects.create(server=self.anaserver,
+                share=self.ssanaruns, path=os.path.join(self.rootdir, 'nf_runs'))
 
         self.remoteserver = rm.FileServer.objects.create(name='storage2', uri='s0.test',
                 fqdn='storage_ssh_2', can_rsync=False, is_analysis=False, rsyncusername='kantele',
                 rsynckeyfile='/kantelessh/rsync_key')
         self.ssoldstorage = rm.ServerShare.objects.create(name=settings.STORAGESHARENAMES[0],
-                max_security=1)
+                max_security=1, function=rm.ShareFunction.RAWDATA)
         self.oldstorctrl = rm.FileserverShare.objects.create(server=self.remoteserver,
                 share=self.ssoldstorage, path=os.path.join(self.rootdir, 'oldstorage'))
 

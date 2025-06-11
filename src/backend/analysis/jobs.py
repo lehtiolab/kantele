@@ -36,15 +36,42 @@ class RefineMzmls(DatasetJob):
     revokable = True
 
     def on_create_addkwargs(self, **kwargs):
-        '''Create target SFL'''
-        dst_sfls = []
+        '''Create target SFLs on local analysis server and final destination 
+        dataset source. This is needed because the final sflocs (which are rsynced
+        in the src dataset dir) will after that be rsynced to all the other 
+        shares where the dataset is, and we need the ids for that job'''
+        local_dst_sfls, remote_dst_sfls = [], []
+        dst_sfls = {}
+        dss = dm.DatasetServer.objects.values('storageshare_id').get(pk=kwargs['dss_id'])
+        anaserver = rm.FileServer.objects.filter(fileservershare__share_id=dss['storageshare_id'],
+                is_analysis=True).first()
+        analocalshare = rm.FileserverShare.objects.filter(share__function=rm.ShareFunction.NFRUNS,
+                server=anaserver).values('share_id', 'path').first()
+        anasrcshareonserver = rm.FileserverShare.objects.filter(server=anaserver,
+                share_id=dss['storageshare_id']).values('path').first()
+
+        analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
+        dstpath = os.path.join(analocalshare['path'],
+                analysis.get_run_base_dir(models.UserWorkflow.WFTypeChoices.SPEC), 'output')
         for sfl in self.getfiles_query(**kwargs).select_related('sfile__mzmlfile__pwiz', 'sfile'):
             mzmlfilename = f'{os.path.splitext(sfl.sfile.filename)[0]}_refined.mzML'
-            mzsf, mzsfl = get_or_create_mzmlentry(sfl, pwiz=sfl.sfile.mzmlfile.pwiz, refined=True,
-                servershare_id=sfl.servershare_id, path=sfl.path, mzmlfilename=mzmlfilename)
-            if mzsf:
-                dst_sfls.append(mzsfl.pk)
-        return {'dstsfloc_ids': dst_sfls}
+            # Create local mzsfl for the analysis server, to rsync from
+            localmzsf, localmzsfl = get_or_create_mzmlentry(sfl.sfile, pwiz=sfl.sfile.mzmlfile.pwiz,
+                    refined=True, servershare_id=analocalshare['share_id'], path=dstpath,
+                    mzmlfilename=mzmlfilename)
+            if localmzsf:
+                local_dst_sfls.append(localmzsfl.pk)
+
+            # Create remote mzsfl since we need to already know in advance where to rsync it
+            # in the view that calls this, as that will do a full dset sync over shares.
+            remote_mzsf, remote_mzsfl = get_or_create_mzmlentry(sfl.sfile, pwiz=sfl.sfile.mzmlfile.pwiz,
+                    refined=True, servershare_id=sfl.servershare_id, path=sfl.path,
+                    mzmlfilename=mzmlfilename)
+            if remote_mzsf:
+                remote_dst_sfls.append(remote_mzsfl.pk)
+                dst_sfls[localmzsfl.pk] = remote_mzsfl.pk
+        return {'dstsfloc_ids': dst_sfls, 'server_id': anaserver.pk,
+                'srcsharepath': anasrcshareonserver['path']}
 
     def _get_extrafiles_to_rsync(self, **kwargs):
         return [kwargs['dbfn_id']]
@@ -54,12 +81,10 @@ class RefineMzmls(DatasetJob):
         dss = dm.DatasetServer.objects.values('storageshare__name', 'storageshare_id', 'storage_loc',
                 'dataset_id').get(pk=kwargs['dss_id'])
         # Pick any server capable:
-        anashareserver = rm.FileserverShare.objects.filter(server__is_analysis=True,
-                share_id=dss['storageshare_id']).values('server_id', 'server__name',
-                        'server__scratchdir', 'path').first()
-        self.queue = self.get_server_based_queue(anashareserver['server__name'], settings.QUEUE_NXF)
+        anaserver = rm.FileServer.objects.get(pk=kwargs['server_id'])
+        self.queue = self.get_server_based_queue(anaserver.name, settings.QUEUE_NXF)
         sharemap = {fss['share_id']: fss['path'] for fss in
-                rm.FileServer.objects.get(pk=anashareserver['server_id']).fileservershare_set.values('share_id', 'path')}
+                anaserver.fileservershare_set.values('share_id', 'path')}
 
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
         analysis.nextflowsearch.token = f'nf-{uuid4()}'
@@ -67,7 +92,7 @@ class RefineMzmls(DatasetJob):
         nfwf = models.NextflowWfVersionParamset.objects.get(pk=kwargs['wfv_id'])
 
         dbfn_q = rm.StoredFileLoc.objects.filter(sfile_id=kwargs['dbfn_id'],
-                servershare__fileservershare__server_id=anashareserver['server_id'])
+                servershare__fileservershare__server=anaserver)
         if dbfn_q.exists():
             dbfn = dbfn_q.values('servershare_id', 'path', 'sfile__filename').first()
         else:
@@ -79,19 +104,16 @@ class RefineMzmls(DatasetJob):
         stagefiles = {'--tdb': [(os.path.join(sharemap[dbfn['servershare_id']], dbfn['path']),
             dbfn['sfile__filename'])]}
 
-        #existing_refined = mzmlfiles.filter(sfile__mzmlfile__refined=True)
-        # FIXME this in the view
-        #mzml_nonrefined = mzmlfiles.exclude(sfile__rawfile__storedfile__in=existing_refined).select_related('sfile__mzmlfile__pwiz')
         timestamp = datetime.strftime(analysis.date, '%Y%m%d_%H.%M')
-        runpath = re.sub('[^a-zA-Z0-9\.\-_]', '_', f'{analysis.id}_{analysis.name}_{timestamp}')
         mzmls = []
-        srcpath = os.path.join(anashareserver['path'], dss['storage_loc'])
+        srcpath = os.path.join(kwargs['srcsharepath'], dss['storage_loc'])
         for x in self.getfiles_query(**kwargs).values('sfile__rawfile_id', 'sfile__filename', 'path',
                 ):
             ref_sfl = rm.StoredFileLoc.objects.values('pk', 'sfile__filename').get(
-                    pk__in=kwargs['dstsfloc_ids'], sfile__rawfile_id=x['sfile__rawfile_id'])
+                    pk__in=kwargs['dstsfloc_ids'].keys(), sfile__rawfile_id=x['sfile__rawfile_id'])
             mzmls.append({'srcpath': srcpath, 'fn': x['sfile__filename'], 'refinedpk': ref_sfl['pk'],
-                'refinedname': ref_sfl['sfile__filename']})
+                'refinedname': ref_sfl['sfile__filename'],
+                'final_sflpk': kwargs['dstsfloc_ids'][str(ref_sfl['pk'])]})
         if not mzmls:
             return
         params = ['--instrument', kwargs['instrument']]
@@ -103,17 +125,15 @@ class RefineMzmls(DatasetJob):
                'wf_commit': nfwf.commit,
                'nxf_wf_fn': nfwf.filename,
                'repo': nfwf.nfworkflow.repo,
-               'runname':  runpath,
-               'user': analysis.user.username,
-               'dstsharepath': anashareserver['path'],
-               'dstpath': dss['storage_loc'],
+               'runname':  analysis.get_run_base_dir(),
+               'server_id': anaserver.pk,
                }
         if not len(nfwf.profiles):
             profiles = ['standard', 'docker', 'lehtio']
         else:
             profiles = nfwf.profiles
         self.run_tasks.append((run, params, mzmls, stagefiles, ','.join(profiles), nfwf.nfversion,
-            anashareserver['server__scratchdir']))
+            anaserver.scratchdir))
         # TODO replace this for general logging anyway, not necessary to keep queueing in analysis log
         analysis.log = ['[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S'))]
         analysis.save()

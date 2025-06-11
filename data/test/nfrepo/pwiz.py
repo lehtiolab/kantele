@@ -22,3 +22,6 @@ for fn in glob(args.raws):
     newfn = os.path.basename(f'{os.path.splitext(fn)[0]}.mzML')
     with open(os.path.join(args.outdir, newfn), 'w') as fp:
         fp.write(f'{newfn} mzML file')
+
+with open('.nextflow.log', 'w') as fp:
+    pass

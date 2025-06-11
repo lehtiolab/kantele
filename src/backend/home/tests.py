@@ -333,8 +333,16 @@ class TestRefineMzmls(MzmlTests):
             self.assertEqual(j.kwargs[k], val)
         self.run_job() # rsync db
         mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}_refined.mzML'
-        mzmlfn1 = os.path.join(self.f3path, mzmlfn)
+        ana = am.Analysis.objects.last()
+        mzmlfn1 = os.path.join(self.rootdir, 'nf_runs', ana.get_run_base_dir(), 'output', mzmlfn)
+        mzmlfn2 = os.path.join(self.f3path, mzmlfn)
         self.assertFalse(os.path.exists(mzmlfn1))
         self.run_job() # refining
         self.assertTrue(os.path.exists(mzmlfn1))
-        self.run_job() # setting to done
+        self.assertFalse(os.path.exists(mzmlfn2))
+        self.run_job() # rsync refined files
+        self.assertTrue(os.path.exists(mzmlfn2))
+        self.run_job() # set to done
+        j = jm.Job.objects.last()
+        self.assertEqual(j.funcname, 'rsync_otherfiles_to_servershare')
+        self.assertEqual(j.state, Jobstates.DONE)

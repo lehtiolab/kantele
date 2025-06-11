@@ -22,13 +22,12 @@ args = p.parse_args(sys.argv[1:])
 
 os.makedirs(args.outdir)
 
-print(sys.argv)
-
 # raws is a 'fn;fn2;fn3;...' or '*', but we use 1 file (or *) for testing so can use glob
 with open(args.input) as fp:
     srcfn = fp.read().strip()
     newfn = os.path.basename(f'{os.path.splitext(srcfn)[0]}_refined.mzML')
     with open(os.path.join(args.outdir, newfn), 'w') as fp:
         fp.write(f'{newfn} mzML file')
-with open(os.path.join(args.outdir, '.nextflow.log'), 'w') as fp:
+
+with open('.nextflow.log', 'w') as fp:
     pass

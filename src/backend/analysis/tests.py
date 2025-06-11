@@ -72,11 +72,8 @@ class AnalysisPageTest(BaseIntegrationTest):
         self.wf = am.UserWorkflow.objects.create(name='testwf', wftype=self.wftype, public=True)
         self.wf.nfwfversionparamsets.add(self.nfwf)
 
-        # Server infra
-        self.ssanaruns = rm.ServerShare.objects.create(name='analysisruns', max_security=1)
-        self.nfrunshare = rm.FileserverShare.objects.create(server=self.anaserver,
-                share=self.ssanaruns, path=os.path.join(self.rootdir, 'nf_runs'))
-        self.ssweb = rm.ServerShare.objects.create(name='web', max_security=1)
+        self.ssweb = rm.ServerShare.objects.create(name='web', max_security=1,
+                function=rm.ShareFunction.REPORTS)
         webserver = rm.FileServer.objects.create(name='web', uri='kantele.test',
                 fqdn='web', can_rsync=False, is_analysis=False, rsyncusername='',
                 rsynckeyfile='')

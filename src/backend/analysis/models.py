@@ -275,16 +275,18 @@ class Analysis(models.Model):
     storage_dir = models.TextField()
     editable = models.BooleanField(default=True)
 
-    def get_fullname(self):
-        if hasattr(self, 'nextflowsearch'):
+    def get_fullname(self, wftype=False):
+        if wftype:
+            pass
+        elif hasattr(self, 'nextflowsearch'):
             wftype = self.nextflowsearch.workflow.wftype
         else:
             wftype = UserWorkflow.WFTypeChoices.USER
         shortname = UserWorkflow.WFTypeChoices(wftype).name
         return f'{shortname}_{self.name}'
 
-    def get_run_base_dir(self):
-       cleanname = re.sub('[^a-zA-Z0-9\.\-_]', '_', self.get_fullname())
+    def get_run_base_dir(self, wftype=False):
+       cleanname = re.sub('[^a-zA-Z0-9\.\-_]', '_', self.get_fullname(wftype))
        return (f'{self.pk}_{cleanname}_{datetime.strftime(self.date, "%Y%m%d_%H.%M")}')
 
     def get_public_output_dir(self):

@@ -123,6 +123,9 @@ def run_ready_jobs(job_fn_map, job_ds_map, active_jobs):
             elif jwrapper.get_jobs_with_single_sfloc_to_wait_for(**job.kwargs).filter(timestamp__lt=job.timestamp, state__in=jj.JOBSTATES_RUNNER_WAIT).exists():
                 # Wait for aux files for jobs, e.g. search fasta, params etc, stuff not in a dataset
                 print(f'Deferring job since it demands to wait on another job for a file needed')
+                # Add job id to active jobs to make sure downstream jobs that do depend
+                # on this jobs src files will actually wait
+                active_jobs.add(job.id)
 #            elif blocking_ds := active_datasets.intersection(job_ds):
 #                print(f'Deferring job since datasets {blocking_ds} are being used in other job')
             else:

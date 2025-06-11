@@ -41,11 +41,15 @@ class RsyncOtherFileServershare(SingleFileJob):
 
     def on_create_addkwargs(self, **kwargs):
         '''Create destination sfloc db rows'''
-        sfl = self.oncreate_getfiles_query(**kwargs).values('sfile_id', 'path').get()
-        dstpath = kwargs.get('dstpath', sfl['path'])
-        dstsfl, _ = rm.StoredFileLoc.objects.update_or_create(sfile_id=sfl['sfile_id'],
-                servershare_id=kwargs['dstshare_id'], defaults={'path': dstpath, 'active': True})
-        return {'dstsfloc_id': dstsfl.pk}
+        if kwargs.get('dstsfloc_id', False):
+            dstsfl = rm.StoredFileLoc.objects.get(pk=kwargs['dstsfloc_id'])
+            return {'dstshare_id': dstsfl.servershare_id}
+        else:
+            sfl = self.oncreate_getfiles_query(**kwargs).values('sfile_id', 'path').get()
+            dstpath = kwargs.get('dstpath', sfl['path'])
+            dstsfl, _ = rm.StoredFileLoc.objects.update_or_create(sfile_id=sfl['sfile_id'],
+                    servershare_id=kwargs['dstshare_id'], defaults={'path': dstpath, 'active': True})
+            return {'dstsfloc_id': dstsfl.pk, 'dstshare_id': dstsfl.servershare_id}
 
     def check_error_on_creation(self, **kwargs):
         '''This should check errors on creation, i.e. files crashing with other files etc,
@@ -55,7 +59,7 @@ class RsyncOtherFileServershare(SingleFileJob):
         if rm.StoredFileLoc.objects.filter(sfile__filename=srcsfl['sfile__filename'],
                 path=srcsfl['path'], servershare_id=kwargs['dstshare_id'], active=True).exists():
             return ('There is already a file existing with the same name as a the target file'
-                    f' in path {dstpath}')
+                    f' in path {srcsfl["path"]}')
         return self._check_error_either(srcsfl, **kwargs)
 
     def _check_error_either(self, srcsfl, **kwargs):
