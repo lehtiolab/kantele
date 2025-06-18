@@ -321,5 +321,5 @@ class FileJob(models.Model):
     deletion, refine mzML, etc
     '''
     # FIXME move to job module
-    storedfile = models.ForeignKey(StoredFile, on_delete=models.CASCADE)
+    rawfile = models.ForeignKey(RawFile, on_delete=models.CASCADE)
     job = models.ForeignKey(Job, on_delete=models.CASCADE)

@@ -316,7 +316,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
         obsolete = sflocs_passed.exclude(sfile__rawfile__datasetrawfile__dataset__datasetanalysis__in=dsa).values('sfile_id')
         models.AnalysisDSInputFile.objects.filter(analysisset__analysis=analysis, sfile__in=obsolete).delete()
         analysis.analysisfilevalue_set.filter(sfile__in=obsolete).delete()
-        rm.FileJob.objects.filter(job_id=job.pk, storedfile__in=obsolete).delete()
+        rm.FileJob.objects.filter(job_id=job.pk, rawfile__storedfile__id__in=obsolete).delete()
         for del_sf in obsolete:
             # FIXME setnames/frac is specific
             kwargs['setnames'].pop(str(del_sf['sfile_id']))

@@ -261,15 +261,11 @@ def populate_files(dbfns):
             it['owner'] = fn.rawfile.datasetrawfile.dataset.datasetowner_set.select_related('user').first().user.username
             dsrf = fn.rawfile.datasetrawfile
             it['dataset'] = dsrf.dataset_id
-            fjobs = filemodels.FileJob.objects.select_related('job').filter(storedfile_id=fn.id)
+            fjobs = filemodels.FileJob.objects.select_related('job').filter(rawfile=fn.rawfile)
             currentjobs = fjobs.exclude(job__state__in=jj.JOBSTATES_DONE)
             it['job_ids'] = [x.job_id for x in currentjobs]
             it['jobs'] = [x.job.state for x in currentjobs]
-            if is_mzml:
-                anjobs = fjobs.filter(job__nextflowsearch__isnull=False)
-            elif hasattr(fn.rawfile.producer, 'msinstrument'):
-                mzmls = fn.rawfile.storedfile_set.filter(mzmlfile__isnull=False)
-                anjobs = filemodels.FileJob.objects.filter(storedfile__in=mzmls, job__nextflowsearch__isnull=False)
+            anjobs = fjobs.filter(job__nextflowsearch__isnull=False)
             it['analyses'].extend([x.job.nextflowsearch.analysis_id for x in anjobs.select_related('job__nextflowsearch')])
         elif hasattr(fn, 'analysisresultfile'):
             it['owner'] = fn.analysisresultfile.analysis.user.username
@@ -378,7 +374,7 @@ def populate_analysis(analyses, user):
         ananame = Throwaway({'name': ana['name'], 'nextflowsearch': nfsearch})
         ananame.get_fullname = anmodels.Analysis.get_fullname
         if ana['nextflowsearch__job_id']:
-            fjobs = filemodels.FileJob.objects.filter(job_id=ana['nextflowsearch__job_id']).values('storedfile_id')
+            fjobs = filemodels.FileJob.objects.filter(job_id=ana['nextflowsearch__job_id']).values('rawfile_id')
             fjobdsets = dsmodels.Dataset.objects.filter(datasetrawfile__rawfile__storedfile__in=[x['storedfile_id'] for x in fjobs]).distinct('pk').values('pk')
             nfs = {'name': ananame.get_fullname(),
                     'jobstate': ana['nextflowsearch__job__state'],
@@ -742,10 +738,10 @@ def get_file_info(request, file_id):
         desc = False
     info['description'] = desc
     if hasattr(sfile.rawfile, 'datasetrawfile'):
-        dsrf = sfile.rawfile.datasetrawfile
-        info['dataset'] = dsrf.dataset_id
+        info['dataset'] = sfile.rawfile.datasetrawfile.dataset_id
         if is_mzml:
-            anjobs = filemodels.FileJob.objects.filter(storedfile_id=file_id, job__nextflowsearch__isnull=False)
+            anjobs = filemodels.FileJob.objects.filter(rawfile=sfile.rawfile,
+                    job__nextflowsearch__isnull=False)
         elif hasattr(sfile.rawfile.producer, 'msinstrument') and not is_mzml:
             mzmls = sfile.rawfile.storedfile_set.filter(mzmlfile__isnull=False)
             anjobs = filemodels.FileJob.objects.filter(storedfile__in=mzmls, job__nextflowsearch__isnull=False)

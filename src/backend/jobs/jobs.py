@@ -4,7 +4,7 @@ from celery import states
 
 from kantele import settings
 from jobs.models import Task, Job, JobError
-from rawstatus.models import StoredFile, StoredFileLoc, DataSecurityClass
+from rawstatus.models import RawFile, StoredFile, StoredFileLoc, DataSecurityClass
 from datasets import models as dm
 
 
@@ -153,10 +153,10 @@ class BaseJob:
         else:
             return Job.objects.none()
 
-    def get_sf_ids_for_filejobs(self, **kwargs):
+    def get_rf_ids_for_filejobs(self, **kwargs):
         """This is run before running job, to define files used by
         the job (so it cant run if if files are in use by other job)"""
-        return [x['sfile_id'] for x in self.oncreate_getfiles_query(**kwargs).values('sfile_id')]
+        return [x['sfile__rawfile_id'] for x in self.oncreate_getfiles_query(**kwargs).values('sfile__rawfile_id')]
 
     def get_dsids_jobrunner(self, **kwargs):
         return []
@@ -259,11 +259,11 @@ class DatasetJob(BaseJob):
     def get_dsids_jobrunner(self, **kwargs):
         return [x.pk for x in dm.Dataset.objects.filter(datasetserver__pk=kwargs['dss_id'])]
 
-    def get_sf_ids_for_filejobs(self, **kwargs):
+    def get_rf_ids_for_filejobs(self, **kwargs):
         '''Let runner wait for entire dataset'''
         dss = dm.DatasetServer.objects.get(pk=kwargs['dss_id'])
-        return [x['pk'] for x in StoredFile.objects.filter(
-            rawfile__datasetrawfile__dataset__datasetserver=dss).values('pk')]
+        return [x['pk'] for x in RawFile.objects.filter(
+            datasetrawfile__dataset__datasetserver=dss).values('pk')]
 
     def oncreate_getfiles_query(self, **kwargs):
         '''Get all files which had a datasetrawfile association when this job was created/retried,
@@ -283,11 +283,11 @@ class DatasetJob(BaseJob):
 class MultiDatasetJob(BaseJob):
     '''For jobs on multiple datasets'''
 
-    def get_sf_ids_for_filejobs(self, **kwargs):
+    def get_rf_ids_for_filejobs(self, **kwargs):
         '''Let runner wait for entire datasets'''
         dss = dm.DatasetServer.objects.filter(pk__in=kwargs['dss_ids'])
-        return [x['pk'] for x in StoredFile.objects.filter(
-            rawfile__datasetrawfile__dataset__datasetserver__in=dss).values('pk')]
+        return [x['pk'] for x in RawFile.objects.filter(
+            datasetrawfile__dataset__datasetserver__in=dss).values('pk')]
 
     def oncreate_getfiles_query(self, **kwargs):
         '''As for dataset job'''

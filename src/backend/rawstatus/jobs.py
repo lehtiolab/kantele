@@ -34,10 +34,10 @@ class RsyncOtherFileServershare(SingleFileJob):
     def get_dsids_jobrunner(self, **kwargs):
         return []
 
-    def get_sf_ids_for_filejobs(self, **kwargs):
+    def get_rf_ids_for_filejobs(self, **kwargs):
         """This is run before running job, to define files used by
         the job (so it cant run if if files are in use by other job)"""
-        return [x['sfile_id'] for x in self.getfiles_query(**kwargs).values('sfile_id')]
+        return [x['sfile__rawfile_id'] for x in self.oncreate_getfiles_query(**kwargs).values('sfile__rawfile_id')]
 
     def on_create_addkwargs(self, **kwargs):
         '''Create destination sfloc db rows'''
@@ -151,10 +151,10 @@ class RemoveFilesFromServershare(RemoveDatasetFilesFromServershare):
     def get_dsids_jobrunner(self, **kwargs):
         return []
 
-    def get_sf_ids_for_filejobs(self, **kwargs):
+    def get_rf_ids_for_filejobs(self, **kwargs):
         """This is run before running job, to define files used by
         the job (so it cant run if if files are in use by other job)"""
-        return [x['sfile_id'] for x in self.getfiles_query(**kwargs).values('sfile_id')]
+        return [x['sfile__rawfile_id'] for x in self.getfiles_query(**kwargs).values('sfile__rawfile_id')]
 
 
 class RsyncFileTransferFromWeb(SingleFileJob):

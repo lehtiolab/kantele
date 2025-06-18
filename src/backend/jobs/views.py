@@ -435,8 +435,8 @@ def do_retry_job(job, force=False):
     # have changed files associated to a dset or such.
     jwrap = jobmap[job.name](job.pk)
     FileJob.objects.filter(job_id=job.pk).delete()
-    FileJob.objects.bulk_create([FileJob(storedfile_id=sf_id, job_id=job.id) for sf_id in 
-        jwrap.get_sf_ids_for_filejobs(**job.kwargs)])
+    FileJob.objects.bulk_create([FileJob(rawfile_id=rf_id, job_id=job.id) for rf_id in 
+        jwrap.get_rf_ids_for_filejobs(**job.kwargs)])
     jobq = models.Job.objects.filter(pk=job.pk, state__in=JOBSTATES_RETRYABLE).update(
             state=Jobstates.PENDING)
     try:

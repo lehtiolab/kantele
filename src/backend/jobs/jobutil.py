@@ -65,8 +65,8 @@ def create_job(name, state=False, **kwargs):
         job = Job.objects.create(funcname=name, timestamp=timezone.now(),
             state=state, kwargs=kwargs)
         jobdata = {'id': job.id, 'kwargs': kwargs, 'error': False}
-        FileJob.objects.bulk_create([FileJob(storedfile_id=sf_id, job_id=job.id) for sf_id in 
-            jwrap.get_sf_ids_for_filejobs(**kwargs)])
+        FileJob.objects.bulk_create([FileJob(rawfile_id=rf_id, job_id=job.id) for rf_id in 
+            jwrap.get_rf_ids_for_filejobs(**kwargs)])
     return jobdata
 
 
@@ -81,6 +81,6 @@ def create_job_without_check(name, state=False, **kwargs):
         create_job(extrajob['name'], **extrajob['kwargs'])
     job = Job.objects.create(funcname=name, timestamp=timezone.now(),
             state=state, kwargs=kwargs)
-    FileJob.objects.bulk_create([FileJob(storedfile_id=sf_id, job_id=job.id) for sf_id in 
-            jwrap.get_sf_ids_for_filejobs(**kwargs)])
+    FileJob.objects.bulk_create([FileJob(rawfile_id=rf_id, job_id=job.id) for rf_id in 
+            jwrap.get_rf_ids_for_filejobs(**kwargs)])
     return {'id': job.id, 'kwargs': kwargs, 'error': False}
