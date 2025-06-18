@@ -60,7 +60,7 @@ def create_job(name, state=False, **kwargs):
         # addkwargs should be here, after error check, otehrwise
         # new SFL will be created at error check even when its failing
         kwargs.update(jwrap.on_create_addkwargs(**kwargs))
-        for extrajob in jwrap.on_create_extrajobs(**kwargs):
+        for extrajob in jwrap.on_create_prep_rsync_jobs(**kwargs):
             create_job(extrajob['name'], **extrajob['kwargs'])
         job = Job.objects.create(funcname=name, timestamp=timezone.now(),
             state=state, kwargs=kwargs)
@@ -77,7 +77,7 @@ def create_job_without_check(name, state=False, **kwargs):
         state = Jobstates.PENDING
     jwrap = jobmap[name](False)
     kwargs.update(jwrap.on_create_addkwargs(**kwargs))
-    for extrajob in jwrap.on_create_extrajobs(**kwargs):
+    for extrajob in jwrap.on_create_prep_rsync_jobs(**kwargs):
         create_job(extrajob['name'], **extrajob['kwargs'])
     job = Job.objects.create(funcname=name, timestamp=timezone.now(),
             state=state, kwargs=kwargs)

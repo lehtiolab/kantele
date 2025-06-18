@@ -5,12 +5,14 @@ services:
             - mq
             - analysis1
             - analysis_ssh_1
+            - analysis_storage_1
             - storage_queue_1
             - storage_fastqueue_1
-            - storage_queue_2
-            - storage_fastqueue_2
+            - analysis2
+            - analysis_storage_2
+            - analysis_fastqueue_2
             - storage_ssh_1
-            - storage_ssh_2
+            - analysis_ssh_2
             - storage_downloads
             - storage_web_rsync
             - tulos_ingester
@@ -87,7 +89,6 @@ services:
         environment:
             KANTELEHOST: web
             TMPSHARE: '/storage/tmp'
-            WEBSHARE: '/storage/web'
             ANALYSISSHARE: '/storage/analysis'
             STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
 
@@ -106,7 +107,6 @@ services:
         environment:
             KANTELEHOST: web
             TMPSHARE: '/storage/tmp'
-            WEBSHARE: '/storage/web'
             ANALYSISSHARE: '/storage/analysis'
             STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
 
@@ -126,13 +126,45 @@ services:
               source: ../../data/teststorage
               target: /storage
 
-    storage_queue_2:
+    analysis2:
+        image: nextflow
+        build:
+            context: ../
+            dockerfile: ./docker/Dockerfile
+            target: nextflow
+            args:
+                USER_ID: "${USER_ID:-You must run export USER_ID}"
+                GROUP_ID: "${GROUP_ID:-You must run export GROUP_ID}"
+        command: celery -A kantele worker -Q analysis2__nextflow -n analysis.%h --concurrency=1
+        env_file:
+            - testing.env
+        volumes:
+            - type: bind
+              source: ../backend
+              target: /kantele
+            - type: bind
+              source: ../../data/teststorage
+              target: /storage
+        environment:
+            KANTELEHOST: web
+            PROTOCOL: http
+            RABBITHOST: mq
+            RABBIT_VHOST: "${RABBIT_VHOST}"
+            RABBITUSER: "${RABBITUSER:-guest}"
+            RABBITPASS: "${RABBITPASS:-guest}"
+            ANALYSISSHARE: '/storage/analysis'
+            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
+            NXF_COMMAND: 'python3'
+            NEXTFLOW_RUNDIR: '/storage/nf_runs2'
+            APIKEY: "${APIKEY_ANALYSIS}"
+
+    analysis_storage_2:
         extends:
             file: ./docker-compose-dev.yml
             service: storage
         env_file:
             - testing.env
-        command: celery -A kantele worker -Q storage2__rsyncstorage -n storage_mv.%h --concurrency=1
+        command: celery -A kantele worker -Q analysis2__rsyncstorage -n storage_mv.%h --concurrency=1
         volumes:
             # Overwrite dev storage here
             - type: bind
@@ -142,13 +174,13 @@ services:
             KANTELEHOST: web
             STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
 
-    storage_fastqueue_2:
+    analysis_fastqueue_2:
         extends:
             file: ./docker-compose-dev.yml
             service: storage
         env_file:
             - testing.env
-        command: celery -A kantele worker -Q storage2__fastfnop -n storage_mv.%h --concurrency=1
+        command: celery -A kantele worker -Q analysis2__fastfnop -n storage_mv.%h --concurrency=1
         volumes:
             # Overwrite dev storage here
             - type: bind
@@ -159,7 +191,7 @@ services:
             STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
 
 
-    storage_ssh_2:
+    analysis_ssh_2:
         image: rsync_stor
         build:
             context: ../
@@ -207,7 +239,6 @@ services:
         environment:
             KANTELEHOST: web
             TMPSHARE: '/storage/tmp'
-            WEBSHARE: '/storage/web'
             ANALYSISSHARE: '/storage/analysis'
             STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
             RSYNC_SSHPORT: "${RSYNC_SSHPORT}"
@@ -228,7 +259,6 @@ services:
         environment:
             KANTELEHOST: web
             TMPSHARE: '/storage/tmp'
-            WEBSHARE: '/storage/web'
             ANALYSISSHARE: '/storage/analysis'
             STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
             RSYNC_SSHPORT: "${RSYNC_SSHPORT}"
@@ -280,6 +310,22 @@ services:
             - type: bind
               source: ../../data/teststorage
               target: /storage
+
+    analysis_storage_1:
+        extends:
+            file: ./docker-compose-dev.yml
+            service: storage
+        env_file:
+            - testing.env
+        command: celery -A kantele worker -Q analysis1__rsyncstorage -n storage_mv.%h --concurrency=1
+        volumes:
+            # Overwrite dev storage here
+            - type: bind
+              source: ../../data/teststorage
+              target: /storage
+        environment:
+            KANTELEHOST: web
+            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
 
 
 

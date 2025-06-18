@@ -929,10 +929,11 @@ def create_mzmls(request):
     # Get all sfl which are on a share attached to analysis server
     rawsfl = filemodels.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=dset,
             active=True, sfile__mzmlfile__isnull=True,
-            servershare__fileservershare__server__is_analysis=True)
-    if not rawsfl.count():
-        return JsonResponse({'error': 'This dataset does not have its raw files on a server with '
-            'analysis capability, please make sure it is correctly stored'}, status=403)
+            servershare__fileservershare__server__is_analysis=True, servershare__active=True,
+            servershare__fileservershare__server__active=True)
+    if rawsfl.count() != num_rawfns:
+        return JsonResponse({'error': 'This dataset does not have (all) its raw files on a server '
+            'with analysis capability, please make sure it is correctly stored'}, status=403)
 
     # Saving starts here
     # Remove other pwiz mzMLs
@@ -961,13 +962,38 @@ def create_mzmls(request):
     if mzjob['error']:
         pass
     elif mzjob['kwargs'].get('dstsfloc_ids', False):
-        for other_dss in dsmodels.DatasetServer.objects.filter(dataset=dset, active=True).exclude(
-                pk=dss_id).values('storageshare_id', 'pk'):
-            # Put result files in all the other shares datasets
-            create_job('rsync_dset_files_to_servershare', dss_id=other_dss['pk'],
-                    sfloc_ids=mzjob['kwargs']['dstsfloc_ids'],
-                    dstshare_id=other_dss['storageshare_id'])
+        dstshare_ids_dss = {x.storageshare_id: x.pk for x in  dsmodels.DatasetServer.objects.filter(
+            dataset=dset, active=True)}
+        share_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
+                dstshare_ids_dss.keys(), mzjob['kwargs']['server_id'])
+        # First put result in local-to-analysis-server share
+        for dstshare_id in share_classes['local']:
+            create_job('rsync_dset_files_to_servershare', dss_id=dstshare_ids_dss[dstshare_id],
+                    sfloc_ids=mzjob['kwargs']['dstsfloc_ids'], dstshare_id=dstshare_id)
+        # Then put result in rsync-accessible share
+        for dstshare_id in share_classes['rsync_sourcable']:
+            srcjob = create_job('rsync_dset_files_to_servershare', dstshare_id=dstshare_id,
+                    dss_id=dstshare_ids_dss[dstshare_id], sfloc_ids=mzjob['kwargs']['dstsfloc_ids'])
+            src_sflids_for_remote = srcjob['kwargs']['dstsfloc_ids']
+        if share_classes['remote'] and not share_classes['rsync_sourcable']:
+            # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
+            # controller (and sensitive classed)
+            dstshare = filemodels.ServerShare.objects.filter(function=filemodels.ShareFunction.INBOX
+                    ).values('pk').first()
+            src_sflids_for_remote = []
+            for sflpk in mzjob['kwargs']['dstsfloc_ids']:
+                srcjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflpk,
+                        dstshare_id=dstshare['pk'], dstpath=filemodels.ServerShare.get_inbox_path(
+                            dset_id=dset.pk))
+                src_sflids_for_remote.append(srcjob['kwargs']['dstsfloc_id'])
+        for dstshare_id in share_classes['remote']:
+            create_job('rsync_dset_files_to_servershare', dss_id=dstshare_ids_dss[dstshare_id],
+                    sfloc_ids=src_sflids_for_remote, dstshare_id=dstshare_id)
     return JsonResponse({})
+
+
+    
+
 
 
 @require_POST
@@ -999,12 +1025,13 @@ def refine_mzmls(request):
             mzmlfile__isnull=False, checked=True)
     nr_refined = mzmls.filter(mzmlfile__refined=True, deleted=False).count()
     normal_mzml = mzmls.filter(mzmlfile__refined=False)
-    nr_mzml = normal_mzml.count()
-    nr_exist_mzml = normal_mzml.filter(deleted=False, storedfileloc__purged=False).count()
+    nr_exist_mzml = normal_mzml.filter(deleted=False, storedfileloc__active=True).count()
     nr_dsrs = dset.datasetrawfile_set.count()
-    if nr_mzml and nr_mzml == nr_refined:
+    if not nr_dsrs:
+        return JsonResponse({'error': 'There are no raw files in dataset'}, status=403)
+    elif nr_refined and normal_mzml.count() == nr_refined:
         return JsonResponse({'error': 'Refined data already exists'}, status=403)
-    elif not nr_exist_mzml or nr_exist_mzml < nr_dsrs:
+    elif nr_exist_mzml < nr_dsrs:
         # This also checks for accidental identical names of the files (shouldnt be possible
         # inside a dataset, but still)
         return JsonResponse({'error': 'Need to create normal mzMLs before refining'}, status=403)
@@ -1012,17 +1039,15 @@ def refine_mzmls(request):
     # Check if we have files on a server with analysis
     mzmlsfl = filemodels.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=dset,
             active=True, sfile__mzmlfile__isnull=False,
-            servershare__fileservershare__server__is_analysis=True)
+            servershare__fileservershare__server__is_analysis=True, servershare__active=True,
+            servershare__fileservershare__server__active=True)
     # FIXME check if already exist refined files (active=True, same pipeline)
     if not mzmlsfl.count():
         return JsonResponse({'error': 'This dataset does not have its input mzML files on a server '
             'with analysis capability, please make sure it is correctly stored'}, status=403)
-    # Pick one but any servershare which is reachable on an analysis server:
-    source_ssid = mzmlsfl.values('servershare_id').first()['servershare_id']
-
     # Check DB
     if dbid := data.get('dbid'):
-        if filemodels.StoredFile.objects.filter(pk=dbid, filetype__name=settings.DBFA_FT_NAME).count() != 1:
+        if not filemodels.StoredFile.objects.filter(pk=dbid, filetype__name=settings.DBFA_FT_NAME).count():
             return JsonResponse({'error': 'Wrong database to refine with'}, status=403)
     else:
         return JsonResponse({'error': 'Must pass a database to refine with'}, status=400)
@@ -1035,24 +1060,52 @@ def refine_mzmls(request):
     # Checks done, refine data, now we can start storing POST data
     # Move entire project if not on same file server (403 is checked before saving anything
     # or queueing jobs)
-    # FIXME get analysis if it does exist, in case someone reruns?
+    # Always create new analysis - some kind of trail, otherwise you get same analysis for each
+    # refining in time
     analysis = anmodels.Analysis.objects.create(user=request.user, name=f'refine_dataset_{dset.pk}',
             editable=False)
+
+    # Pick one but any servershare which is reachable on an analysis server:
+    srcdss = dsmodels.DatasetServer.objects.filter(dataset=dset,
+            storageshare_id__in=mzmlsfl.values('servershare_id')).values('pk', 'storageshare_id').first()
+    dss_id, source_ssid = srcdss['pk'], srcdss['storageshare_id']
     srcsfl_pk = [x['pk'] for x in mzmlsfl.filter(servershare_id=source_ssid).values('pk')]
-    dss_id = dsmodels.DatasetServer.objects.filter(dataset=dset,
-            storageshare_id=source_ssid).values('pk').get()['pk']
     job = create_job('refine_mzmls', dss_id=dss_id, analysis_id=analysis.id, wfv_id=data['wfid'],
             sfloc_ids=srcsfl_pk, dbfn_id=dbid, qtype=dset.quantdataset.quanttype.shortname,
             instrument=instrument)
     if job['error']:
-        pass
-    elif job['kwargs']['dstsfloc_ids']:
-        for other_dss in dsmodels.DatasetServer.objects.filter(dataset=dset, active=True).exclude(
-                pk=dss_id).values('storageshare_id', 'pk'):
-            # Put result files in all the other shares datasets
-            create_job('rsync_dset_files_to_servershare', dss_id=other_dss['pk'],
-                    sfloc_ids=job['kwargs']['dstsfloc_ids'].values(),
-                    dstshare_id=other_dss['storageshare_id'])
+        analysis.delete()
+        return JsonResponse({'error': 'Error trying to create a refine dataset job: {job["error"]}'},
+            status=400) 
+    elif job['kwargs'].get('dstsfloc_ids', False):
+        dstshare_ids_dss = {x.storageshare_id: x.pk for x in  dsmodels.DatasetServer.objects.filter(
+            dataset=dset, active=True)}
+        share_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
+                dstshare_ids_dss.keys(), job['kwargs']['server_id'])
+        # First put result in local-to-analysis-server share
+        for dstshare_id in share_classes['local']:
+            create_job('rsync_dset_files_to_servershare', dss_id=dstshare_ids_dss[dstshare_id],
+                    sfloc_ids=job['kwargs']['dstsfloc_ids'], dstshare_id=dstshare_id)
+        # Then put result in rsync-accessible share
+        for dstshare_id in share_classes['rsync_sourcable']:
+            srcjob = create_job('rsync_dset_files_to_servershare', dstshare_id=dstshare_id,
+                    dss_id=dstshare_ids_dss[dstshare_id], sfloc_ids=job['kwargs']['dstsfloc_ids'])
+            src_sflids_for_remote = srcjob['kwargs']['dstsfloc_ids']
+        if share_classes['remote'] and not share_classes['rsync_sourcable']:
+            # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
+            # controller (and sensitive classed)
+            dstshare = filemodels.ServerShare.objects.filter(function=filemodels.ShareFunction.INBOX
+                    ).values('pk').first()
+            src_sflids_for_remote = []
+            for sflpk in job['kwargs']['dstsfloc_ids']:
+                srcjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflpk,
+                        dstshare_id=dstshare['pk'], dstpath=filemodels.ServerShare.get_inbox_path(
+                            dset_id=dset.pk))
+                src_sflids_for_remote.append(srcjob['kwargs']['dstsfloc_id'])
+        for dstshare_id in share_classes['remote']:
+            create_job('rsync_dset_files_to_servershare', dss_id=dstshare_ids_dss[dstshare_id],
+                    sfloc_ids=src_sflids_for_remote, dstshare_id=dstshare_id)
+
     uwf = anmodels.UserWorkflow.objects.get(nfwfversionparamsets=data['wfid'],
             wftype=anmodels.UserWorkflow.WFTypeChoices.SPEC)
     anmodels.NextflowSearch.objects.update_or_create(analysis=analysis, defaults={

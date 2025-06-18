@@ -25,7 +25,7 @@ from celery import states as taskstates
 
 from kantele import settings
 from rawstatus.models import (RawFile, Producer, StoredFile, ServerShare, StoredFileLoc,
-                              SwestoreBackedupFile, StoredFileType, UserFile,
+                              FileserverShare, StoredFileType, UserFile,
                               MSFileData, PDCBackedupFile, UploadToken, UploadFileType)
 from rawstatus import jobs as rsjobs
 from rawstatus.tasks import search_raws_downloaded
@@ -35,7 +35,7 @@ from datasets import models as dsmodels
 from dashboard import models as dashmodels
 from jobs import models as jm
 from jobs import jobs as jobutil
-from jobs.jobutil import create_job, check_job_error
+from jobs.jobutil import create_job, create_job_without_check, check_job_error
 
 
 # TODO this is temporary?
@@ -662,6 +662,31 @@ def process_file_confirmed_ready(rfn, sfn, sfloc, upload, desc):
     #    sfn.save()
     #    create_job('purge_files', sf_ids=[sfn.pk], need_archive=True)
     return newname
+
+
+# /files/newmzml/
+@require_POST
+def new_mzml_uploaded(request):
+    '''This is for uploading files from an instrument, so not from a user using the
+    upload script. We dont use a token since the scripts run on our own server.
+    '''
+    data =  json.loads(request.body.decode('utf-8'))
+    try:
+        sflpk, dstsflpk, md5, filedate_raw = data['sflpk'], data.get('dst_sflpk'), data['md5'], data['date']
+        file_date = datetime.strftime(
+            datetime.fromtimestamp(float(filedate_raw)), '%Y-%m-%d %H:%M')
+    except ValueError as error:
+        return JsonResponse({'error': 'Date passed to registration incorrectly formatted'}, status=400)
+    except KeyError as error:
+        print(f'Request to upload instrument file with missing parameter, {error}')
+        return JsonResponse({'error': 'Bad request'}, status=400)
+    sfl = StoredFileLoc.objects.get(pk=sflpk)
+    sfl.sfile.md5 = md5
+    sfl.sfile.checked = True
+    sfl.sfile.save()
+    sfl.purged = False
+    sfl.save()
+    return JsonResponse({})
 
 
 @require_POST

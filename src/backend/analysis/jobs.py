@@ -41,8 +41,9 @@ class RefineMzmls(DatasetJob):
         in the src dataset dir) will after that be rsynced to all the other 
         shares where the dataset is, and we need the ids for that job'''
         local_dst_sfls, remote_dst_sfls = [], []
-        dst_sfls = {}
+        dst_sfls = []
         dss = dm.DatasetServer.objects.values('storageshare_id').get(pk=kwargs['dss_id'])
+        # Pick any server capable:
         anaserver = rm.FileServer.objects.filter(fileservershare__share_id=dss['storageshare_id'],
                 is_analysis=True).first()
         analocalshare = rm.FileserverShare.objects.filter(share__function=rm.ShareFunction.NFRUNS,
@@ -62,14 +63,7 @@ class RefineMzmls(DatasetJob):
             if localmzsf:
                 local_dst_sfls.append(localmzsfl.pk)
 
-            # Create remote mzsfl since we need to already know in advance where to rsync it
-            # in the view that calls this, as that will do a full dset sync over shares.
-            remote_mzsf, remote_mzsfl = get_or_create_mzmlentry(sfl.sfile, pwiz=sfl.sfile.mzmlfile.pwiz,
-                    refined=True, servershare_id=sfl.servershare_id, path=sfl.path,
-                    mzmlfilename=mzmlfilename)
-            if remote_mzsf:
-                remote_dst_sfls.append(remote_mzsfl.pk)
-                dst_sfls[localmzsfl.pk] = remote_mzsfl.pk
+            dst_sfls.append(localmzsfl.pk)
         return {'dstsfloc_ids': dst_sfls, 'server_id': anaserver.pk,
                 'srcsharepath': anasrcshareonserver['path']}
 
@@ -78,9 +72,7 @@ class RefineMzmls(DatasetJob):
 
     def process(self, **kwargs):
         """Return all a dset mzMLs but not those that have a refined mzML associated, to not do extra work."""
-        dss = dm.DatasetServer.objects.values('storageshare__name', 'storageshare_id', 'storage_loc',
-                'dataset_id').get(pk=kwargs['dss_id'])
-        # Pick any server capable:
+        dss = dm.DatasetServer.objects.values('storage_loc').get(pk=kwargs['dss_id'])
         anaserver = rm.FileServer.objects.get(pk=kwargs['server_id'])
         self.queue = self.get_server_based_queue(anaserver.name, settings.QUEUE_NXF)
         sharemap = {fss['share_id']: fss['path'] for fss in
@@ -104,23 +96,20 @@ class RefineMzmls(DatasetJob):
         stagefiles = {'--tdb': [(os.path.join(sharemap[dbfn['servershare_id']], dbfn['path']),
             dbfn['sfile__filename'])]}
 
-        timestamp = datetime.strftime(analysis.date, '%Y%m%d_%H.%M')
         mzmls = []
         srcpath = os.path.join(kwargs['srcsharepath'], dss['storage_loc'])
         for x in self.getfiles_query(**kwargs).values('sfile__rawfile_id', 'sfile__filename', 'path',
                 ):
             ref_sfl = rm.StoredFileLoc.objects.values('pk', 'sfile__filename').get(
-                    pk__in=kwargs['dstsfloc_ids'].keys(), sfile__rawfile_id=x['sfile__rawfile_id'])
+                    pk__in=kwargs['dstsfloc_ids'], sfile__rawfile_id=x['sfile__rawfile_id'])
             mzmls.append({'srcpath': srcpath, 'fn': x['sfile__filename'], 'refinedpk': ref_sfl['pk'],
-                'refinedname': ref_sfl['sfile__filename'],
-                'final_sflpk': kwargs['dstsfloc_ids'][str(ref_sfl['pk'])]})
+                'refinedname': ref_sfl['sfile__filename']})
         if not mzmls:
             return
         params = ['--instrument', kwargs['instrument']]
         if kwargs['qtype'] != 'labelfree':
             params.extend(['--isobaric', kwargs['qtype']])
-        run = {'timestamp': timestamp,
-               'analysis_id': analysis.id,
+        run = {'analysis_id': analysis.id,
                'token': analysis.nextflowsearch.token,
                'wf_commit': nfwf.commit,
                'nxf_wf_fn': nfwf.filename,

@@ -212,7 +212,7 @@ def refine_mzmls(self, run, params, mzmls, stagefiles, profiles, nf_version, sta
         outfiles_db[fn] = (path, outfn)
     for non_ref_mzfn in mzmls:
         path, reffn = outfiles_db[non_ref_mzfn['refinedname']]
-        regfile = new_register_mzmlfile(non_ref_mzfn['refinedpk'], non_ref_mzfn['final_sflpk'], reffn, path, run['server_id'], run['analysis_id'])
+        regfile = register_mzmlfile(non_ref_mzfn['refinedpk'], reffn, path, run['server_id'])
     reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:analysisdone'))
     postdata = {'client_id': settings.APIKEY, 'analysis_id': run['analysis_id'],
             'task': self.request.id}
@@ -476,11 +476,10 @@ def new_register_resultfile(fname, path, server_id, analysis_id):
     return rj
  
 
-def new_register_mzmlfile(sflpk, dstsflpk, fname, path, server_id, analysis_id):
+def register_mzmlfile(sflpk, fname, path, server_id):
     fullpath = os.path.join(path, fname)
     reg_url = urljoin(settings.KANTELEHOST, reverse('files:uploaded_mzml'))
     postdata = {'sflpk': sflpk,
-                'dst_sflpk': dstsflpk,
                 'client_id': settings.APIKEY,
                 'md5': calc_md5(fullpath),
                 'size': os.path.getsize(fullpath),
@@ -489,7 +488,6 @@ def new_register_mzmlfile(sflpk, dstsflpk, fname, path, server_id, analysis_id):
                 'sharepath': settings.NF_RUNDIR,
                 'path': os.path.relpath(path, settings.NF_RUNDIR),
                 'server_id': server_id,
-                'analysis_id': analysis_id,
                 }
     resp = requests.post(url=reg_url, json=postdata)
     if resp.status_code != 500:

@@ -9,7 +9,7 @@ from celery.exceptions import MaxRetriesExceededError
 
 from kantele import settings
 from jobs.post import update_db, taskfail_update_db
-from analysis.tasks import create_runname_dirname, prepare_nextflow_run, run_nextflow, transfer_resultfile, check_in_transfer_client, process_error_from_nf_log, copy_stage_files
+from analysis.tasks import create_runname_dirname, prepare_nextflow_run, run_nextflow, register_mzmlfile, process_error_from_nf_log, copy_stage_files
 from rawstatus.tasks import calc_md5, delete_empty_dir
 
 # Updating stuff in tasks happens over the API, assume no DB is touched. This
@@ -19,12 +19,10 @@ from rawstatus.tasks import calc_md5, delete_empty_dir
 
 @shared_task(bind=True)
 def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profiles, stagescratchdir):
-    postdata = {'client_id': settings.APIKEY, 'task': self.request.id}
-    rundir = create_runname_dirname(run)
-    params, gitwfdir, stagedir, scratchdir = prepare_nextflow_run(run, self.request.id, rundir,
+    basedir = create_runname_dirname(run)
+    params, gitwfdir, stagedir, scratchdir = prepare_nextflow_run(run, self.request.id, basedir,
             {}, params, stagescratchdir)
     # Stage raws if there is a stagedir
-    print(f'Stagedir is {stagedir}')
     if scratchdir:
         rawdir = os.path.join(scratchdir, 'raws')
         try:
@@ -38,7 +36,7 @@ def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profile
         cmdraws = ';'.join([os.path.join(x[0], x[1]) for x in raws])
         params.extend(['--raws', cmdraws])
     try:
-        run_outdir = run_nextflow(run, params, rundir, gitwfdir, profiles, nf_version, scratchdir)
+        run_outdir = run_nextflow(run, params, basedir, gitwfdir, profiles, nf_version, scratchdir)
     except subprocess.CalledProcessError as e:
         errmsg = process_error_from_nf_log(os.path.join(gitwfdir, '.nextflow.log'))
         taskfail_update_db(self.request.id, errmsg)
@@ -48,18 +46,13 @@ def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profile
     token = False
     transfer_url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
     for raw in raws:
-        token = check_in_transfer_client(self.request.id, token, ftype_name)
-        srcfpath = os.path.join(run_outdir, raw[3])
-        transfer_resultfile(run['dstsharepath'], run['dstpath'], srcfpath,
-                transfer_url, token, self.request.id, raw[2], calc_md5(srcfpath), raw[3])
-    # FIXME first check tstate so no dup transfers used?
-    # TODO we're only reporting task finished in this POST call, but there is no specific route
-    # for that.
+        regfile = register_mzmlfile(raw[2], raw[3], run_outdir, run['server_id'])
     url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
+    postdata = {'client_id': settings.APIKEY, 'task': self.request.id}
     update_db(url, json=postdata)
     if scratchdir:
         shutil.rmtree(scratchdir)
-    shutil.rmtree(rundir)
+    shutil.rmtree(gitwfdir)
 
 
 @shared_task(bind=True)

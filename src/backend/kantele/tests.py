@@ -48,10 +48,15 @@ class BaseTest(TestCase):
         self.cl.login(username=username, password=password)
         # storage backend
         self.storagecontroller = rm.FileServer.objects.create(name='storage1', uri='s1.test',
-                fqdn='storage_ssh_1', can_rsync=True, is_analysis=False, rsyncusername='kantele',
+                fqdn='storage_ssh_1', can_rsync_remote=True, is_analysis=False, rsyncusername='kantele',
                 rsynckeyfile='/kantelessh/rsync_key')
         self.anaserver = rm.FileServer.objects.create(name='analysis1', uri='ana.test',
                 fqdn='analysis_ssh_1', is_analysis=True, rsyncusername='kantele', rsynckeyfile='/kantelessh/rsync_key')
+        self.ssinbox = rm.ServerShare.objects.create(name='inbox', max_security=2,
+                function=rm.ShareFunction.INBOX)
+        self.inboxctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
+                share=self.ssinbox, path=os.path.join(self.rootdir, 'inbox'))
+
         self.sstmp = rm.ServerShare.objects.create(name=settings.TMPSHARENAME, max_security=1,
                 function=rm.ShareFunction.RAWDATA)
         rm.FileserverShare.objects.create(server=self.storagecontroller, share=self.sstmp,
@@ -60,9 +65,9 @@ class BaseTest(TestCase):
                 max_security=1, function=rm.ShareFunction.RAWDATA)
         self.newstorctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
                 share=self.ssnewstore, path=os.path.join(self.rootdir, 'newstorage'))
-        rm.FileserverShare.objects.create(server=self.anaserver, share=self.ssnewstore,
-                path=os.path.join(self.rootdir, 'newstorage'))
-        self.ssana = rm.ServerShare.objects.create(name=settings.ANALYSISSHARENAME, max_security=1,
+        self.ana_newstor = rm.FileserverShare.objects.create(server=self.anaserver,
+                share=self.ssnewstore, path=os.path.join(self.rootdir, 'newstorage'))
+        self.ssana = rm.ServerShare.objects.create(name='analysisfakename', max_security=1,
                 function=rm.ShareFunction.ANALYSISRESULTS)
         self.anashare = rm.FileserverShare.objects.create(server=self.storagecontroller, share=self.ssana,
                 path=os.path.join(self.rootdir, 'analysis'))
@@ -71,13 +76,17 @@ class BaseTest(TestCase):
         self.nfrunshare = rm.FileserverShare.objects.create(server=self.anaserver,
                 share=self.ssanaruns, path=os.path.join(self.rootdir, 'nf_runs'))
 
-        self.remoteserver = rm.FileServer.objects.create(name='storage2', uri='s0.test',
-                fqdn='storage_ssh_2', can_rsync=False, is_analysis=False, rsyncusername='kantele',
+        self.remoteanaserver = rm.FileServer.objects.create(name='analysis2', uri='s0.test',
+                fqdn='analysis_ssh_2', can_rsync_remote=False, is_analysis=True, rsyncusername='kantele',
                 rsynckeyfile='/kantelessh/rsync_key')
-        self.ssoldstorage = rm.ServerShare.objects.create(name=settings.STORAGESHARENAMES[0],
+        self.analocalstor = rm.ServerShare.objects.create(name=settings.STORAGESHARENAMES[0],
                 max_security=1, function=rm.ShareFunction.RAWDATA)
-        self.oldstorctrl = rm.FileserverShare.objects.create(server=self.remoteserver,
-                share=self.ssoldstorage, path=os.path.join(self.rootdir, 'oldstorage'))
+        self.ssanaruns2 = rm.ServerShare.objects.create(name='analysisruns2', max_security=1,
+                function=rm.ShareFunction.NFRUNS)
+        self.nfrunshare2 = rm.FileserverShare.objects.create(server=self.remoteanaserver,
+                share=self.ssanaruns2, path=os.path.join(self.rootdir, 'nf_runs2'))
+        self.oldstorctrl = rm.FileserverShare.objects.create(server=self.remoteanaserver,
+                share=self.analocalstor, path=os.path.join(self.rootdir, 'oldstorage'))
 
         # Species / sampletype fill
         self.spec1, _ = dm.Species.objects.get_or_create(linnean='species1', popname='Spec1')
@@ -170,7 +179,7 @@ class BaseTest(TestCase):
         self.oldstorloc = os.path.join(self.oldp.name, self.oldexp.name, self.oldrun.name)
         self.oldds = dm.Dataset.objects.create(date=self.oldp.registered, runname=self.oldrun,
                 datatype=self.dtype, securityclass=max(rm.DataSecurityClass)) 
-        self.olddss = dm.DatasetServer.objects.create(dataset=self.oldds, storageshare=self.ssoldstorage,
+        self.olddss = dm.DatasetServer.objects.create(dataset=self.oldds, storageshare=self.analocalstor,
                 storage_loc_ui=self.oldstorloc, storage_loc=self.oldstorloc, startdate=timezone.now())
         dm.QuantDataset.objects.get_or_create(dataset=self.oldds, quanttype=self.lfqt)
         dm.DatasetComponentState.objects.create(dataset=self.oldds, dtcomp=self.dtcompfiles, state=dm.DCStates.OK)
@@ -178,14 +187,14 @@ class BaseTest(TestCase):
         self.contact, _ = dm.ExternalDatasetContact.objects.get_or_create(dataset=self.oldds,
                 email='contactname')
         dm.DatasetOwner.objects.get_or_create(dataset=self.oldds, user=self.user)
-        self.oldfpath = os.path.join(settings.SHAREMAP[self.ssoldstorage.name], self.oldstorloc)
+        self.oldfpath = os.path.join(settings.SHAREMAP[self.analocalstor.name], self.oldstorloc)
         oldsize = os.path.getsize(os.path.join(self.oldfpath, oldfn))
         self.oldraw = rm.RawFile.objects.create(name=oldfn, producer=self.prod,
                 source_md5='old_to_new_fakemd5', size=oldsize, date=timezone.now(), claimed=True)
         self.olddsr = dm.DatasetRawFile.objects.create(dataset=self.oldds, rawfile=self.oldraw)
         self.oldsf = rm.StoredFile.objects.create(rawfile=self.oldraw, filename=oldfn,
                     md5=self.oldraw.source_md5, filetype=self.ft, checked=True)
-        self.oldsss = rm.StoredFileLoc.objects.create(sfile=self.oldsf, servershare=self.ssoldstorage,
+        self.oldsss = rm.StoredFileLoc.objects.create(sfile=self.oldsf, servershare=self.analocalstor,
                 path=self.oldstorloc, active=True, purged=False)
         self.oldqsf = dm.QuantSampleFile.objects.create(rawfile=self.olddsr, projsample=self.projsam2)
 
@@ -207,8 +216,8 @@ class BaseTest(TestCase):
                 source_md5='libfilemd5', size=100, claimed=True, date=timezone.now())
         self.sflib = rm.StoredFile.objects.create(rawfile=self.libraw, md5=self.libraw.source_md5,
                 filetype=self.lft, checked=True, filename=self.libraw.name)
-        rm.StoredFileLoc.objects.create(sfile=self.sflib, servershare=self.ssnewstore, path='libfiles',
-                active=True, purged=False)
+        self.sflibloc = rm.StoredFileLoc.objects.create(sfile=self.sflib,
+                servershare=self.ssnewstore, path='libfiles', active=True, purged=False)
         self.lf = am.LibraryFile.objects.create(sfile=self.sflib, description='This is a libfile')
 
 #        # User files for input

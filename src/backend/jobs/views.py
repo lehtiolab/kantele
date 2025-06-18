@@ -87,10 +87,7 @@ def update_storagepath_file(request):
             # FIXME newname sfile/rawfile should be done prejob, not post job? only rawfile, sfile is current!
             sf_q.update(filename=data['newname'])
             RawFile.objects.filter(storedfile__storedfileloc__pk=data['sfloc_id']).update(
-                    filename=data['newname'])
-        elif 'md5' in data:
-            # Case for produced mzMLs, already registered
-            sf_q.update(md5=data['md5'], checked=True)
+                    name=data['newname'])
     elif 'sfloc_ids' in data:
         sfns = StoredFileLoc.objects.filter(pk__in=[int(x) for x in data['sfloc_ids']])
         sfns.update(path=data['dst_path'], purged=False)

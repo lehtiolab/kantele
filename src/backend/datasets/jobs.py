@@ -84,7 +84,7 @@ class RsyncDatasetServershare(DatasetJob):
     - dss_id is TARGET (destination) datasetserver, some files do not come from a dset
     '''
     refname = 'rsync_dset_files_to_servershare'
-    queue = settings.QUEUE_FILE_DOWNLOAD
+    queue = False
     task = filetasks.rsync_files_to_servershares
 
     def on_create_addkwargs(self, **kwargs):
@@ -103,10 +103,14 @@ class RsyncDatasetServershare(DatasetJob):
         which means we cannot check for database fields reflecting an immediate current state (e.g. purged sfl)
         '''
         dst_dss = DatasetServer.objects.values('storage_loc_ui').get(pk=kwargs['dss_id'])
-        return self._check_error_either(dst_dss['storage_loc_ui'], **kwargs)
-
-    def _check_error_either(self, dstpath, **kwargs):
         srcsfl = self.getfiles_query(**kwargs).values('sfile__filename')
+        if StoredFileLoc.objects.filter(sfile__filename__in=[x['sfile__filename'] for x in srcsfl],
+                path=dst_dss['storage_loc_ui'], servershare_id=kwargs['dstshare_id'], active=True).exists():
+            return ('There is already a file existing with the same name as a the target file'
+                    f' in path {dstpath}')
+        return self._check_error_either(srcsfl, dst_dss['storage_loc_ui'], **kwargs)
+
+    def _check_error_either(self, srcsfl, dstpath, **kwargs):
         for sfl in srcsfl:
             # Check for storage_loc_ui in the on_creation error check
             err_fpath = os.path.join(dstpath, sfl['sfile__filename'])
@@ -115,16 +119,18 @@ class RsyncDatasetServershare(DatasetJob):
             if err_dss.exists():
                 return (f'There is already a dataset with the exact path as the target file {err_fpath}, '
                         f'namely dataset {err_dss.values("pk").get()["pk"]}. Consider renaming the dataset.')
-        if StoredFileLoc.objects.exclude(pk__in=kwargs['dstsfloc_ids']).filter(
-                sfile__filename__in=[x['sfile__filename'] for x in srcsfl],
-                path=dstpath, servershare_id=kwargs['dstshare_id'], active=True).exists():
-            return ('There is already a file existing with the same name as a the target file'
-                    f' in path {dstpath}')
         return False
             
     def check_error_on_running(self, **kwargs):
+        srcsfl = self.getfiles_query(**kwargs).values('sfile__filename')
         dst_dss = DatasetServer.objects.values('storage_loc').get(pk=kwargs['dss_id'])
-        return self._check_error_either(dst_dss['storage_loc'], **kwargs)
+        if StoredFileLoc.objects.exclude(pk__in=kwargs['dstsfloc_ids']).filter(
+                sfile__filename__in=[x['sfile__filename'] for x in srcsfl],
+                path=dst_dss['storage_loc'], servershare_id=kwargs['dstshare_id'],
+                active=True).exists():
+            return ('There is already a file existing with the same name as a the target file'
+                    f' in path {dstpath}')
+        return self._check_error_either(srcsfl, dst_dss['storage_loc'], **kwargs)
 
     def process(self, **kwargs):
         srcsfs = self.getfiles_query(**kwargs)
@@ -137,7 +143,7 @@ class RsyncDatasetServershare(DatasetJob):
             raise RuntimeError('Dataset source files are spread over more than one location, please '
                     'contact admin to make sure files are consolicated before sync to a new location')
         dstshare = ServerShare.objects.values('pk', 'name').get(pk=kwargs['dstshare_id'])
-        dst_dss = DatasetServer.objects.values('storage_loc').get(pk=kwargs['dss_id'])
+        dst_dss = DatasetServer.objects.values('storage_loc', 'storageshare_id').get(pk=kwargs['dss_id'])
         # Check if target sflocs already exist in a nonpurged state in wrong path?
         or_wrongloc_q = Q(path=dst_dss['storage_loc']) | Q(servershare_id=dstshare['pk'])
         all_dstsfs = StoredFileLoc.objects.filter(pk__in=kwargs['dstsfloc_ids']) 
@@ -147,13 +153,14 @@ class RsyncDatasetServershare(DatasetJob):
         if all_dstsfs.count() == 0:
             # Do not error on empty dataset, just skip
             return
+
         # Select file servers to rsync from/to
         srcloc_one = srcloc.values(*srcvals).get()
         servers = FileserverShare.objects.filter(share_id__in=[srcloc_one['servershare_id'],
                 kwargs['dstshare_id']])
-        rsync_server_q = servers.filter(server__can_rsync=True)
+        rsync_server_q = servers.filter(server__can_rsync_remote=True)
         if singleserver := FileServer.objects.filter(fileservershare__share=kwargs['dstshare_id']
-                ).filter(fileservershare__share=srcloc_one['servershare_id'], can_rsync=True):
+                ).filter(fileservershare__share=srcloc_one['servershare_id']):
             # Try to get both shares from same server? (Rsync can skip SSH then)
             srcserver = FileserverShare.objects.filter(server_id__in=singleserver,
                     share=srcloc_one['servershare_id']
@@ -232,31 +239,47 @@ class ConvertDatasetMzml(DatasetJob):
     revokable = True
 
     def on_create_addkwargs(self, **kwargs):
-        # FIXME create dst sfloc ids etc
-        pwiz = Proteowizard.objects.get(pk=kwargs['pwiz_id'])
+        '''Create target SFLs on local analysis server and final destination 
+        dataset source. This is needed because the final sflocs (which are rsynced
+        in the src dataset dir) will after that be rsynced to all the other 
+        shares where the dataset is, and we need the ids for that job'''
+        local_dst_sfls, remote_dst_sfls = [], []
         dst_sfls = []
+        dss = DatasetServer.objects.values('storageshare_id', 'dataset_id').get(
+                pk=kwargs['dss_id'])
+        anaserver = FileServer.objects.filter(fileservershare__share_id=dss['storageshare_id'],
+                is_analysis=True).first()
+        analocalshare = FileserverShare.objects.filter(share__function=rm.ShareFunction.NFRUNS,
+                server=anaserver).values('share_id', 'path').first()
+        anasrcshareonserver = FileserverShare.objects.filter(server=anaserver,
+                share_id=dss['storageshare_id']).values('path').first()
+
+        runpath = f'{dss["dataset_id"]}_convert_mzml_{kwargs["timestamp"]}'
+        dstpath = os.path.join(analocalshare['path'], runpath, 'output')
+
+        pwiz = Proteowizard.objects.get(pk=kwargs['pwiz_id'])
         for sfl in self.getfiles_query(**kwargs):
             mzmlfilename = os.path.splitext(sfl.sfile.filename)[0] + '.mzML'
-            mzsf, mzsfl = get_or_create_mzmlentry(sfl, pwiz=pwiz, refined=False,
-                servershare_id=sfl.servershare_id, path=sfl.path, mzmlfilename=mzmlfilename)
-            if mzsf:
-                dst_sfls.append(mzsfl.pk)
-        return {'dstsfloc_ids': dst_sfls}
+            localmzsf, localmzsfl = get_or_create_mzmlentry(sfl.sfile, pwiz=pwiz, refined=False,
+                    servershare_id=analocalshare['share_id'], path=dstpath, mzmlfilename=mzmlfilename)
+            dst_sfls.append(localmzsfl.pk)
+        return {'dstsfloc_ids': dst_sfls, 'server_id': anaserver.pk, 'runpath': runpath, 
+                'srcsharepath': anasrcshareonserver['path']}
 
     def process(self, **kwargs):
-        dss = DatasetServer.objects.values('storageshare__name', 'storageshare_id', 'storage_loc',
-                'dataset_id').get(pk=kwargs['dss_id'])
-        anashareserver = FileserverShare.objects.filter(server__is_analysis=True,
-                share_id=dss['storageshare_id']).values('server__name', 'server__scratchdir',
-                        'path').first()
+        dss = DatasetServer.objects.values('storage_loc').get(pk=kwargs['dss_id'])
+        anaserver = rm.FileServer.objects.get(pk=kwargs['server_id'])
+        self.queue = self.get_server_based_queue(anaserver.name, settings.QUEUE_NXF)
+        sharemap = {fss['share_id']: fss['path'] for fss in
+                anaserver.fileservershare_set.values('share_id', 'path')}
         pwiz = Proteowizard.objects.get(pk=kwargs['pwiz_id'])
-        runpath = f'{dss["dataset_id"]}_convert_mzml_{kwargs["timestamp"]}'
         nf_raws = []
+        srcpath = os.path.join(kwargs['srcsharepath'], dss['storage_loc'])
         for fn in self.getfiles_query(**kwargs).values('sfile__rawfile_id', 'sfile__filename'):
             # Have to line up the sfl with their dst mzml sfl ids, so we cant just oneline it
             mzsfl = StoredFileLoc.objects.values('pk', 'sfile__filename', 'sfile__filetype__name'
                     ).get(pk__in=kwargs['dstsfloc_ids'], sfile__rawfile_id=fn['sfile__rawfile_id'])
-            srcpath = os.path.join(anashareserver['path'], dss['storage_loc'])
+
             nf_raws.append((srcpath, fn['sfile__filename'], mzsfl['pk'], mzsfl['sfile__filename']))
         if not nf_raws:
             return
@@ -267,18 +290,16 @@ class ConvertDatasetMzml(DatasetJob):
                'wf_commit': nfwf.commit,
                'nxf_wf_fn': nfwf.filename,
                'repo': nfwf.nfworkflow.repo,
-               'dstsharepath': anashareserver['path'],
-               'dstpath': dss['storage_loc'],
-               'runname': runpath,
+               'runname': kwargs['runpath'],
+               'server_id': anaserver.pk,
                }
         params = ['--container', pwiz.container_version]
         for pname in ['options', 'filters']:
             p2parse = kwargs.get(pname, [])
             if len(p2parse):
                 params.extend(['--{}'.format(pname), ';'.join(p2parse)])
-        self.queue = self.get_server_based_queue(anashareserver['server__name'], settings.QUEUE_NXF)
         self.run_tasks.append((run, params, nf_raws, mzsfl['sfile__filetype__name'],
-            nfwf.nfversion, ','.join(nfwf.profiles), anashareserver['server__scratchdir']))
+            nfwf.nfversion, ','.join(nfwf.profiles), anaserver.scratchdir))
 
 
 class DeleteDatasetPDCBackup(DatasetJob):
@@ -290,11 +311,11 @@ class DeleteDatasetPDCBackup(DatasetJob):
     # this for e.g empty or active-only dsets
 
 
-def get_or_create_mzmlentry(fn, pwiz, refined, servershare_id, path, mzmlfilename):
+def get_or_create_mzmlentry(sfile, pwiz, refined, servershare_id, path, mzmlfilename):
     '''This also resets the path of the mzML file in case it's deleted'''
-    new_md5 = f'mzml_{fn.sfile.rawfile.source_md5[5:]}'
+    new_md5 = f'mzml_{sfile.rawfile.source_md5[5:]}'
     mzsf, cr = StoredFile.objects.get_or_create(mzmlfile__pwiz=pwiz, mzmlfile__refined=refined,
-            rawfile_id=fn.sfile.rawfile_id, filetype_id=fn.sfile.filetype_id, defaults={'md5': new_md5,
+            rawfile_id=sfile.rawfile_id, filetype_id=sfile.filetype_id, defaults={'md5': new_md5,
                 'filename': mzmlfilename})
     sfl, sfl_cr = StoredFileLoc.objects.get_or_create(sfile=mzsf, servershare_id=servershare_id,
             defaults={'path': path})

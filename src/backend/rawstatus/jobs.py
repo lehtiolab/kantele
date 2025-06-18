@@ -56,8 +56,9 @@ class RsyncOtherFileServershare(SingleFileJob):
         which means we cannot check for database fields reflecting an immediate current state (e.g. purged sfl)
         '''
         srcsfl = self.oncreate_getfiles_query(**kwargs).values('sfile__filename', 'path').get()
+        dstpath = kwargs.get('dstpath', srcsfl['path'])
         if rm.StoredFileLoc.objects.filter(sfile__filename=srcsfl['sfile__filename'],
-                path=srcsfl['path'], servershare_id=kwargs['dstshare_id'], active=True).exists():
+                path=dstpath, servershare_id=kwargs['dstshare_id'], active=True).exists():
             return ('There is already a file existing with the same name as a the target file'
                     f' in path {srcsfl["path"]}')
         return self._check_error_either(srcsfl, **kwargs)
@@ -99,9 +100,9 @@ class RsyncOtherFileServershare(SingleFileJob):
         # Select file servers to rsync from/to - FIXME share code!
         servers = rm.FileserverShare.objects.filter(share_id__in=[srcsfl['servershare_id'],
                 kwargs['dstshare_id']])
-        rsync_server_q = servers.filter(server__can_rsync=True)
+        rsync_server_q = servers.filter(server__can_rsync_remote=True)
         if singleserver := rm.FileServer.objects.filter(fileservershare__share=kwargs['dstshare_id']
-                ).filter(fileservershare__share=srcsfl['servershare_id'], can_rsync=True):
+                ).filter(fileservershare__share=srcsfl['servershare_id'], can_rsync_remote=True):
             # Try to get both shares from same server, rsync can skip SSH then
             srcserver = rm.FileserverShare.objects.filter(server_id__in=singleserver,
                     share=srcsfl['servershare_id']

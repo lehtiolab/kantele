@@ -117,7 +117,7 @@ class BaseJob:
             srcsfl = False # keep linter happy until we have fixed backup retrieval
         return srcsfl
 
-    def on_create_extrajobs(self, **kwargs):
+    def on_create_prep_rsync_jobs(self, **kwargs):
         '''If needed, rsync the DB and other singlefiles which is not on the analysis share'''
         newjobs = []
         if all_exfiles_sfpk := self._get_extrafiles_to_rsync(**kwargs):
@@ -142,8 +142,9 @@ class BaseJob:
     def get_jobs_with_single_sfloc_to_wait_for(self, **kwargs):
         '''Need to wait for non-dataset jobs on files involved in this job. One could
         add those to the get_sf_ids_for_filejobs but then you wouldnt be able to run two
-        analyses in parallel if theyd use the same DB. However, a problem now is that
-        such a file could be deleted mid-analysis - make sure these files are fairly stable
+        analyses in parallel if theyd use the same DB.
+        However, a problem now is that such a file could be deleted mid-analysis,
+        in a parallel job - make sure these files are fairly stable
         '''
         # FIXME make sure any single file job checks for these jobs as well.
         if sfpks := self._get_extrafiles_to_rsync(**kwargs):

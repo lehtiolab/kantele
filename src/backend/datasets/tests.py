@@ -1349,13 +1349,18 @@ class TestReactivateProject(BaseTest):
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.p1.pk})
         self.assertEqual(resp.status_code, 500)
-        self.assertEqual(resp.json()['error'], 'Not all project datasets could be reactivated. Errors: Cannot reactivate cold dataset')
+        self.assertEqual(resp.json()['error'], 'Not all project datasets could be reactivated. '
+                f'Problem with dataset {self.ds.pk}: Cannot reactivate purged dataset')
 
-        rm.PDCBackedupFile.objects.bulk_create([rm.PDCBackedupFile(storedfile=sf, pdcpath=sf.md5,
-            success=True) for sf in dsfiles])
+        rm.PDCBackedupFile.objects.bulk_create([rm.PDCBackedupFile(storedfile=sfl.sfile,
+            pdcpath=sfl.sfile.md5, success=True)
+            for sfl in dsfiles.filter(sfile__mzmlfile__isnull=True)])
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.p1.pk})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.ProjectLog.objects.last().message,
                 f'User {self.user.pk} reopened project')
 
+
+class TestChangeDatasetOwner(BaseTest):
+    url = '/datasets/save/owner/'

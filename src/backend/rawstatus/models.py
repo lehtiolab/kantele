@@ -62,13 +62,15 @@ class DataSecurityClass(models.IntegerChoices):
 
 class FileServer(models.Model):
     name = models.TextField(unique=True)
-    uri = models.TextField() # for users
-    fqdn = models.TextField() # controller URL for rsync SSH etc
-    # Is this an analysis server? Scratchdir can be blank even for those!
+    uri = models.TextField(help_text='How users can find server')
+    fqdn = models.TextField(help_text='controller URL for rsync SSH')
+    active = models.BooleanField(default=True, help_text='Are we using this server?')
+    # Is this an analysis server? In that case we specify 
     is_analysis = models.BooleanField(default=False)
     scratchdir = models.TextField()
-    # Does the server have rsync private keys (aka is some kind of controller)
-    can_rsync = models.BooleanField(default=False)
+    # Does the server have rsync private keys for other servers (aka is some kind of controller)
+    can_rsync_remote = models.BooleanField(default=False)
+    # username/keyfilename are for access to this server 
     rsyncusername = models.TextField()
     rsynckeyfile = models.TextField()
 
@@ -76,15 +78,20 @@ class FileServer(models.Model):
         return self.name
 
 
+class ShareFunction(models.IntegerChoices):
+    RAWDATA = 1, 'Raw data'
+    ANALYSISRESULTS = 2, 'Analysis results'
+    REPORTS = 3, 'Reports'
+    NFRUNS = 4, 'Analysis workdir'
+    INBOX = 5, 'File inflow and tmp storage'
+
+
 class ServerShare(models.Model):
     name = models.TextField(unique=True)  # storage, tmp,
     max_security = models.IntegerField(choices=DataSecurityClass.choices)
     description = models.TextField()
     active = models.BooleanField(default=True)
-    # Not all shares are for raw data:
-    # - web for serving QC
-    # - analysis for storing analysis results
-    # - mzml_in etc etc
+    function = models.IntegerField(choices=ShareFunction.choices)
     # This may become obsolete in the future but is needed now
     has_rawdata = models.BooleanField(default=True)
     # 0 is no expiry date
@@ -117,7 +124,7 @@ class ServerShare(models.Model):
                 subdir = os.path.join(subdir, models.HiriefRange.objects.get(
                     pk=hiriefrange_id).get_path())
             elif prefrac:
-                subdir = os.path.join(prefrac.name)
+                subdir = os.path.join(subdir, prefrac.name)
             subdir = re.sub('[^a-zA-Z0-9_\-\/\.]', '_', subdir)
             if len(subdir):
                 subdir = '/{}'.format(subdir)
@@ -128,6 +135,34 @@ class ServerShare(models.Model):
                 return '{}/{}{}/{}'.format(project.name, exp.name, subdir, dset.runname.name)
         else:
             return self.get_non_open_dset_path(project.pk, dset.pk)
+
+    @staticmethod
+    def get_inbox_path(*, dset_id=False, analysis_id=False):
+        if dset_id:
+            return os.path.join('datasets', str(dset_id))
+        elif analysis_id:
+            return os.path.join('analyses', str(analysis_id))
+        else:
+            return ''
+
+    @staticmethod
+    def classify_shares_by_rsync_reach(dstshare_ids, serverid):
+        '''For all dst shares to rsync to, classify them with respect to if they are either
+        local to a server where srcfiles are, or can be used to rsync from, or are remote.
+        '''
+        # shares local 
+        localshares = [x['share_id'] for x in FileserverShare.objects.filter(
+            server_id=serverid, share_id__in=dstshare_ids).values('share_id')]
+
+        # shares which can be used to rsync push from (excluded local job server shares):
+        rsync_srcshares = [x['share_id'] for x in FileserverShare.objects.exclude(
+            share_id__in=localshares).filter(share_id__in=dstshare_ids, server__can_rsync_remote=True).values('share_id')]
+        # remote shares
+        remote_shares = [x['share_id'] for x in FileserverShare.objects.exclude(
+            share_id__in=[*localshares, *rsync_srcshares]).filter(share_id__in=dstshare_ids).values('share_id')]
+        return {'local': localshares, 'rsync_sourcable': rsync_srcshares, 'remote': remote_shares}
+        
+
 
 
 class FileserverShare(models.Model):
