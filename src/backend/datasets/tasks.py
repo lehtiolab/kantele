@@ -128,43 +128,6 @@ def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, sfloc_ids
 
 
 @shared_task(bind=True)
-def move_file_storage(self, fn, srcshare, srcpath, dstpath, sfloc_id, dstsharename, newname=False):
-    '''Moves file across server shares, dirs, or as rename'''
-    src = os.path.join(settings.SHAREMAP[srcshare], srcpath, fn)
-    dstfn = newname or fn
-    dst = os.path.join(settings.SHAREMAP[dstsharename], dstpath, dstfn)
-    url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
-    if src == dst:
-        print('Source and destination are identical, not moving file')
-        update_db(url, json={'client_id': settings.APIKEY, 'task': self.request.id})
-    print('Moving file {} to {}'.format(src, dst))
-    dstdir = os.path.split(dst)[0]
-    try:
-        os.makedirs(dstdir, exist_ok=True)
-    except Exception:
-            taskfail_update_db(self.request.id)
-            raise
-    if not os.path.isdir(dstdir):
-        taskfail_update_db(self.request.id)
-        raise RuntimeError('Directory {} is already on disk as a file name. '
-                           'Not moving files.')
-    try:
-        shutil.move(src, dst)
-    except Exception as e:
-        taskfail_update_db(self.request.id)
-        raise RuntimeError('Could not move file tot storage:', e)
-    postdata = {'sfloc_id': sfloc_id, 'servershare': dstsharename, 'dst_path': dstpath,
-            'client_id': settings.APIKEY, 'task': self.request.id}
-    if newname:
-        postdata['newname'] = newname
-    try:
-        update_db(url, json=postdata)
-    except RuntimeError:
-        shutil.move(dst, src)
-        raise
-
-
-@shared_task(bind=True)
 def move_stored_file_tmp(self, sharename, fn, path, sfloc_id):
     src = os.path.join(settings.SHAREMAP[sharename], path, fn)
     dst = os.path.join(settings.TMPSHARE, fn)

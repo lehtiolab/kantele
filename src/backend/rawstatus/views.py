@@ -889,12 +889,24 @@ def rename_file(request):
         return JsonResponse({'error': 'Files of this type cannot be renamed'}, status=403)
     elif re.match('^[a-zA-Z_0-9\-]*$', newfilename) is None:
         return JsonResponse({'error': 'Illegal characteres in new file name'}, status=403)
-    for sfloc in sfile.storedfileloc_set.filter(purged=False):
-        job = create_job('rename_file', sfloc_id=sfloc.id, newname=newfilename)
-    if job['error']:
-        return JsonResponse({'error': job['error']}, status=403)
-    else:
-        return JsonResponse({})
+    jobkws = []
+    for sfloc in StoredFileLoc.objects.filter(sfile__rawfile__storedfile=sfile, active=True
+            ).select_related('sfile__mzmlfile'):
+        # go through rawfile to also rename mzml files
+        refined = '_refined' if hasattr(sfloc.sfile, 'mzmlfile') and sfloc.sfile.mzmlfile.refined else ''
+        fn_ext = os.path.splitext(sfloc.sfile.filename)[1]
+        newname = f'{newfilename}{refined}{fn_ext}'
+        jobkw = {'sfloc_id': sfloc.pk, 'newname': newname}
+        joberr = check_job_error('rename_file', **jobkw)
+        if joberr:
+            return JsonResponse({'error': joberr}, status=403)
+        jobkws.append(jobkw)
+    for jobkw in jobkws:
+        create_job_without_check('rename_file', **jobkw)
+    rawfn_ext = os.path.splitext(sfile.rawfile.name)[1]
+    newrawname = f'{newfilename}{rawfn_ext}'
+    RawFile.objects.filter(storedfile=sfile).update(name=newname)
+    return JsonResponse({})
 
 
 def zip_instrument_upload_pkg(prod, runtransferfile):

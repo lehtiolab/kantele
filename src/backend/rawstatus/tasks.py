@@ -294,7 +294,47 @@ def delete_file(self, servershare, path, fname, sfloc_id, is_dir=False):
 
 
 @shared_task(bind=True)
-def delete_empty_dir(self, servershare, directory):
+def rename_file(self, fn, srcsharepath, srcpath, dstpath, sfloc_id, newname):
+    '''Move or rename a file, to another name or another dir
+    # FIXME when move_single_file is gone, this can be simplified (no dstpath,
+    no makedirs, etc)
+    '''
+    src = os.path.join(srcsharepath, srcpath, fn)
+    dstfn = newname or fn
+    dst = os.path.join(srcsharepath, dstpath, dstfn)
+    url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
+    if src == dst:
+        print('Source and destination are identical, not moving file')
+        update_db(url, json={'client_id': settings.APIKEY, 'task': self.request.id})
+    print('Moving file {} to {}'.format(src, dst))
+    dstdir = os.path.split(dst)[0]
+    try:
+        os.makedirs(dstdir, exist_ok=True)
+    except Exception:
+            taskfail_update_db(self.request.id)
+            raise
+    if not os.path.isdir(dstdir):
+        taskfail_update_db(self.request.id)
+        raise RuntimeError('Directory {} is already on disk as a file name. '
+                           'Not moving files.')
+    try:
+        shutil.move(src, dst)
+    except Exception as e:
+        taskfail_update_db(self.request.id)
+        raise RuntimeError('Could not move file tot storage:', e)
+    postdata = {'sfloc_id': sfloc_id, 'servershare': srcshare, 'dst_path': dstpath,
+            'client_id': settings.APIKEY, 'task': self.request.id}
+    if newname:
+        postdata['newname'] = newname
+    try:
+        update_db(url, json=postdata)
+    except RuntimeError:
+        shutil.move(dst, src)
+        raise
+
+
+@shared_task(bind=True)
+def delete_empty_dir(self, sharepath, directory):
     """Deletes the (reportedly) empty directory, then proceeds to delete any
     parent directory which is also empty"""
     dirpath = os.path.join(settings.SHAREMAP[servershare], directory)

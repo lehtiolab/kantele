@@ -1278,8 +1278,8 @@ class TestRenameFile(BaseIntegrationTest):
         self.f3sfmz.delete()
         oldfn = self.f3sf.filename
         oldname, ext = os.path.splitext(oldfn)
-        newname = f'renamed_{oldname}'
-        newfile_path = os.path.join(self.f3path, f'{newname}{ext}')
+        newname = f'renamed_{oldname}{ext}'
+        newfile_path = os.path.join(self.f3path, newname)
         kwargs_postdata = {'sf_id': self.f3sf.pk, 'newname': newname}
         # First call HTTP
         resp = self.post_json(data=kwargs_postdata)
@@ -1311,7 +1311,8 @@ class TestRenameFile(BaseIntegrationTest):
                 source_md5='rename_oldraw_fakemd5', size=10, date=timezone.now(), claimed=True)
         sf = rm.StoredFile.objects.create(rawfile=oldraw, filename=oldfn, md5=oldraw.source_md5,
                 filetype=self.ft, checked=True)
-        sfloc = rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.f3sss.servershare, path=self.f3sss.path)
+        sfloc = rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.f3sss.servershare, path=self.f3sss.path,
+                purged=False, active=True)
         # Try with no file ownership 
         resp = self.post_json(data={'sf_id': sf.pk, 'newname': self.f3sf.filename})
         self.assertEqual(resp.status_code, 403)

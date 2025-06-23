@@ -213,8 +213,8 @@ class RestoreFromPDC(SingleFileJob):
 
 class RenameFile(SingleFileJob):
     refname = 'rename_file'
-    task = dstasks.move_file_storage
-    queue = settings.QUEUE_STORAGE
+    task = tasks.rename_file
+    queue = False
     retryable = False
     """Only renames file inside same path/server. Does not move cross directories. Does not change extensions.
     Updates RawFile in job instead of view since jobs are processed in a single queue. StoredFile names are
@@ -224,33 +224,25 @@ class RenameFile(SingleFileJob):
 
     def check_error(self, **kwargs):
         '''Check for file name collisions, also with directories'''
-        src_sf = self.getfiles_query(**kwargs)
-        fn_ext = os.path.splitext(src_sf.sfile.filename)[1]
-        fullnewname = f'{kwargs["newname"]}{fn_ext}'
-        fullnewpath = os.path.join(src_sf.path, f'{kwargs["newname"]}{fn_ext}')
-        if rm.StoredFileLoc.objects.filter(sfile__filename=fullnewname, path=src_sf.path,
+        src_sf = self.getfiles_query(**kwargs).get()
+        fullnewpath = os.path.join(src_sf.path, kwargs["newname"])
+        if rm.StoredFileLoc.objects.filter(sfile__filename=kwargs['newname'], path=src_sf.path,
                 servershare_id=src_sf.servershare_id).exists():
-            return f'A file in path {src_sf.path} with name {fullnewname} already exists. Please choose another name.'
-        elif dm.Dataset.objects.filter(storage_loc=fullnewpath,
+            return (f'A file in path {src_sf.path} with name {kwargs["newname"]} already exists. '
+                    'Please choose another name.')
+        elif dm.DatasetServer.objects.filter(storage_loc=fullnewpath,
                 storageshare_id=src_sf.servershare_id).exists():
             return f'A dataset with the same directory name as your new file name {fullnewpath} already exists'
         else:
             return False
         
     def process(self, **kwargs):
-        sfloc = self.getfiles_query(**kwargs)
-        newname = kwargs['newname']
-        fn_ext = os.path.splitext(sfloc.sfile.filename)[1]
-        sfloc.sfile.rawfile.name = newname + fn_ext
-        sfloc.sfile.rawfile.save()
-        for changefn in rm.StoredFileLoc.objects.filter(sfile__rawfile=sfloc.sfile.rawfile):
-            # FIXME deleted etc? Run the sfloc selection in view instead
-            oldname, ext = os.path.splitext(changefn.sfile.filename)
-            special_type = '_refined' if hasattr(changefn.sfile, 'mzmlfile') and changefn.sfile.mzmlfile.refined else ''
-            self.run_tasks.append(((
-                changefn.sfile.filename, changefn.servershare.name,
-                changefn.path, changefn.path, changefn.id, changefn.servershare.name),
-                {'newname': '{}{}{}'.format(newname, special_type, ext)}))
+        sfloc = self.getfiles_query(**kwargs).select_related('sfile').get()
+        fss = rm.FileserverShare.objects.filter(share=sfloc.servershare).values('server__name',
+                'path').first()
+        self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_FASTSTORAGE)
+        self.run_tasks.append((sfloc.sfile.filename, fss['path'], sfloc.path,
+            sfloc.path, sfloc.id, kwargs["newname"]))
 
 
 class ClassifyMSRawFile(SingleFileJob):
