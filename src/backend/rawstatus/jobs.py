@@ -158,29 +158,31 @@ class RemoveFilesFromServershare(RemoveDatasetFilesFromServershare):
 
 
 class RsyncFileTransferFromWeb(SingleFileJob):
-    # FIXME change name? All these are for web-to-storage, can maybe generalize that
-    # with the also-rsyncing move_dset_servershare, or with (later) any-mover like for analysis results
-    # Possibly dont generalize as this could check if 
-    refname = 'rsync_transfer'
+    refname = 'rsync_transfer_fromweb'
     task = tasks.rsync_transfer_file_web
     queue = settings.QUEUE_WEB_RSYNC
 
+    def getfiles_query(self, **kwargs):
+        return self.oncreate_getfiles_query(**kwargs).filter(purged=True)
+
     def check_error(self, **kwargs):
-        src_sfloc = self.getfiles_query(**kwargs)
-        if rm.StoredFileLoc.objects.exclude(pk=src_sfloc.pk).filter(
-                sfile__filename=src_sfloc.sfile.filename, path=src_sfloc.path,
-                servershare=src_sfloc.servershare).exists():
-            return (f'Cannot rsync file {src_sfloc.pk} to location {src_sfloc.servershare.name} / '
-                    f'{src_sfloc.path} as another file with the same name is already there')
+        src_sfloc = self.getfiles_query(**kwargs).values('pk', 'path', 'sfile__filename',
+                'servershare_id', 'servershare__name').get()
+        if rm.StoredFileLoc.objects.exclude(pk=src_sfloc['pk']).filter(
+                sfile__filename=src_sfloc['sfile__filename'], path=src_sfloc['path'],
+                servershare_id=src_sfloc['servershare_id']).exists():
+            return (f'Cannot rsync file {src_sfloc["pk"]} to location {src_sfloc["servershare__name"]} / '
+                    f'{src_sfloc["path"]} as another file with the same name is already there')
         else:
             return False
 
     def process(self, **kwargs):
-        sfloc = self.getfiles_query(**kwargs)
+        sfloc = self.getfiles_query(**kwargs).select_related('sfile').get()
         dstpath = os.path.join(sfloc.path, sfloc.sfile.filename)
-        self.run_tasks.append(((sfloc.sfile_id, get_host_upload_dst(kwargs['src_path']),
-            dstpath, sfloc.servershare.name, sfloc.sfile.filetype.is_folder,
-            sfloc.sfile.filetype.stablefiles), {}))
+        fss = rm.FileserverShare.objects.filter(share=sfloc.servershare).first()
+        self.run_tasks.append((sfloc.sfile_id, get_host_upload_dst(kwargs['src_path']),
+            fss.path, dstpath, sfloc.servershare.name, sfloc.sfile.filetype.is_folder,
+            sfloc.sfile.filetype.stablefiles))
 
 
 class CreatePDCArchive(SingleFileJob):
@@ -248,12 +250,16 @@ class RenameFile(SingleFileJob):
 class ClassifyMSRawFile(SingleFileJob):
     refname = 'classify_msrawfile'
     task = tasks.classify_msrawfile
-    queue=settings.QUEUE_SEARCH_INBOX
 
     def process(self, **kwargs):
-        sfloc = self.getfiles_query(**kwargs)
-        self.run_tasks.append(((kwargs['token'], sfloc.id, sfloc.sfile.filetype.name,
-            sfloc.servershare.name, sfloc.path, sfloc.sfile.filename), {}))
+        sfloc = self.getfiles_query(**kwargs).values('pk', 'sfile__filetype__name',
+                'servershare_id', 'path', 'sfile__filename').get()
+        fss = rm.FileserverShare.objects.filter(share=sfloc['servershare_id']).values('server__name',
+                'path').first()
+
+        self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_FASTSTORAGE)
+        self.run_tasks.append((kwargs['token'], sfloc['pk'], sfloc['sfile__filetype__name'],
+            fss['path'], sfloc['path'], sfloc['sfile__filename']))
 
 
 class MoveSingleFile(SingleFileJob):

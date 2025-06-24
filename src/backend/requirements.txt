@@ -6,3 +6,4 @@ requests_toolbelt==1.0.0
 uWSGI==2.0.29
 dulwich==0.22.8
 biopython==1.85
+psutil==7.0.0

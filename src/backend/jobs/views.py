@@ -224,19 +224,26 @@ def downloaded_file(request):
     if 'client_id' not in data or not taskclient_authorized(
             data['client_id'], [settings.STORAGECLIENT_APIKEY]):
         return HttpResponseForbidden()
-    sfile = StoredFile.objects.select_related('rawfile').get(pk=data['sf_id'])
-    # Delete file in tmp download area
+    sfloc = StoredFileLoc.objects.select_related('sfile__rawfile', 'sfile__filetype').get(
+            pk=data['sfloc_id'])
     if data['do_md5check']:
-        sfile.checked = sfile.rawfile.source_md5 == data['md5']
+        # FIXME Deprecate when no longer uploading .d files this route
+        # md5 is checked for raws with stablefiles inside a .d
+        sfloc.sfile.checked = sfloc.sfile.rawfile.source_md5 == data['md5']
+        sfloc.purged = not sfloc.sfile.checked
     else:
-        # rsync checks integrity so we should not have problems here
-        sfile.checked = True
+        # md5 is done on upload in transfer_file
+        sfloc.sfile.checked = True
+        sfloc.purged = False
+
     if data['unzipped']:
-        sfile.filename = sfile.filename.rstrip('.zip')
-        sfile.rawfile.name = sfile.rawfile.name.rstrip('.zip')
-        sfile.rawfile.save()
-    sfile.save()
-    fpath = rj.create_upload_dst_web(sfile.rawfile.pk, sfile.filetype.filetype)
+        sfloc.sfile.filename = sfloc.sfile.filename.rstrip('.zip')
+        sfloc.sfile.rawfile.name = sfloc.sfile.rawfile.name.rstrip('.zip')
+        sfloc.sfile.rawfile.save()
+    sfloc.sfile.save()
+    sfloc.save()
+    # Delete file in tmp download area
+    fpath = rj.create_upload_dst_web(sfloc.sfile.rawfile.pk, sfloc.sfile.filetype.filetype)
     os.unlink(fpath)
     if 'task' in data:
         set_task_done(data['task'])

@@ -200,13 +200,13 @@ class BaseTest(TestCase):
 
         # Tmp rawfile
         tmpfn = 'raw2'
-        tmpfpathfn = os.path.join(settings.SHAREMAP[self.sstmp.name], tmpfn)
+        tmpfpathfn = os.path.join(self.inboxctrl.path, tmpfn)
         tmpsize = os.path.getsize(tmpfpathfn)
         self.tmpraw = rm.RawFile.objects.create(name=tmpfn, producer=self.prod,
                 source_md5='tmpraw_fakemd5', size=tmpsize, date=timezone.now(), claimed=False)
         self.tmpsf = rm.StoredFile.objects.create(rawfile=self.tmpraw, md5=self.tmpraw.source_md5,
                 filename=tmpfn, checked=True, filetype=self.ft)
-        self.tmpsss = rm.StoredFileLoc.objects.create(sfile=self.tmpsf, servershare=self.sstmp,
+        self.tmpsss = rm.StoredFileLoc.objects.create(sfile=self.tmpsf, servershare=self.ssinbox,
                 path='', active=True, purged=False)
 
         # Library files, for use as input, so claimed and ready
@@ -229,7 +229,7 @@ class BaseTest(TestCase):
         self.anaprod = rm.Producer.objects.create(name='analysisprod', client_id=settings.ANALYSISCLIENT_APIKEY, shortname=settings.PRODUCER_ANALYSIS_NAME)
         self.ana_raw, _ = rm.RawFile.objects.get_or_create(name='ana_file', producer=self.anaprod, source_md5='kjlmnop1234',
                 size=100, defaults={'date': timezone.now(), 'claimed': True})
-        self.anasfile = rm.StoredFile.objects.create(rawfile=self.ana_raw, filetype=anaft, #self.ft.id,
+        self.anasfile = rm.StoredFile.objects.create(rawfile=self.ana_raw, filetype=anaft,
 
                 filename=self.ana_raw.name, md5=self.ana_raw.source_md5)
         rm.StoredFileLoc.objects.create(sfile=self.anasfile, servershare=self.sstmp, path='',
@@ -237,7 +237,7 @@ class BaseTest(TestCase):
         self.ana_raw2, _ = rm.RawFile.objects.get_or_create(name='ana_file2', producer=self.anaprod,
                 source_md5='anarawabc1234', size=100, defaults={'date': timezone.now(), 'claimed': True})
         self.anasfile2 = rm.StoredFile.objects.create(rawfile=self.ana_raw2,
-                filetype_id=self.ft.id, filename=self.ana_raw2.name, filetype=anaft, #self.ft,
+                filetype_id=self.ft.id, filename=self.ana_raw2.name, filetype=anaft,
                     md5=self.ana_raw2.source_md5)
         rm.StoredFileLoc.objects.create(sfile=self.anasfile2, servershare=self.sstmp, path='',
                 active=True, purged=False)

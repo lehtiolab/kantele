@@ -82,7 +82,7 @@ class TestUploadScript(BaseIntegrationTest):
         # Have ledger with f3sf md5 so system thinks it's already done
         fpath = os.path.join(settings.SHAREMAP[self.f3sss.servershare.name], self.f3sss.path)
         fullp = os.path.join(fpath, self.f3sf.filename)
-        self.f3sss.servershare = self.sstmp
+        self.f3sss.servershare = self.ssinbox
         self.f3sss.save()
         self.f3raw.producer = self.adminprod
         self.f3raw.save()
@@ -98,7 +98,6 @@ class TestUploadScript(BaseIntegrationTest):
                 'fn_id': self.f3raw.pk,
                 }}, fp)
 
-        # Check bakcup jobs before and after
         cmsjobs = jm.Job.objects.filter(funcname='classify_msrawfile', kwargs={
             'sfloc_id': self.f3sss.pk, 'token': self.token})
         self.assertEqual(cmsjobs.count(), 0)
@@ -107,7 +106,9 @@ class TestUploadScript(BaseIntegrationTest):
         sp = subprocess.run(cmd, stderr=subprocess.PIPE)
         explines = [f'Token OK, expires on {datetime.strftime(self.uploadtoken.expires, "%Y-%m-%d, %H:%M")}',
                 f'File {self.f3raw.name} has ID {self.f3raw.pk}, instruction: done']
-        for out, exp in zip(sp.stderr.decode('utf-8').strip().split('\n'), explines):
+        outlines = [x for x in sp.stderr.decode('utf-8').strip().split('\n')
+                if 'invalid escape sequence' not in x and 'r' in x]
+        for out, exp in zip(outlines, explines):
             out = re.sub('.* - INFO - .producer.main - ', '', out)
             out = re.sub('.* - INFO - .producer.worker - ', '', out)
             out = re.sub('.* - INFO - root - ', '', out)
@@ -139,7 +140,7 @@ class TestUploadScript(BaseIntegrationTest):
         sss = sf.storedfileloc_set.get()
         self.assertEqual(sf.filename, f'{self.f3sf.filename}.zip')
         self.assertEqual(sss.path, settings.TMPPATH)
-        self.assertEqual(sss.servershare.name, settings.TMPSHARENAME)
+        self.assertEqual(sss.servershare, self.ssinbox)
         self.assertFalse(sf.checked)
         # Run rsync
         self.run_job()
@@ -172,7 +173,8 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Uploading {zipboxpath} to {self.live_server_url}',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
-        outlines = sperr.decode('utf-8').strip().split('\n')
+        outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
+                if 'invalid escape sequence' not in x and 'r' in x]
         for out, exp in zip(outlines, explines):
             out = re.sub('.* - INFO - .producer.main - ', '', out)
             out = re.sub('.* - INFO - .producer.worker - ', '', out)
@@ -196,10 +198,11 @@ class TestUploadScript(BaseIntegrationTest):
         self.f3sf.checked = False
         self.f3sf.save()
         self.f3sfmz.delete()
-        self.f3sss.servershare = self.sstmp
+        self.f3sss.servershare = self.ssinbox
         self.f3sss.path = settings.TMPPATH
+        self.f3sss.purged = True
         self.f3sss.save()
-        jm.Job.objects.create(funcname='rsync_transfer', kwargs={'sfloc_id': self.f3sss.pk,
+        jm.Job.objects.create(funcname='rsync_transfer_fromweb', kwargs={'sfloc_id': self.f3sss.pk,
             'src_path': os.path.join(settings.TMP_UPLOADPATH, f'{self.f3raw.pk}.{self.f3sf.filetype.filetype}')},
             timestamp=timezone.now(), state=jj.Jobstates.DONE)
         fullp = os.path.join(fpath, self.f3sf.filename)
@@ -221,6 +224,7 @@ class TestUploadScript(BaseIntegrationTest):
             spout, sperr = sp.communicate()
             print(sperr.decode('utf-8'))
             self.fail()
+        print(sperr.decode('utf-8'))
         self.f3raw.refresh_from_db()
         self.f3sf.refresh_from_db()
         self.assertEqual(self.f3raw.msfiledata.mstime, 123.456)
@@ -233,7 +237,8 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Uploading {zipboxpath} to {self.live_server_url}',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
-        outlines = sperr.decode('utf-8').strip().split('\n')
+        outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
+                if 'invalid escape sequence' not in x and 'r' in x]
         for out, exp in zip(outlines, explines):
             out = re.sub('.* - INFO - .producer.main - ', '', out)
             out = re.sub('.* - INFO - .producer.worker - ', '', out)
@@ -246,7 +251,7 @@ class TestUploadScript(BaseIntegrationTest):
         # Test trying to upload file with same name/path but diff MD5
         fpath = os.path.join(settings.SHAREMAP[self.f3sss.servershare.name], self.f3sss.path)
         fullp = os.path.join(fpath, self.f3sf.filename)
-        self.f3sss.servershare = self.sstmp
+        self.f3sss.servershare = self.ssinbox
         self.f3sss.path = settings.TMPPATH
         self.f3sss.save()
         lastraw = rm.RawFile.objects.last()
@@ -282,10 +287,12 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to {self.live_server_url}',
                 f'Moving file {newraw.name} to skipbox',
                 f'Another file in the system has the same name and is stored in the same path '
-                f'({self.f3sss.servershare.name} - {self.f3sss.path}/{self.f3sf.filename}). Please '
+                f'({self.f3sss.path}/{self.f3sf.filename}). Please '
                 'investigate, possibly change the file name or location of this or the other file '
                 'to enable transfer without overwriting.']
-        for out, exp in zip(sperr.decode('utf-8').strip().split('\n'), explines):
+        outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
+                if 'invalid escape sequence' not in x and 'r' in x]
+        for out, exp in zip(outlines,  explines):
             out = re.sub('.* - INFO - .producer.worker - ', '', out)
             out = re.sub('.* - INFO - .producer.inboxcollect - ', '', out)
             out = re.sub('.* - WARNING - .producer.worker - ', '', out)
@@ -335,7 +342,7 @@ class TestUploadScript(BaseIntegrationTest):
         self.f3raw.save()
         self.f3sf.checked = False
         self.f3sfmz.delete()
-        self.f3sss.servershare = self.sstmp
+        self.f3sss.servershare = self.ssinbox
         self.f3sss.path = settings.TMPPATH
         self.f3sss.save()
         self.f3sf.save()
@@ -372,7 +379,9 @@ class TestUploadScript(BaseIntegrationTest):
         explines = [f'Token OK, expires on {self.token["expires"]}',
                 f'File {self.f3raw.name} has ID {self.f3raw.pk}, instruction: wait',
                 f'File {self.f3raw.name} has ID {self.f3raw.pk}, instruction: done']
-        for out, exp in zip(sperr.decode('utf-8').strip().split('\n'), explines):
+        outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
+                if 'invalid escape sequence' not in x and 'r' in x]
+        for out, exp in zip(outlines, explines):
             out = re.sub('.* - INFO - .producer.main - ', '', out)
             out = re.sub('.*producer.worker - ', '', out)
             self.assertEqual(out, exp)
@@ -416,9 +425,8 @@ class TestUploadScript(BaseIntegrationTest):
         classifyjob = jm.Job.objects.filter(funcname='classify_msrawfile', kwargs={
             'sfloc_id': newsfloc.pk, 'token': self.token})
         classifytask = jm.Task.objects.filter(job__funcname='classify_msrawfile', job__kwargs__sfloc_id=newsfloc.pk)
-        mvjobs = jm.Job.objects.filter(funcname='move_single_file', kwargs={
-            'sfloc_id': newsfloc.pk, 'dstsharename': settings.PRIMARY_STORAGESHARENAME,
-            'dst_path': os.path.join(settings.QC_STORAGE_DIR, self.prod.name)})
+        mvjobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare', kwargs__sfloc_id=newsfloc.pk, kwargs__dstshare_id=self.ssnewstore.pk,
+            kwargs__dstpath=os.path.join(settings.QC_STORAGE_DIR, self.prod.name))
         qcjobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow', kwargs__sfloc_id=newsfloc.pk,
                 kwargs__params=['--instrument', self.msit.name, '--dia'])
         self.assertEqual(classifyjob.count(), 1)
@@ -451,7 +459,9 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to {self.live_server_url}',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
-        outlines = sperr.decode('utf-8').strip().split('\n')
+        # Remove warnings for upload.py ascii art
+        outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
+                if 'invalid escape sequence' not in x and 'r' in x]
         for out, exp in zip(outlines , explines):
             out = re.sub('.* - INFO - .producer.worker - ', '', out)
             out = re.sub('.* - INFO - .producer.inboxcollect - ', '', out)
@@ -466,8 +476,6 @@ class TestUploadScript(BaseIntegrationTest):
         # Testing all the way from register to upload
         # This file is of filetype self.ft which is NOT is_folder -> so it will be zipped up
         self.token = 'hfsjkfhhkjshfskj'
-        anashare = rm.ServerShare.objects.create(name=settings.ANALYSISSHARENAME,
-                server=self.newfserver, share='/ana', max_security=1)
         anaft = rm.StoredFileType.objects.create(name='anaft', filetype=settings.ANALYSIS_FT_NAME,
                 is_rawdata=False)
         self.uploadtoken = rm.UploadToken.objects.create(user=self.user, token=self.token,
@@ -491,7 +499,7 @@ class TestUploadScript(BaseIntegrationTest):
         sss = sf.storedfileloc_set.first()
         self.assertEqual(sf.filename, self.f3sf.filename)
         self.assertEqual(sss.path, ana.storage_dir)
-        self.assertEqual(sss.servershare, anashare)
+        self.assertEqual(sss.servershare, self.ssana)
         self.assertFalse(sf.checked)
         # Run rsync
         self.run_job()
@@ -520,7 +528,8 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Uploading {fullp} to {self.live_server_url}',
                 f'Succesful transfer of file {fullp}',
                 ]
-        outlines = sperr.decode('utf-8').strip().split('\n')
+        outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
+                if 'invalid escape sequence' not in x and 'r' in x]
         for out, exp in zip(outlines, explines):
             out = re.sub('.* - INFO - .producer.main - ', '', out)
             out = re.sub('.* - INFO - .producer.worker - ', '', out)
@@ -602,7 +611,8 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Succesful transfer of file {zipboxpath}',
                 # This is enough, afterwards the 'Checking new files in outbox' starts
                 ]
-        outlines = sperr.decode('utf-8').strip().split('\n')
+        outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
+                if 'invalid escape sequence' not in x and 'r' in x]
         for out, exp in zip(outlines , explines):
             out = re.sub('.* - INFO - .producer.worker - ', '', out)
             out = re.sub('.* - INFO - .producer.inboxcollect - ', '', out)
@@ -617,7 +627,6 @@ class TestUploadScript(BaseIntegrationTest):
         self.uploadtoken = rm.UploadToken.objects.create(user=self.user, token=self.token,
                 expires=timezone.now() + timedelta(settings.TOKEN_RENEWAL_WINDOW_DAYS + 1), expired=False,
                 producer=self.prod, filetype=self.ft, uploadtype=rm.UploadFileType.RAWFILE)
-        dm.Operator.objects.create(user=self.user) # need operator for QC jobs
         fpath = os.path.join(settings.SHAREMAP[self.f3sss.servershare.name], self.f3sss.path)
         fullp = os.path.join(fpath, self.f3sf.filename)
         # Using BRUKERKEY=Description with current metadata:
@@ -649,8 +658,9 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertFalse(newraw.claimed)
         # Run rsync
         self.run_job()
-        mvjobs = jm.Job.objects.filter(funcname='move_files_storage', kwargs={
-            'dset_id': self.oldds.pk, 'rawfn_ids': [newraw.pk]})
+        mvjobs = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare', kwargs__dss_id=self.olddss.pk,
+                kwargs__sfloc_ids=[newsf.sfile.storedfileloc_set.first().pk])
+
         qcjobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow', kwargs__sfloc_id=newsf.pk,
                 kwargs__params=['--instrument', self.msit.name])
         classifytask = jm.Task.objects.filter(job__funcname='classify_msrawfile', job__kwargs__sfloc_id=newsf.pk)
@@ -687,7 +697,8 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to {self.live_server_url}',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
-        outlines = sperr.decode('utf-8').strip().split('\n')
+        outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
+                if 'invalid escape sequence' not in x and 'r' in x]
         for out, exp in zip(outlines , explines):
             out = re.sub('.* - INFO - .producer.worker - ', '', out)
             out = re.sub('.* - INFO - .producer.inboxcollect - ', '', out)

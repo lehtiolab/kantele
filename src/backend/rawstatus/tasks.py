@@ -176,7 +176,8 @@ def rsync_files_to_servershares(self, src_user, srcserver_url, srcpath, dst_user
 
 
 @shared_task(bind=True)
-def rsync_transfer_file_web(self, sfid, srcpath, dstpath, dstsharename, do_unzip, stablefiles):
+def rsync_transfer_file_web(self, sfloc_id, srcpath, dstsharepath, dstpath, dstsharename,
+        do_unzip, stablefiles):
     '''Uses rsync to transfer uploaded file from KANTELEHOST/other RSYNC_HOST to storage server.
     In case of a zipped folder transfer, the file is unzipped and an MD5 check is done 
     on its relevant file, in case the transferred file is corrupt'''
@@ -184,7 +185,7 @@ def rsync_transfer_file_web(self, sfid, srcpath, dstpath, dstsharename, do_unzip
     # (use case e.g. microscopy images), unlike e.g. .d folders from Bruker.
     ssh_host = settings.RSYNC_HOST
     ssh_srcpath = f'{settings.RSYNC_SSHUSER}@{ssh_host}:{srcpath}'
-    dstfpath = os.path.join(settings.SHAREMAP[dstsharename], dstpath)
+    dstfpath = os.path.join(dstsharepath, dstpath)
     fulldir, fn = os.path.split(dstfpath)
     if not os.path.exists(fulldir):
         os.makedirs(fulldir)
@@ -203,7 +204,7 @@ def rsync_transfer_file_web(self, sfid, srcpath, dstpath, dstsharename, do_unzip
         except MaxRetriesExceededError:
             taskfail_update_db(self.request.id)
             raise
-    postdata = {'sf_id': sfid, 'client_id': settings.APIKEY, 'task': self.request.id, 
+    postdata = {'sfloc_id': sfloc_id, 'client_id': settings.APIKEY, 'task': self.request.id, 
             'do_md5check': len(stablefiles) > 0, 'unzipped': do_unzip}
     if do_unzip:
         # Unzip if needed, in that case recheck MD5 to be sure of the zipping has been correct
@@ -244,7 +245,7 @@ def rsync_transfer_file_web(self, sfid, srcpath, dstpath, dstsharename, do_unzip
             postdata.update({'md5': md5result})
     # Done, notify database
     url = urljoin(settings.KANTELEHOST, reverse('jobs:download_file'))
-    msg = f'Rsync used for file transfer of {dstfpath} with id {sfid} to storage'
+    msg = f'Rsync used for file transfer of {dstfpath} with id {sfloc_id} to storage'
     try:
         update_db(url, json=postdata, msg=msg)
     except RuntimeError:
@@ -491,8 +492,8 @@ def pdc_restore(self, servershare, filepath, pdcpath, sfloc_id, isdir):
 
 
 @shared_task(bind=True)
-def classify_msrawfile(self, token, fnid, ftypename, servershare, path, fname):
-    path = os.path.join(settings.SHAREMAP[servershare], path)
+def classify_msrawfile(self, token, fnid, ftypename, sharepath, path, fname):
+    path = os.path.join(sharepath, path)
     fpath = os.path.join(path, fname)
     val = False
     if ftypename == settings.THERMORAW:
