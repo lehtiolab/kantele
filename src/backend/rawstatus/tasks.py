@@ -258,9 +258,9 @@ def rsync_transfer_file_web(self, sfloc_id, srcpath, dstsharepath, dstpath, dsts
 
 
 @shared_task(bind=True)
-def delete_file(self, servershare, path, fname, sfloc_id, is_dir=False):
-    print(f'Deleting file {path}/{fname} on {servershare}')
-    fileloc = os.path.join(settings.SHAREMAP[servershare], path, fname)
+def delete_file(self, sharepath, path, fname, sfloc_id, is_dir=False):
+    print(f'Deleting file {sharepath}/{path}/{fname}')
+    fileloc = os.path.join(sharepath, path, fname)
     try:
         if is_dir:
             shutil.rmtree(fileloc)
@@ -338,8 +338,8 @@ def rename_file(self, fn, srcsharepath, srcpath, dstpath, sfloc_id, newname):
 def delete_empty_dir(self, sharepath, directory):
     """Deletes the (reportedly) empty directory, then proceeds to delete any
     parent directory which is also empty"""
-    dirpath = os.path.join(settings.SHAREMAP[servershare], directory)
-    print('Trying to delete empty directory {}'.format(dirpath))
+    dirpath = os.path.join(sharepath, directory)
+    print(f'Trying to delete empty directory {dirpath}')
     try:
         os.rmdir(dirpath)
     except FileNotFoundError:
@@ -352,8 +352,8 @@ def delete_empty_dir(self, sharepath, directory):
     # Now delete parent directories if any empty
     while os.path.split(directory)[0]:
         directory = os.path.split(directory)[0]
-        dirpath = os.path.join(settings.SHAREMAP[servershare], directory)
-        print('Trying to delete parent directory {}'.format(dirpath))
+        dirpath = os.path.join(sharepath, directory)
+        print(f'Trying to delete parent directory {dirpath}')
         try:
             os.rmdir(dirpath)
         except FileNotFoundError:
@@ -362,17 +362,16 @@ def delete_empty_dir(self, sharepath, directory):
             # OSError raised on dir not empty
             print(f'Parent directory {dirpath} not empty, stop deletion')
     # Report
-    msg = ('Could not update database with deletion of dir {} :'
-           '{}'.format(dirpath, '{}'))
+    dberrmsg = f'Could not update database with deletion of dir {dirpath}'
     url = urljoin(settings.KANTELEHOST, reverse('jobs:rmdir'))
     postdata = {'task': self.request.id, 'client_id': settings.APIKEY}
     try:
-        update_db(url, postdata, msg)
+        update_db(url, postdata, dberrmsg)
     except RuntimeError:
         try:
             self.retry(countdown=60)
         except MaxRetriesExceededError:
-            update_db(url, postdata, msg)
+            update_db(url, postdata, dberrmsg)
             raise
 
 

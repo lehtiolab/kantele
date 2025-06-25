@@ -6,6 +6,7 @@ services:
             - analysis1
             - analysis_ssh_1
             - analysis_storage_1
+            - analysis_fastqueue_1
             - storage_queue_1
             - storage_fastqueue_1
             - analysis2
@@ -318,6 +319,22 @@ services:
         env_file:
             - testing.env
         command: celery -A kantele worker -Q analysis1__rsyncstorage -n storage_mv.%h --concurrency=1
+        volumes:
+            # Overwrite dev storage here
+            - type: bind
+              source: ../../data/teststorage
+              target: /storage
+        environment:
+            KANTELEHOST: web
+            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
+
+    analysis_fastqueue_1:
+        extends:
+            file: ./docker-compose-dev.yml
+            service: storage
+        env_file:
+            - testing.env
+        command: celery -A kantele worker -Q analysis1__fastfnop -n storage_mv.%h --concurrency=1
         volumes:
             # Overwrite dev storage here
             - type: bind

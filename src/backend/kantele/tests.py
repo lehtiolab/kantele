@@ -71,6 +71,10 @@ class BaseTest(TestCase):
                 function=rm.ShareFunction.ANALYSISRESULTS)
         self.anashare = rm.FileserverShare.objects.create(server=self.storagecontroller, share=self.ssana,
                 path=os.path.join(self.rootdir, 'analysis'))
+        # web share without a controller
+        self.ssweb = rm.ServerShare.objects.create(name='reportswebshare', max_security=1,
+                function=rm.ShareFunction.REPORTS)
+
         self.ssanaruns = rm.ServerShare.objects.create(name='analysisruns', max_security=1,
                 function=rm.ShareFunction.NFRUNS)
         self.nfrunshare = rm.FileserverShare.objects.create(server=self.anaserver,

@@ -707,18 +707,36 @@ class TestStoreAnalysis(AnalysisPageTest):
         x = os.path.join(self.nfrunshare.path, ana.get_run_base_dir())
         nfrunsfl = reports.filter(servershare=self.ssanaruns,
                 path=os.path.join(ana.get_run_base_dir(), 'output')).get()
-        self.assertTrue(os.path.exists(os.path.join(self.nfrunshare.path, nfrunsfl.path,
-            'report.html')))
+        nfrunfn = os.path.join(self.nfrunshare.path, nfrunsfl.path, 'report.html')
+        self.assertTrue(os.path.exists(nfrunfn))
 
         anasfl = reports.filter(servershare=self.ssana, path=ana.storage_dir).get()
-        self.assertTrue(os.path.exists(os.path.join(self.anashare.path, anasfl.path, 'report.html')))
+        anafn = os.path.join(self.anashare.path, anasfl.path, 'report.html')
+        self.assertTrue(os.path.exists(anafn))
 
         websfl = reports.filter(servershare=self.ssweb, path=ana.get_run_base_dir()).get()
-        self.assertTrue(os.path.exists(os.path.join(self.webshare.path, websfl.path, 'report.html')))
+        webfn = os.path.join(self.webshare.path, websfl.path, 'report.html')
+        self.assertTrue(os.path.exists(webfn))
 
         self.run_job() # Queue backup (no task for it)
         j = jm.Job.objects.last()
         self.assertEqual(j.kwargs, {'sfloc_id': anasfl.pk, 'isdir': False})
+
+        # Now purge
+        j.state = jj.Jobstates.DONE
+        j.save()
+        self.user.is_staff = True
+        self.user.save()
+        resp = self.cl.post('/analysis/delete/', content_type='application/json', data={'item_id': ana.pk})
+        resp = self.cl.post('/analysis/purge/', content_type='application/json', data={'item_id': ana.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(os.path.exists(webfn))
+        self.assertTrue(os.path.exists(anafn))
+        self.assertTrue(os.path.exists(nfrunfn))
+        self.run_job()
+        self.run_job()
+        self.assertFalse(os.path.exists(anafn))
+        self.assertFalse(os.path.exists(nfrunfn))
 
 
 class TestStoreExistingIsoAnalysis(AnalysisPageTest):
@@ -1087,3 +1105,88 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(resp.json(), {'error': 'Only locked datasets can be analyzed'})
+
+
+class TestDeleteAnalysis(BaseTest):
+    url = '/analysis/delete/'
+
+    def setUp(self):
+        super().setUp()
+        self.ana = am.Analysis.objects.create(user=self.user, name='test', storage_dir='testdir')
+
+    def test_fail_request(self):
+        resp = self.cl.get(self.url)
+        self.assertEqual(resp.status_code, 405)
+        # wrong dict keys
+        resp = self.cl.post(self.url, content_type='application/json', data={'hello': 'test'})
+        self.assertEqual(resp.status_code, 400)
+
+        # No analysis
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.ana.pk + 1000})
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn('Analysis does not exist', resp.json()['error'])
+
+        # Not allowed wrong user
+        user = User.objects.create(username='wrong', email='wrong2')
+        self.user.is_staff = False
+        self.user.save()
+        self.ana.user = user
+        self.ana.save()
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.ana.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn('User is not authorized to delete', resp.json()['error'])
+        
+        # analysis already deleted
+        self.ana.deleted = True
+        self.ana.save()
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.ana.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn('Analysis is already deleted', resp.json()['error'])
+        
+    def test_delete(self):
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.ana.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(self.ana.deleted)
+        self.ana.refresh_from_db()
+        self.assertTrue(self.ana.deleted)
+        # FIXME test job revoked
+
+
+class TestPurgeAnalysis(BaseIntegrationTest):
+    url = '/analysis/purge/'
+
+    def setUp(self):
+        super().setUp()
+        self.ana = am.Analysis.objects.create(user=self.user, name='test', storage_dir='testdir', deleted=True)
+        self.user.is_staff = True
+        self.user.save()
+
+    def test_fail_request(self):
+        resp = self.cl.get(self.url)
+        self.assertEqual(resp.status_code, 405)
+        # wrong dict keys
+        resp = self.cl.post(self.url, content_type='application/json', data={'hello': 'test'})
+        self.assertEqual(resp.status_code, 400)
+
+        # No analysis
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.ana.pk + 1000})
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn('Analysis does not exist', resp.json()['error'])
+
+        # Not allowed wrong user
+        self.user.is_staff = False
+        self.user.save()
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.ana.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn('Only admin is authorized to purge analysis', resp.json()['error'])
+        
+        # analysis not deleted
+        self.user.is_staff = True
+        self.user.save()
+        self.ana.deleted = False
+        self.ana.save()
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.ana.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn('Analysis is not deleted', resp.json()['error'])

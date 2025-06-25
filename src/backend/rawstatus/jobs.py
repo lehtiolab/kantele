@@ -145,8 +145,18 @@ class RemoveFilesFromServershare(RemoveDatasetFilesFromServershare):
     '''Does the same as rsync dset, but for when files are not in a dataset
     '''
     refname = 'purge_files'
-    task = tasks.delete_file
-    queue = False
+
+    def check_error_on_creation(self, **kwargs):
+        srcsfs = self.oncreate_getfiles_query(**kwargs)
+        if srcsfs.filter(active=True).count() < len(kwargs['sfloc_ids']):
+            return ('Some files asked to delete are marked as deleted already, please contact admin')
+        return False
+
+    def check_error_on_running(self, **kwargs):
+        srcsfs = self.getfiles_query(**kwargs)
+        if srcsfs.filter(purged=False).count() < len(kwargs['sfloc_ids']):
+            return ('Some files asked to delete for dataset/server do not exist, please contact admin')
+        return False
 
     def get_dsids_jobrunner(self, **kwargs):
         return []
@@ -298,56 +308,32 @@ class MoveSingleFile(SingleFileJob):
             sfloc.path, kwargs['dst_path'], sfloc.pk, dstsharename), taskkwargs))
 
 
-class PurgeFiles(MultiFileJob):
-    """Removes a number of files from active storage"""
-    refname = 'purge_files'
-    task = tasks.delete_file
-    queue = settings.QUEUE_STORAGE
-    # FIXME needs to happen for all storages?
-
-    def getfiles_query(self, **kwargs):
-        return super().getfiles_query(**kwargs).values('sfile__mzmlfile', 'path', 'sfile__filename',
-                'sfile__filetype__is_folder', 'servershare__name', 'sfile_id', 'pk') 
-
-    def process(self, **kwargs):
-        # Safety check:
-        # First check if files have been archived if that is a demand
-        if kwargs.get('need_archive', False):
-            if rm.PDCBackedupFile.objects.filter(storedfile_id__in=kwargs['sf_ids'],
-                    success=True, deleted=False).count() != len(kwargs['sf_ids']):
-                raise RuntimeError('Cannot purge these files which are dependent on an archive job '
-                        'to have occurred, cannot find records of archived files in DB')
-        # Do the actual purge
-        for fn in self.getfiles_query(**kwargs):
-            fullpath = os.path.join(fn['path'], fn['sfile__filename'])
-            if fn['sfile__mzmlfile'] is not None:
-                is_folder = False
-            else:
-                is_folder = fn['sfile__filetype__is_folder']
-            self.run_tasks.append(((fn['servershare__name'], fullpath, fn['pk'], is_folder), {}))
-
-
 class DeleteEmptyDirectory(MultiFileJob):
     """Check first if all the sfids are set to purged, indicating the dir is actually empty.
     Then queue a task. The sfids also make this job dependent on other jobs on those, as in
     the file-purging tasks before this directory deletion"""
     refname = 'delete_empty_directory'
     task = tasks.delete_empty_dir
-    queue = settings.QUEUE_STORAGE
+    queue = False
 
-    def getfiles_query(self, **kwargs):
-        return super().getfiles_query(**kwargs).values('servershare__name', 'path')
-    
+    def check_error_on_creation(self, **kwargs):
+        if rm.StoredFileLoc.objects.filter(servershare_id=kwargs['share_id'], path=kwargs['path'],
+                active=True):
+            ssname = rm.ServerShare.objects.filter(pk=kwargs['share_id']).values('name').get()['name']
+            return f'Cannot create job to delete dir {kwargs["path"]} on {ssname}, there are files in it'
+
+    def check_error_on_running(self, **kwargs):
+        if rm.StoredFileLoc.objects.filter(servershare_id=kwargs['share_id'], path=kwargs['path'],
+                purged=False):
+            ssname = rm.ServerShare.objects.filter(pk=kwargs['share_id']).values('name').get()['name']
+            return f'Cannot queue job to delete dir {kwargs["path"]} on {ssname}, there are files in it'
     def process(self, **kwargs):
-        sfiles = self.getfiles_query(**kwargs)
-        if sfiles.count() and sfiles.count() == sfiles.filter(purged=True).count():
-            fn = sfiles.last()
-            self.run_tasks.append(((fn['servershare__name'], fn['path']), {}))
-        elif not sfiles.count():
-            pass
-        else:
-            raise RuntimeError('Cannot delete dir: according to the DB, there are still storedfiles which '
-                'have not been purged yet in the directory')
+        # Use oncreate_getfiles_query since the normal getfiles_query filters on purged=False,
+        # whereas here we need the files to be purged
+        fss = rm.FileserverShare.objects.filter(share_id=kwargs['share_id'], active=True,
+                server__active=True).values('server__name', 'path').first()
+        self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_FASTSTORAGE)
+        self.run_tasks.append(((fss['path'], kwargs['path'])))
 
 
 class RegisterExternalFile(MultiFileJob):

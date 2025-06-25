@@ -36,7 +36,6 @@ alljobs = [
         anjobs.RunLongitudinalQCWorkflow,
         anjobs.RunNextflowWorkflow,
         anjobs.RefineMzmls,
-        anjobs.PurgeAnalysis,
         anjobs.DownloadFastaFromRepos,
         mtjobs.ProcessAnalysis,
         ]

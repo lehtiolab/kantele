@@ -404,25 +404,3 @@ class RunNextflowWorkflow(MultiDatasetJob):
 
         analysis.log.append('[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S')))
         analysis.save()
-
-
-class PurgeAnalysis(MultiFileJob):
-    refname = 'purge_analysis'
-    task = filetasks.delete_file
-    queue = settings.QUEUE_STORAGE
-
-    """Queues tasks for deleting files from analysis from disk, then queues 
-    job for directory removal"""
-
-    def getfiles_query(self, **kwargs):
-        return super().getfiles_query(**kwargs).values('path', 'sfile__filename', 'servershare',
-                'servershare__name', 'sfile_id')
-
-    def process(self, **kwargs):
-        webshare = rm.ServerShare.objects.get(name=settings.WEBSHARENAME)
-        for fn in self.getfiles_query(**kwargs):
-            fullpath = os.path.join(fn['path'], fn['sfile__filename'])
-            print(f'Purging {fullpath} from analysis {kwargs["analysis_id"]}')
-            if fn['servershare'] != webshare.pk:
-                # Files on web share live locally, deleted by the purge view itself
-                self.run_tasks.append(((fn['servershare__name'], fullpath, fn['sfile_id']), {}))

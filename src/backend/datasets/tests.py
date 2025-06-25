@@ -1037,31 +1037,33 @@ class MergeProjectsTest(BaseTest):
 
 
 class TestDeleteDataset(ProcessJobTest):
-    jobclass = dj.DeleteActiveDataset
+    jobclass = dj.RemoveDatasetFilesFromServershare
 
     def test_files(self):
         # Delete both raw and mzML file, pretend they are files
         self.ft.is_folder = False
         self.ft.save()
         kwargs = {'dss_id': self.ds.pk, 'sfloc_ids': [self.f3sss.pk, self.f3mzsss.pk]}
+        queue = f'{self.storagecontroller.name}__{settings.QUEUE_FASTSTORAGE}'
         self.job.process(**kwargs)
         exp_t = [
-                ((self.f3sss.servershare.name, os.path.join(self.f3sss.path, self.f3sf.filename),
-                    self.f3sf.pk, self.f3sf.filetype.is_folder), {}),
-                ((self.f3mzsss.servershare.name, os.path.join(self.f3mzsss.path, self.f3sfmz.filename),
-                    self.f3sfmz.pk, self.f3sfmz.filetype.is_folder), {})
+                ((self.f3sss.servershare.name, self.f3sss.path, self.f3sf.filename,
+                    self.f3sss.pk, self.f3sf.filetype.is_folder), queue),
+                ((self.f3mzsss.servershare.name, self.f3mzsss.path, self.f3sfmz.filename,
+                    self.f3mzsss.pk, self.f3sfmz.filetype.is_folder), queue)
                 ]
         self.check(exp_t)
 
     def test_is_dir(self):
         # Delete both raw and mzML file, where raw is a folder
         kwargs = {'dss_id': self.ds.pk, 'sfloc_ids': [self.f3sss.pk, self.f3mzsss.pk]}
+        queue = f'{self.storagecontroller.name}__{settings.QUEUE_FASTSTORAGE}'
         self.job.process(**kwargs)
         exp_t = [
-                ((self.f3sss.servershare.name, os.path.join(self.f3sss.path, self.f3sf.filename),
-                    self.f3sss.pk, self.f3sf.filetype.is_folder), {}),
-                ((self.f3mzsss.servershare.name, os.path.join(self.f3mzsss.path, self.f3sfmz.filename),
-                    self.f3mzsss.pk, False), {})
+                ((self.f3sss.servershare.name, self.f3sss.path, self.f3sf.filename,
+                    self.f3sss.pk, self.f3sf.filetype.is_folder), queue),
+                ((self.f3mzsss.servershare.name, self.f3mzsss.path, self.f3sfmz.filename,
+                    self.f3mzsss.pk, False), queue)
                 ]
         self.check(exp_t)
 

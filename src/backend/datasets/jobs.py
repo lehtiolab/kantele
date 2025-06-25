@@ -200,36 +200,39 @@ class RsyncDatasetServershare(DatasetJob):
 
 
 class RemoveDatasetFilesFromServershare(DatasetJob):
-    '''Moves all files associated to a dataset to another servershare, in one task.
-    After all the files are done, delete them from src, and update dset.storage_loc
-    '''
+    '''Delete all files associated to a dataset on a servershare'''
     refname = 'remove_dset_files_servershare'
     queue = False
     task = filetasks.delete_file
 
-    def check_error(self, **kwargs):
-        # FIXME testing wo errcheck
+    def check_error_on_creation(self, **kwargs):
+        srcsfs = self.oncreate_getfiles_query(**kwargs)
+        if srcsfs.filter(active=True).count() < len(kwargs['sfloc_ids']):
+            return (f'Some files asked to delete for dataset/server {kwargs["dss_id"]} '
+                    'are marked as deleted already, please contact admin')
+        return False
+
+    def check_error_on_running(self, **kwargs):
+        srcsfs = self.getfiles_query(**kwargs)
+        if srcsfs.filter(purged=False).count() < len(kwargs['sfloc_ids']):
+            return (f'Some files asked to delete for dataset/server {kwargs["dss_id"]} '
+                    'do not exist, please contact admin')
         return False
 
     def process(self, **kwargs):
         srcsfs = self.getfiles_query(**kwargs)
-
-        # Check if target sflocs already exist in a nonpurged state in wrong path?
-        if srcsfs.filter(purged=False).count() < len(kwargs['sfloc_ids']):
-            raise RuntimeError(f'Some files asked to delete for dataset/server {kwargs["dss_id"]} '
-                    'do not exist, please contact admin')
-
         fields = ['servershare__name', 'path', 'sfile__filename', 'pk', 'sfile__mzmlfile',
                 'sfile__filetype__is_folder', 'servershare__pk']
         for sfl in srcsfs.values(*fields):
-            server = FileServer.objects.filter(fileservershare__share=sfl['servershare__pk']
-                    ).values('name').first()
-            queue = self.get_server_based_queue(server['name'], settings.QUEUE_FASTSTORAGE)
+            fss = FileserverShare.objects.filter(share=sfl['servershare__pk']).values(
+                    'server__name', 'path').first()
+            queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_FASTSTORAGE)
             if sfl['sfile__mzmlfile'] is not None:
                 is_folder = False
             else:
                 is_folder = sfl['sfile__filetype__is_folder']
-            self.run_tasks.append(((*[sfl[x] for x in fields[:-3]], is_folder), queue))
+            self.run_tasks.append(((fss['path'], sfl['path'], sfl['sfile__filename'], sfl['pk'],
+                is_folder), queue))
 
 
 class ConvertDatasetMzml(DatasetJob):

@@ -1261,6 +1261,8 @@ def delete_analysis(request):
         analysis = am.Analysis.objects.select_related('nextflowsearch__job').get(pk=req['item_id'])
     except am.Analysis.DoesNotExist:
         return JsonResponse({'error': 'Analysis does not exist'}, status=403)
+    except KeyError:
+        return JsonResponse({'error': 'Bad request'}, status=400)
     if analysis.deleted:
         return JsonResponse({'error': 'Analysis is already deleted'}, status=403)
     if analysis.user == request.user or request.user.is_staff:
@@ -1288,21 +1290,33 @@ def purge_analysis(request):
         analysis = am.Analysis.objects.get(pk=req['item_id'])
     except am.Analysis.DoesNotExist:
         return JsonResponse({'error': 'Analysis does not exist'}, status=403)
+    except KeyError:
+        return JsonResponse({'error': 'Bad request'}, status=400)
     if not analysis.deleted:
         return JsonResponse({'error': 'Analysis is not deleted, cannot purge'}, status=403)
     analysis.purged = True
     analysis.save()
-    webshare = rm.ServerShare.objects.get(name=settings.WEBSHARENAME)
+    webshares = rm.ServerShare.objects.filter(function=rm.ShareFunction.REPORTS)
     # Delete files on web share here since the job tasks run on storage cannot do that
-    for webfile in rm.StoredFile.objects.filter(analysisresultfile__analysis__id=analysis.pk,
-            storedfileloc__servershare_id=webshare.pk):
-        fpath = os.path.join(settings.WEBSHARE, webfile.path, webfile.filename)
+    webfiles = rm.StoredFileLoc.objects.filter(sfile__analysisresultfile__analysis__id=analysis.pk,
+            servershare__in=webshares, active=True)
+    for webfile in webfiles.values('path', 'sfile__filename'):
+        fpath = os.path.join(settings.WEBSHARE, webfile['path'], webfile['sfile__filename'])
         os.unlink(fpath)
+    webfiles.update(active=False, purged=True)
     sfiles = rm.StoredFile.objects.filter(analysisresultfile__analysis__id=analysis.pk)
     sfiles.update(deleted=True)
-    sf_ids = [x['pk'] for x in sfiles.values('pk')]
-    create_job('purge_analysis', analysis_id=analysis.pk, sf_ids=sf_ids)
-    create_job('delete_empty_directory', sf_ids=sf_ids)
+    sfls = rm.StoredFileLoc.objects.filter(sfile__in=sfiles, active=True)
+    # One job per servershare as empty dir deleter needs that
+    share_pks = defaultdict(list)
+    for sfl in sfls.values('pk', 'servershare_id', 'path'):
+        share_pks[f'{sfl["servershare_id"]}__{sfl["path"]}'].append(sfl['pk'])
+    for share_path, sfloc_ids in share_pks.items():
+        shareid, path = share_path.split('__')
+        purgejob = create_job('purge_files', sfloc_ids=sfloc_ids)
+        if not purgejob['error']:
+            rmdirjob = create_job('delete_empty_directory', sfloc_ids=sfloc_ids, path=path, share_id=shareid)
+            sfls.update(active=False)
     return JsonResponse({})
 
 
@@ -1418,7 +1432,7 @@ def upload_servable_file(request):
         # store any potential servable file on share on web server
         # FIXME web files are not currently tracked by an sfloc (or previously by an sf)
         # need to setup a controller on the webshare :( for deleting
-        webshare = rm.ServerShare.objects.get(name=settings.WEBSHARENAME)
+        webshare = rm.ServerShare.objects.filter(function=rm.ShareFunction.REPORTS).first()
         #srvfile, _cr = StoredFileLoc.objects.get_or_create(sfile=sfile, servershare=webshare, path=data['outdir'])
         sfloc, _ = rm.StoredFileLoc.objects.get_or_create(sfile_id=data['sfid'], servershare=webshare,
                 path=data['path'])
