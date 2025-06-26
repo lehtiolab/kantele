@@ -370,16 +370,17 @@ def execute_normal_nf(run, params, rundir, gitwfdir, taskid, nf_version, profile
 
 
 @shared_task(bind=True)
-def run_nextflow_longitude_qc(self, run, params, stagefiles, profiles, nf_version):
+def run_nextflow_longitude_qc(self, run, params, stagefiles, profiles, nf_version, scratchbasedir):
     print('Got message to run QC workflow, preparing')
     reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:storelongqc'))
     postdata = {'client_id': settings.APIKEY, 'qcrun_id': run['qcrun_id'], 'plots': {},
             'task': self.request.id}
-    rundir = create_runname_dir(run)
-    params, gitwfdir, no_stagedir = prepare_nextflow_run(run, self.request.id, rundir, stagefiles, [], params)
+    rundir = create_runname_dirname(run)
+    params, gitwfdir, no_stagedir, scratchdir = prepare_nextflow_run(run, self.request.id, rundir,
+            stagefiles, params, scratchbasedir)
     # QC has no stagedir, we put the raw in rundir to stage
     try:
-        outdir = run_nextflow(run, params, rundir, gitwfdir, profiles, nf_version)
+        outdir = run_nextflow(run, params, rundir, gitwfdir, profiles, nf_version, scratchdir)
     except subprocess.CalledProcessError:
         errmsg = process_error_from_nf_log(os.path.join(gitwfdir, '.nextflow.log'))
         log_analysis(run['analysis_id'], 'QC Workflow crashed')
@@ -394,7 +395,7 @@ def run_nextflow_longitude_qc(self, run, params, stagefiles, profiles, nf_versio
                 line = line.strip('\n').split('\t')
                 if line[namefield] == 'createPSMPeptideTable' and line[exitfield] == '3':
                     postdata.update({'state': 'error', 'msg': 'Not enough PSM data found in file to extract QC from, possibly bad run'})
-                    report_finished_run(reporturl, postdata, no_stagedir, rundir, run['analysis_id'])
+                    report_finished_run_and_cleanup(reporturl, postdata, scratchdir, no_stagedir, rundir, run['analysis_id'])
                     return run
         taskfail_update_db(self.request.id, errmsg)
         raise RuntimeError('Error occurred running QC workflow {rundir}')
@@ -403,7 +404,7 @@ def run_nextflow_longitude_qc(self, run, params, stagefiles, profiles, nf_versio
         qcreport = json.load(fp)
     log_analysis(run['analysis_id'], 'QC Workflow finished')
     postdata.update({'state': 'ok', 'plots': qcreport, 'msg': 'QC run OK'})
-    report_finished_run(reporturl, postdata, no_stagedir, rundir, run['analysis_id'])
+    report_finished_run_and_cleanup(reporturl, postdata, scratchdir, no_stagedir, rundir, run['analysis_id'])
     return run
 
 

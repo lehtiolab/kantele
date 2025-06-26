@@ -474,7 +474,9 @@ def classified_rawfile_treatment(request):
     upload = UploadToken.validate_token(token, [])
     if not upload:
         return JsonResponse({'error': 'Token invalid or expired'}, status=403)
-    sfloc = StoredFileLoc.objects.filter(pk=fnid).select_related('sfile__rawfile__producer').get()
+    sfloc = StoredFileLoc.objects.select_related('sfile__rawfile__producer',
+            'sfile__filetype').get(pk=fnid)
+
     MSFileData.objects.get_or_create(rawfile_id=sfloc.sfile.rawfile_id, defaults={'mstime': mstime})
     already_classified_or_error = False
     if sfloc.sfile.rawfile.claimed:
@@ -483,17 +485,17 @@ def classified_rawfile_treatment(request):
     elif is_qc_acqtype:
         sfloc.sfile.rawfile.claimed = True
         sfloc.sfile.rawfile.save()
-        # FIXME non-dataset file transfer need rsync job:
-        # FIXME qc file can be put directly on analysis instead of primary, if ok w henrik etc
-        #dstshare = ServerShare.objects.get(function=...).first() ??
-        # need to set servershare for QC files, or maybe just dump them in analysis
-        # server directly -- ask MS
-        # went home now
-        dstshare = ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
-        create_job('rsync_otherfiles_to_servershare', sfloc_id=sfloc.pk, dstshare_id=dstshare.pk,
+        # Rsync file to analysis server
+        fss = FileserverShare.objects.filter(share__function=ShareFunction.RAWDATA,
+                server__active=True, server__is_analysis=True).values('share_id', 'server_id').first()
+        qc_mvjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sfloc.pk,
+                dstshare_id=fss['share_id'],
                 dstpath=os.path.join(settings.QC_STORAGE_DIR, sfloc.sfile.rawfile.producer.name))
         user_op = get_operator_user()
-        run_singlefile_qc(sfloc.sfile.rawfile, sfloc, user_op, dsmodels.AcquisistionMode[is_qc_acqtype])
+        dst_sfloc = StoredFileLoc.objects.select_related(
+                'sfile__rawfile__producer__msinstrument__instrumenttype').get(
+                        pk=qc_mvjob['kwargs']['dstsfloc_id'])
+        run_singlefile_qc(dst_sfloc, fss['server_id'], user_op, dsmodels.AcquisistionMode[is_qc_acqtype])
     elif dsid:
         # Backup also done 
         #process_new_nonqc_rawfile(sfn, dsid)
@@ -852,8 +854,9 @@ def transfer_file(request):
     return JsonResponse({'fn_id': fn_id, 'state': 'ok'})
 
 
-def run_singlefile_qc(rawfile, sfloc, user_op, acqtype):
+def run_singlefile_qc(sfloc, server_id, user_op, acqtype):
     """This method is only run for detecting new incoming QC files"""
+    rawfile = sfloc.sfile.rawfile
     params = ['--instrument', rawfile.producer.msinstrument.instrumenttype.name,
             f'--{acqtype.name.lower()}']
     analysis, _ = Analysis.objects.update_or_create(user_id=user_op.user_id,
@@ -866,7 +869,7 @@ def run_singlefile_qc(rawfile, sfloc, user_op, acqtype):
             dashmodels.PeptideInSet.objects.filter(peptideset=tps).values('peptide__pk',
             'peptide__sequence', 'peptide__charge')]
     create_job('run_longit_qc_workflow', sfloc_id=sfloc.id, analysis_id=analysis.id,
-            qcrun_id=qcrun.pk, params=params, trackpeptides=trackpeps)
+            fserver_id=server_id, qcrun_id=qcrun.pk, params=params, trackpeptides=trackpeps)
 
 
 def get_file_owners(sfile):

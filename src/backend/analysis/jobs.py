@@ -131,17 +131,22 @@ class RefineMzmls(DatasetJob):
 class RunLongitudinalQCWorkflow(SingleFileJob):
     refname = 'run_longit_qc_workflow'
     task = tasks.run_nextflow_longitude_qc
-    queue=settings.QUEUE_QC_NXF
+    queue = False
     revokable = True
 
     def process(self, **kwargs):
         """Assumes one file, one analysis"""
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
-        sfloc = rm.StoredFileLoc.objects.select_related('sfile__rawfile__producer', 'sfile__filetype').get(pk=kwargs['sfloc_id'])
+        sfl = rm.StoredFileLoc.objects.values('servershare_id', 'path', 'sfile__filename',
+                'sfile__rawfile_id', 'sfile__rawfile__producer__name').get(pk=kwargs['sfloc_id'])
+        fss = rm.FileserverShare.objects.values('server__name', 'server__scratchdir', 'path').get(
+                server_id=kwargs['fserver_id'], share_id=sfl['servershare_id'])
+        self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_NXF)
+
         wf = models.UserWorkflow.objects.filter(wftype=models.UserWorkflow.WFTypeChoices.QC).last()
         nfwf = wf.nfwfversionparamsets.last()
         params = kwargs.get('params', [])
-        stagefiles = {'--raw': [(sfloc.servershare.name, sfloc.path, sfloc.sfile.filename)]}
+        stagefiles = {'--raw': [(os.path.join(fss['path'], sfl['path']), sfl['sfile__filename'])]}
         timestamp = datetime.strftime(analysis.date, '%Y%m%d_%H.%M')
         models.NextflowSearch.objects.update_or_create(defaults={'nfwfversionparamset_id': nfwf.id, 
             'job_id': self.job_id, 'workflow_id': wf.id, 'token': f'nf-{uuid4()}'},
@@ -153,13 +158,13 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
                'wf_commit': nfwf.commit,
                'nxf_wf_fn': nfwf.filename,
                'repo': nfwf.nfworkflow.repo,
-               'runname': f'{analysis.id}_longqc_{sfloc.sfile.rawfile.producer.name}_rawfile{sfloc.sfile.rawfile_id}_{timestamp}',
+               'runname': f'{analysis.id}_longqc_{sfl["sfile__rawfile__producer__name"]}_rawfile{sfl["sfile__rawfile_id"]}_{timestamp}',
                }
         if kwargs['trackpeptides']:
             params.extend(['--trackedpeptides', ';'.join([f'{pep}_{ch}'
                 for _, pep, ch in kwargs['trackpeptides']])])
 
-        self.run_tasks.append(((run, params, stagefiles, ','.join(nfwf.profiles), nfwf.nfversion), {}))
+        self.run_tasks.append((run, params, stagefiles, ','.join(nfwf.profiles), nfwf.nfversion, fss['server__scratchdir']))
         analysis.log.append('[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S')))
         analysis.save()
 
