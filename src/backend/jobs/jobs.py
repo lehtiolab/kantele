@@ -90,7 +90,7 @@ class BaseJob:
         return False
 
     def oncreate_getfiles_query(self, **kwargs):
-        return []
+        return StoredFileLoc.objects.none()
 
     def getfiles_query(self, **kwargs):
         return self.oncreate_getfiles_query(**kwargs).filter(purged=False)

@@ -7,6 +7,7 @@ from time import sleep
 from datetime import datetime
 from urllib.parse import urljoin, urlsplit
 from ftplib import FTP
+from hashlib import md5
 from dulwich.porcelain import clone, reset, fetch
 from tempfile import NamedTemporaryFile
 from gzip import GzipFile
@@ -23,38 +24,46 @@ from analysis.models import UniProtFasta
 
 
 @shared_task(bind=True)
-def check_ensembl_uniprot_fasta_download(self, dbname, version, organism, dbtype):
+def check_ensembl_uniprot_fasta_download(self, dbname, version, organism, dbtype, shareid, sharepath,
+        sflpath, ftype_id):
     """Checks if there is a new version of ENSEMBL data,
     downloads it to system over FTP"""
-    token = check_in_transfer_client(self.request.id, False, settings.DBFA_FT_NAME)
-    dstpath = os.path.join(settings.SHAREMAP[settings.PRIMARY_STORAGESHARENAME],
-            settings.LIBRARY_FILE_PATH)
     doneurl = urljoin(settings.KANTELEHOST, reverse('jobs:internalfiledone'))
 
-    fa_data = {'dbname': dbname, 'organism': organism, 'version': version}
+    fa_data = {'dbname': dbname, 'organism': organism, 'version': version, 'dbtype': dbtype}
+    dstpath = os.path.join(sharepath, sflpath)
+    try:
+        os.makedirs(dstpath, exist_ok=True)
+    except Exception:
+        msg = 'Cannot mkdir for download fasta'
+        taskfail_update_db(self.request.id, msg)
+        raise
+
     if dbname == 'uniprot':
         uptype = UniProtFasta.UniprotClass[dbtype]
         url = settings.UNIPROT_API.format(settings.UP_ORGS[organism],
                 UniProtFasta.url_addons[dbtype])
         desc = f'Uniprot release {version}, {organism}, {uptype.label} fasta'
+        dighash = md5()
+        dstfn = f'Uniprot_{version}_{organism.replace(" ", "_")}_{uptype.label}.fa'
+        dst = os.path.join(dstpath, dstfn)
         with requests.get(url, stream=True) as req, NamedTemporaryFile(mode='wb') as wfp:
             for chunk in req.iter_content(chunk_size=8192):
                 if chunk:
                     wfp.write(chunk)
-            dstfn = f'Uniprot_{version}_{organism.replace(" ", "_")}_{uptype.label}.fa'
-            regresp = register_resultfile(dstfn, wfp.name, token)
-            if regresp:
-                fa_data.update({'desc': desc, 'dbtype': dbtype})
-                transfer_resultfile(dstpath, settings.LIBRARY_FILE_PATH, wfp.name, 
-                        settings.PRIMARY_STORAGESHARENAME, doneurl, token, self.request.id,
-                        regresp['fnid'], regresp['md5'], regresp['newname'], is_fasta=fa_data)
-            else:
-                print('File was already downloaded')
+                dighash.update(chunk)
+            # stay in context until copied, else tempfile is deleted
+            wfp.seek(0)
+            dighash = dighash.hexdigest() 
+            shutil.copy(wfp.name, dst)
+        # FIXME first copy to a tmp file and register, then move into proper place?
 
     elif dbname == 'ensembl':
         # Download db, use FTP to get file, download zipped via HTTPS and unzip in stream
         url = urlsplit(settings.ENSEMBL_DL_URL.format(version, organism.lower().replace(' ', '_')))
         desc = f'ENSEMBL {organism} release {version} pep.all fasta'
+        dstfn = f'ENS{version}_{organism.replace(" ", "_")}.fa'
+        dst = os.path.join(dstpath, dstfn)
         with FTP(url.netloc) as ftp:
             ftp.login()
             fn = [x for x in ftp.nlst(url.path) if 'pep.all.fa.gz' in x][0]
@@ -65,18 +74,20 @@ def check_ensembl_uniprot_fasta_download(self, dbname, version, organism, dbtype
             with NamedTemporaryFile(mode='wb') as wfp, GzipFile(fileobj=reqfp) as gzfp:
                 for line in gzfp:
                     wfp.write(line)
-                dstfn = f'ENS{version}_{organism.replace(" ", "_")}.fa'
                 # Now register download in Kantele, still in context manager
                 # since tmp file will be deleted on close()
-                regresp = register_resultfile(dstfn, wfp.name, token)
-                if regresp:
-                    fa_data['desc'] = desc
-                    transfer_resultfile(dstpath, settings.LIBRARY_FILE_PATH, wfp.name, 
-                            settings.PRIMARY_STORAGESHARENAME, doneurl, token, self.request.id,
-                            regresp['fnid'], regresp['md5'], regresp['newname'], is_fasta=fa_data)
-                else:
-                    print('File was already downloaded')
-    update_db(urljoin(settings.KANTELEHOST, reverse('jobs:settask')), json={'task_id': self.request.id,
+                wfp.seek(0)
+                shutil.copy(wfp.name, dst)
+        dighash = False
+
+    fa_data['desc'] = desc
+    regresp = register_resultfile(dstfn, sflpath, md5sum=dighash, fasta=fa_data, share_id=shareid, sharepath=sharepath, is_library=True, filetype_id=ftype_id)
+
+    # went home!
+    if errmsg := regresp.get('error'):
+        print(f'Something went wrong registering downloaded fasta {dst} - {errmsg}')
+    else:
+        update_db(urljoin(settings.KANTELEHOST, reverse('jobs:settask')), json={'task_id': self.request.id,
         'client_id': settings.APIKEY, 'state': taskstates.SUCCESS})
     print(f'Finished downloading {desc}')
         
@@ -170,8 +181,11 @@ def run_nextflow_workflow(self, run, params, paramfiles, stagefiles, profiles, n
     # Register output files to web host
     token = False
     for ofile in outfiles:
-        path, fn = os.path.split(ofile)
-        regfile = new_register_resultfile(fn, path, run['server_id'], run['analysis_id'])
+        # FIXME sharepath == NF_RUNDIR? Can we pass from job/db?
+        full_path, fn = os.path.split(ofile)
+        path = os.path.relpath(full_path, settings.NF_RUNDIR)
+        regfile = register_resultfile(fn, path, server_id=run['server_id'],
+                analysis_id=run['analysis_id'], sharepath=settings.NF_RUNDIR)
         # FIXME this also, sometimes files with same MD5 arrive twice - can that be handled??:
         # Yes - analysis/sfile can possibly have multiple analysis per sfile
         if not regfile:
@@ -432,41 +446,27 @@ def check_in_transfer_client(task_id, token, filetype):
         return token
 
 
-def register_resultfile(fname, fpath, token):
-    reg_url = urljoin(settings.KANTELEHOST, reverse('files:reg_trfstate'))
-    postdata = {'fn': fname,
-                'client_id': settings.APIKEY,
-                'md5': calc_md5(fpath),
-                'size': os.path.getsize(fpath),
-                'date': str(os.path.getctime(fpath)),
-                'claimed': True,
-                'token': token,
-                }
-    resp = requests.post(url=reg_url, json=postdata)
-    if resp.status_code != 500:
-        rj = resp.json()
-    else:
-        rj = False
-    resp.raise_for_status()
-    if rj['transferstate'] == 'transfer':
-        return {'fnid': rj['fn_id'], 'newname': fname, 'md5': postdata['md5']}
-    else:
-        return False
-
-
-def new_register_resultfile(fname, path, server_id, analysis_id):
-    fullpath = os.path.join(path, fname)
+def register_resultfile(fname, sflpath, *, sharepath, server_id=False, share_id=False,
+        analysis_id=False, md5sum=False, filetype_id=False, fasta=False, is_library=False):
+    '''This is for registering output from nextflow runs, automatic downloads
+    of fasta files, and possibly more in the future'''
+    fullpath = os.path.join(sharepath, sflpath, fname)
+    md5sum = md5sum or calc_md5(fullpath)
     reg_url = urljoin(settings.KANTELEHOST, reverse('files:uploaded_file'))
     postdata = {'fn': fname,
                 'client_id': settings.APIKEY,
-                'md5': calc_md5(fullpath),
+                'md5': md5sum,
                 'size': os.path.getsize(fullpath),
                 'date': str(os.path.getctime(fullpath)),
                 'claimed': True,
-                'sharepath': settings.NF_RUNDIR,
-                'path': os.path.relpath(path, settings.NF_RUNDIR),
+                'sharepath': sharepath,
+                'path': sflpath,
                 'server_id': server_id,
+                'share_id': share_id,
+                'filetype_id': filetype_id,
+                'is_library': is_library,
                 'analysis_id': analysis_id,
+                'is_fasta': fasta,
                 }
     resp = requests.post(url=reg_url, json=postdata)
     if resp.status_code != 500:

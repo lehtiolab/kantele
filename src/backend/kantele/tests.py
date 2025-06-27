@@ -54,8 +54,12 @@ class BaseTest(TestCase):
                 fqdn='analysis_ssh_1', is_analysis=True, rsyncusername='kantele', rsynckeyfile='/kantelessh/rsync_key')
         self.ssinbox = rm.ServerShare.objects.create(name='inbox', max_security=2,
                 function=rm.ShareFunction.INBOX)
+        self.sslib = rm.ServerShare.objects.create(name='library', max_security=1,
+                function=rm.ShareFunction.LIBRARY)
         self.inboxctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
                 share=self.ssinbox, path=os.path.join(self.rootdir, 'inbox'))
+        self.libctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
+                share=self.sslib, path=os.path.join(self.rootdir, 'library'))
 
         self.sstmp = rm.ServerShare.objects.create(name=settings.TMPSHARENAME, max_security=1,
                 function=rm.ShareFunction.RAWDATA)

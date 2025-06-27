@@ -116,8 +116,8 @@ ALLOWED_PROJEXPRUN_CHARS = 'A-Za-z0-9-_'
 ENSEMBL_API = 'https://rest.ensembl.org/info/software'
 # human, canonical/isoform, only swiss
 UNIPROT_API = 'https://rest.uniprot.org/uniprotkb/stream?download=true&format=fasta&query=(proteome:{}){}'
-UP_ORGS = {'Homo sapiens': 'UP000005640', 'Mus musculus': 'UP000000589'}
-ENSEMBL_DL_URL = 'ftp://ftp.ensembl.org/pub/release-{}/fasta/{}/pep/'
+UP_ORGS = {'Homo sapiens': 'UP000005640', 'Mus musculus': 'UP000000589', 'Escherichia coli K12': 'UP000000625'}
+ENSEMBL_DL_URL = os.environ.get('ENSEMBL_DL_URL', 'ftp://ftp.ensembl.org/pub/release-{}/fasta/{}/pep/')
 PX_PROJECT_ID = os.environ.get('PX_PROJECT_ID')
 # multiple
 EXTERNAL_PRODUCER_IDS = [int(x) for x in os.environ.get('EXTERNAL_PRODUCER_IDS', '-1').split(',')]
@@ -125,7 +125,8 @@ USERFILEDIR = 'uploadfiles'
 
 # nextflow
 NXF_COMMAND = os.environ.get('NXF_COMMAND', 'nextflow run').split(' ')
-LIBRARY_FILE_PATH = 'databases'
+
+LIBRARY_FILE_PATH = ''
 
 NF_RUNDIR = os.environ.get('NEXTFLOW_RUNDIR', 'nf_runs')
 

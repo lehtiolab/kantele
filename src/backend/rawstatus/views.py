@@ -29,7 +29,7 @@ from rawstatus.models import (RawFile, Producer, StoredFile, ServerShare, Stored
         UploadToken, UploadFileType)
 from rawstatus import jobs as rsjobs
 from rawstatus.tasks import search_raws_downloaded
-from analysis.models import (Analysis, LibraryFile, AnalysisResultFile)
+from analysis.models import Analysis, LibraryFile, AnalysisResultFile, UniProtFasta, EnsemblFasta
 from datasets import views as dsviews
 from datasets import models as dsmodels
 from dashboard import models as dashmodels
@@ -554,7 +554,7 @@ def classified_rawfile_treatment(request):
 
 # /files/uploaded
 @require_POST
-def new_file_uploaded(request):
+def file_uploaded(request):
     '''This is for uploading files from an instrument, so not from a user using the
     upload script. We dont use a token since the scripts run on our own server.
     '''
@@ -564,7 +564,7 @@ def new_file_uploaded(request):
         instrument_id = data['client_id']
         file_date = datetime.strftime(
             datetime.fromtimestamp(float(filedate_raw)), '%Y-%m-%d %H:%M')
-        sfl_sharepath, sfl_path = data['sharepath'], data['path']
+        sfl_path = data['path']
     except ValueError as error:
         return JsonResponse({'error': 'Date passed to registration incorrectly formatted'}, status=400)
     except KeyError as error:
@@ -574,22 +574,32 @@ def new_file_uploaded(request):
     claimed = data.get('claimed')
     # For analysis we have the server in the run, otherwise this ID is from env var 
     # in MS prod upload script:
-    server_id = data.get('server_id')
     analysis_id = data.get('analysis_id')
 
-    fileserver_share = FileserverShare.objects.values('share__name', 'share_id').get(
-            server_id=server_id, path=sfl_sharepath)
+    if server_id := data.get('server_id', False):
+        sfl_sharepath = data['sharepath']
+        fss = FileserverShare.objects.values('share__name', 'share_id').get(
+                server_id=server_id, path=sfl_sharepath)
+        share_name, share_id = fss['share__name'], fss['share_id']
+    elif share_id := data.get('share_id', False):
+        share_name = ServerShare.objects.values('name').get(pk=share_id)['name']
+    else:
+        return JsonResponse({'error': 'Bad request'}, status=400)
     producer = Producer.objects.values('pk', 'internal', 'msinstrument__filetype',
             'msinstrument__active').get(client_id=instrument_id)
     if producer['msinstrument__filetype'] is not None:
         filetype = producer['msinstrument__filetype']
         is_active_ms = producer['internal'] and producer['msinstrument__active']
     elif instrument_id == settings.ANALYSISCLIENT_APIKEY:
+        analysis  = Analysis.objects.get(pk=analysis_id)
         is_active_ms = False
         filetype = StoredFileType.objects.get(name=settings.ANALYSIS_FT_NAME)
+    elif data['is_library']:
+        is_active_ms = False
+        filetype = StoredFileType.objects.get(pk=data['filetype_id'])
     else:
         return JsonResponse({'error': f'Could not identify uploading client for file {fn} on '
-            'server {fileserver_share["share__name"]}'}, status=403)
+            'server {share__name}'}, status=403)
 
     # Create file entries
     rfn, raw_created = RawFile.objects.get_or_create(source_md5=md5, defaults={
@@ -603,15 +613,15 @@ def new_file_uploaded(request):
             'problem': 'ALREADY_EXISTS'}, status=409)
     sf, _ = StoredFile.objects.get_or_create(rawfile=rfn, filetype=filetype, md5=rfn.source_md5,
             defaults={'filename': fn, 'checked': True})
-    sfl, _ = StoredFileLoc.objects.get_or_create(sfile=sf, servershare_id=fileserver_share['share_id'],
+    sfl, _ = StoredFileLoc.objects.get_or_create(sfile=sf, servershare_id=share_id,
             path=sfl_path, defaults={'purged': False})
 
     if is_active_ms:
         # FIXME do more things here!
         create_job('classify_msrawfile', sfloc_id=sfloc.pk, token=upload.token)
-        # No backup before the classify job etc
+        # backup is done after the classify job (remove failing files)
     elif instrument_id == settings.ANALYSISCLIENT_APIKEY:
-        AnalysisResultFile.objects.get_or_create(sfile=sf, analysis_id=analysis_id)
+        AnalysisResultFile.objects.get_or_create(sfile=sf, analysis=analysis)
         sensitive_data = False
         if sensitive_data:
             # Only dump in sens OK data storage, if that is set up, to do backups from
@@ -624,15 +634,36 @@ def new_file_uploaded(request):
             pass
         else:
             # Rsync non-sensitive data to the public data storage
-            analysis = Analysis.objects.get(pk=analysis_id)
-            dstshare = ServerShare.objects.values('pk').get(name=settings.ANALYSISSHARENAME)
+            # FIXME do not use analysisharename, try instead public/sens w function=analysis
+            dstshare = ServerShare.objects.values('pk').get(active=True,
+                    function=ShareFunction.ANALYSISRESULTS)
             rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sfl.pk,
                 dstshare_id=dstshare['pk'], dstpath=analysis.get_public_output_dir())
             create_job('create_pdc_archive', sfloc_id=rsjob['kwargs']['dstsfloc_id'],
                     isdir=sf.filetype.is_folder)
-
-    # FIXME pdc transfer should be done from either open area or a closed one
-    #create_job('create_pdc_archive', sfloc_id=sfl.pk, isdir=sf.filetype.is_folder)
+    elif data.get('is_library', False):
+        # Library files at this URL arrive in inbox, go to their respective shares
+        # These are always fasta files from auto downloads for this view
+        fa = data['is_fasta']
+        # set fasta download files
+        libfile = LibraryFile.objects.create(sfile=sf, description=fa['desc'])
+        dbmodel = {'uniprot': UniProtFasta, 'ensembl': EnsemblFasta}[fa['dbname']]
+        kwargs = {'version': fa['version'], 'libfile_id': libfile.id, 'organism': fa['organism']}
+        subtype = False
+        if fa['dbname'] == 'uniprot':
+            subtype = UniProtFasta.UniprotClass[fa['dbtype']]
+            kwargs['dbtype'] = subtype
+        dbmodel.objects.create(**kwargs)
+        rs_kwargs = []
+        for dstshare in ServerShare.objects.filter(function=ShareFunction.LIBRARY).values('pk'):
+            kwargs = {'name': 'rsync_otherfiles_to_servershare', 'sfloc_id': sfl.pk,
+                    'dstshare_id': dstshare['pk'], 'dstpath': settings.LIBRARY_FILE_PATH}
+            if rsjoberr := check_job_error(**kwargs):
+                return JsonResponse({'error': rsjoberr}, status=401)
+            rs_kwargs.append(kwargs)
+            print(rs_kwargs)
+        [create_job(**kwargs) for args in rs_kwargs]
+        create_job('create_pdc_archive', sfloc_id=sfl.pk, isdir=sf.filetype.is_folder)
     return JsonResponse({'rfid': rfn.pk, 'sfid': sf.pk, 'sflid': sfl.pk, 'path': sfl.path})
 
 
@@ -681,7 +712,7 @@ def process_file_confirmed_ready(rfn, sfn, sfloc, upload, desc):
 
 # /files/newmzml/
 @require_POST
-def new_mzml_uploaded(request):
+def mzml_uploaded(request):
     '''This is for uploading files from an instrument, so not from a user using the
     upload script. We dont use a token since the scripts run on our own server.
     '''

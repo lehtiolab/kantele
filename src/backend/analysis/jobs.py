@@ -25,8 +25,11 @@ class DownloadFastaFromRepos(BaseJob):
     queue = settings.QUEUE_FILE_DOWNLOAD
     
     def process(self, **kwargs):
-        self.run_tasks.append(((kwargs['db'], kwargs['version'], kwargs['organism'], 
-            kwargs.get('dbtype')), {}))
+        # get controller
+        fss = rm.FileserverShare.objects.filter(share__function=rm.ShareFunction.INBOX, server__can_rsync_remote=True).values('path', 'share_id').first()
+        ft = rm.StoredFileType.objects.values('pk').get(name=settings.DBFA_FT_NAME)
+        self.run_tasks.append((kwargs['db'], kwargs['version'], kwargs['organism'], 
+            kwargs.get('dbtype'), fss['share_id'], fss['path'], 'library', ft['pk']))
 
 
 class RefineMzmls(DatasetJob):

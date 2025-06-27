@@ -84,6 +84,7 @@ class ShareFunction(models.IntegerChoices):
     REPORTS = 3, 'Reports'
     NFRUNS = 4, 'Analysis workdir'
     INBOX = 5, 'File inflow and tmp storage'
+    LIBRARY = 6, 'Library and user reference files'
 
 
 class ServerShare(models.Model):

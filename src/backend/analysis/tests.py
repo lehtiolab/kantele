@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
 import os
 import json
+from glob import glob
 
+from django.core.management import call_command
 from django.utils import timezone
 from django.db.models import Max
 from django.contrib.auth.models import User
@@ -13,6 +15,25 @@ from rawstatus import models as rm
 from jobs import models as jm
 from jobs import jobs as jj
 from datasets import models as dm
+
+
+class TestDownloadFasta(BaseIntegrationTest):
+
+    def test_ensembl(self):
+        call_command('download_latest_fasta', species='escherichia_coli_str_k_12_substr_mg1655_gca_000005845', dbtype='ensembl', ensembl_ver=61)
+        self.run_job()
+        fafns = glob(os.path.join(self.inboxctrl.path, 'library', 'ENS61*'))
+        self.assertEqual(len(fafns), 1)
+        self.run_job()
+        self.assertTrue(os.path.exists(os.path.join(self.libctrl.path, fafns[0])))
+
+    def test_uniprot(self):
+        call_command('download_latest_fasta', species='Escherichia coli K12', dbtype='uniprot', uptype='SWISS')
+        self.run_job()
+        fafns = glob(os.path.join(self.inboxctrl.path, 'library', 'Uniprot*'))
+        self.assertEqual(len(fafns), 1)
+        self.run_job()
+        self.assertTrue(os.path.exists(os.path.join(self.libctrl.path, fafns[0])))
 
 
 class AnalysisPageTest(BaseIntegrationTest):
