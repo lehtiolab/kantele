@@ -54,12 +54,12 @@ class BaseTest(TestCase):
                 fqdn='analysis_ssh_1', is_analysis=True, rsyncusername='kantele', rsynckeyfile='/kantelessh/rsync_key')
         self.ssinbox = rm.ServerShare.objects.create(name='inbox', max_security=2,
                 function=rm.ShareFunction.INBOX)
-        self.sslib = rm.ServerShare.objects.create(name='library', max_security=1,
+        self.sslib = rm.ServerShare.objects.create(name='libshare', max_security=1,
                 function=rm.ShareFunction.LIBRARY)
         self.inboxctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
                 share=self.ssinbox, path=os.path.join(self.rootdir, 'inbox'))
         self.libctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
-                share=self.sslib, path=os.path.join(self.rootdir, 'library'))
+                share=self.sslib, path=os.path.join(self.rootdir, 'libshare'))
 
         self.sstmp = rm.ServerShare.objects.create(name=settings.TMPSHARENAME, max_security=1,
                 function=rm.ShareFunction.RAWDATA)
@@ -219,7 +219,7 @@ class BaseTest(TestCase):
 
         # Library files, for use as input, so claimed and ready
         self.lft = rm.StoredFileType.objects.create(name=settings.DBFA_FT_NAME, filetype='fasta',
-                is_rawdata=False)
+                is_rawdata=False, user_uploadable=True)
         self.libraw = rm.RawFile.objects.create(name='db.fa', producer=self.prod,
                 source_md5='libfilemd5', size=100, claimed=True, date=timezone.now())
         self.sflib = rm.StoredFile.objects.create(rawfile=self.libraw, md5=self.libraw.source_md5,

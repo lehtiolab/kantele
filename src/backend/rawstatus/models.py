@@ -261,7 +261,6 @@ class UploadToken(models.Model):
     producer = models.ForeignKey(Producer, on_delete=models.CASCADE)
     # ftype is encoded in token for upload, so need to bind Token to Filetype:
     filetype = models.ForeignKey(StoredFileType, on_delete=models.CASCADE)
-    archive_only = models.BooleanField(default=False)
     uploadtype = models.IntegerField(choices=UploadFileType.choices)
 
     @staticmethod

@@ -38,13 +38,11 @@ from jobs import jobs as jj
 from jobs.jobutil import create_job, create_job_without_check, check_job_error, jobmap
 
 
-# TODO this is temporary?
 UPLOAD_DESTINATIONS = {
         UploadFileType.RAWFILE: (ShareFunction.INBOX, settings.TMPPATH),
         UploadFileType.ANALYSIS: (ShareFunction.ANALYSISRESULTS, False),
-        UploadFileType.LIBRARY: (ShareFunction.RAWDATA, settings.LIBRARY_FILE_PATH),
-        UploadFileType.USERFILE: (ShareFunction.RAWDATA, settings.USERFILEDIR),
-
+        UploadFileType.LIBRARY: (ShareFunction.LIBRARY, settings.LIBRARY_FILE_PATH),
+        UploadFileType.USERFILE: (ShareFunction.LIBRARY, settings.LIBRARY_FILE_PATH),
         }
 
 
@@ -144,7 +142,7 @@ def browser_userupload(request):
     # create userfileupload model (incl. fake token)
     # FIXME hardcoded admin name!
     producer = Producer.objects.get(shortname='admin')
-    upload = create_upload_token(ftype.pk, request.user.id, producer, uploadtype, archive_only)
+    upload = create_upload_token(ftype.pk, request.user.id, producer, uploadtype)
     # tmp write file 
     upfile = request.FILES['file']
     dighash = md5()
@@ -186,9 +184,11 @@ def browser_userupload(request):
             'should not happen, please inform your administrator'}, status=403)
 
     # Get the file path and share dependent on the upload type
-    dstsharefun, dstpath = UPLOAD_DESTINATIONS[upload.uploadtype]
+    _, dstpath = UPLOAD_DESTINATIONS[upload.uploadtype]
     if upload.uploadtype == UploadFileType.RAWFILE:
         fname = upfile.name
+        # inbox is so broad so we upload to each raw file's own path
+        dstpath = os.path.join(dstpath, raw.pk)
     elif upload.uploadtype == UploadFileType.LIBRARY:
         fname = f'{raw.pk}_{upfile.name}'
     elif upload.uploadtype == UploadFileType.USERFILE:
@@ -198,7 +198,7 @@ def browser_userupload(request):
             'or user type'}, status=403)
 
     # FIXME this will crash:
-    dstshare = ServerShare.objects.get(function=dstsharefun)
+    dstshare = ServerShare.objects.get(function=ShareFunction.INBOX)
     if upload.uploadtype == UploadFileType.RAWFILE and StoredFileLoc.objects.filter(
             sfile__filename=fname, path=dstpath, servershare=dstshare, sfile__deleted=False).exclude(
                     sfile__rawfile__source_md5=raw.source_md5).exists():
@@ -318,19 +318,19 @@ def request_upload_token(request):
     if uploadtype not in [UploadFileType.RAWFILE, UploadFileType.USERFILE, UploadFileType.LIBRARY]:
         return JsonResponse({'success': False, 'msg': 'Can only upload raw, library, user files '})
 
-    ufu = create_upload_token(data['ftype_id'], request.user.id, producer, uploadtype, data['archive_only'])
+    ufu = create_upload_token(data['ftype_id'], request.user.id, producer, uploadtype)
     host = settings.KANTELEHOST or request.build_absolute_uri('/')
     return JsonResponse(ufu.parse_token_for_frontend(host))
 
 
-def create_upload_token(ftype_id, user_id, producer, uploadtype, archive_only=False):
+def create_upload_token(ftype_id, user_id, producer, uploadtype):
     '''Generates a new UploadToken for a producer and stores it in DB'''
     token = str(uuid4())
     expi_sec = settings.MAX_TIME_PROD_TOKEN if producer.internal else settings.MAX_TIME_UPLOADTOKEN
     expiry = timezone.now() + timedelta(seconds=expi_sec)
     return UploadToken.objects.create(token=token, user_id=user_id, expired=False,
             expires=expiry, filetype_id=ftype_id, producer=producer,
-            archive_only=archive_only, uploadtype=uploadtype)
+            uploadtype=uploadtype)
 
 
 # /files/transferstate
@@ -681,17 +681,17 @@ def process_file_confirmed_ready(rfn, sfn, sfloc, upload, desc):
         create_job('classify_msrawfile', sfloc_id=sfloc.pk, token=upload.token)
         # No backup before the classify job etc
     else:
-        if upload.uploadtype == UploadFileType.LIBRARY:
-            LibraryFile.objects.create(sfile=sfn, description=desc)
-            newname = f'libfile_{sfn.libraryfile.id}_{rfn.name}'
-            create_job('move_single_file', sfloc_id=sfloc.id, dst_path=settings.LIBRARY_FILE_PATH,
-                    newname=newname)
-        elif upload.uploadtype == UploadFileType.USERFILE:
-            UserFile.objects.create(sfile=sfn, description=desc, upload=upload)
-            newname = f'userfile_{rfn.id}_{rfn.name}'
-            # FIXME can we move a folder!?
-            create_job('move_single_file', sfloc_id=sfloc.id, dst_path=settings.USERFILEDIR,
-                    newname=newname)
+        if upload.uploadtype in [UploadFileType.LIBRARY, UploadFileType.USERFILE]:
+            if upload.uploadtype == UploadFileType.LIBRARY:
+                LibraryFile.objects.create(sfile=sfn, description=desc)
+                newname = f'libfile_{sfn.libraryfile.id}_{rfn.name}'
+            elif upload.uploadtype == UploadFileType.USERFILE:
+                UserFile.objects.create(sfile=sfn, description=desc, upload=upload)
+                newname = f'userfile_{rfn.id}_{rfn.name}'
+            create_job('rename_file', sfloc_id=sfloc.pk, newname=newname)
+            for ss in ServerShare.objects.exclude(pk=sfloc.servershare_id).filter(
+                    function=ShareFunction.LIBRARY):
+                create_job('rsync_otherfiles_to_servershare', sfloc_id=sfloc.id, dstshare_id=ss.pk)
         elif upload.uploadtype == UploadFileType.ANALYSIS:
             # TODO which analysis uploads go to Kantele? Skip any sens data
             # results, so possibly only reports (aggregates)

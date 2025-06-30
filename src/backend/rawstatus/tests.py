@@ -47,6 +47,48 @@ class BaseFilesTest(BaseTest):
                 source_md5='b7d55c322fa09ecd8bea141082c5419d',
                 size=100, date=timezone.now(), claimed=False)
 
+class TestBrowserUpload(BaseIntegrationTest):
+
+    def test_libfile(self):
+        url = f'{self.live_server_url}/files/upload/userfile/'
+        libfn = os.path.join(self.newstorctrl.path, 'libfiles', 'db.fa')
+        data = {'ftype_id': self.lft.pk, 'uploadtype': rm.UploadFileType.LIBRARY, 'desc': 'abc',
+                'file': open(libfn, 'r')}
+        resp = self.cl.post(url, data)
+        self.assertEqual(resp.status_code, 200)
+        fn = rm.StoredFile.objects.last()
+        newname = f'libfile_{fn.libraryfile.pk}_{fn.rawfile.name}'
+        self.assertEqual(fn.filename, f'{fn.rawfile_id}_db.fa')
+        self.run_job()
+        self.assertTrue(os.path.exists(os.path.join(self.inboxctrl.path, fn.filename)))
+        self.run_job()
+        fn.refresh_from_db()
+        self.assertEqual(fn.filename, newname)
+        self.assertTrue(os.path.exists(os.path.join(self.inboxctrl.path, fn.filename)))
+        self.assertFalse(os.path.exists(os.path.join(self.libctrl.path, fn.filename)))
+        self.run_job()
+        self.assertTrue(os.path.exists(os.path.join(self.libctrl.path, fn.filename)))
+
+    def test_userfile(self):
+        url = f'{self.live_server_url}/files/upload/userfile/'
+        upfn = os.path.join(self.newstorctrl.path, 'libfiles', 'db.fa')
+        data = {'ftype_id': self.lft.pk, 'uploadtype': rm.UploadFileType.USERFILE, 'desc': 'abc',
+                'file': open(upfn, 'r')}
+        resp = self.cl.post(url, data)
+        self.assertEqual(resp.status_code, 200)
+        fn = rm.StoredFile.objects.last()
+        newname = f'userfile_{fn.rawfile_id}_{fn.rawfile.name}'
+        self.assertEqual(fn.filename, f'{fn.rawfile_id}_db.fa')
+        self.run_job()
+        self.assertTrue(os.path.exists(os.path.join(self.inboxctrl.path, fn.filename)))
+        self.run_job()
+        fn.refresh_from_db()
+        self.assertEqual(fn.filename, newname)
+        self.assertTrue(os.path.exists(os.path.join(self.inboxctrl.path, fn.filename)))
+        self.assertFalse(os.path.exists(os.path.join(self.libctrl.path, fn.filename)))
+        self.run_job()
+        self.assertTrue(os.path.exists(os.path.join(self.libctrl.path, fn.filename)))
+
 
 class TestUploadScript(BaseIntegrationTest):
     def setUp(self):
