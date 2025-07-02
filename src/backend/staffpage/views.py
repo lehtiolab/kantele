@@ -23,13 +23,6 @@ from jobs import models as jm
 from jobs import jobs as jj
 
 
-def query_all_qc_files():
-    '''QC files are defined as not having a dataset, being claimed, and stored on the
-    QC storage dir'''
-    return rm.StoredFile.objects.filter(rawfile__datasetrawfile__isnull=True, rawfile__claimed=True,
-            storedfileloc__path__startswith=settings.QC_STORAGE_DIR, rawfile__qcrun__isnull=False)
-
-
 @staff_member_required
 @require_GET
 def show_staffpage(request):
@@ -67,7 +60,57 @@ def remove_qcfile(request):
     pass
 
 
-@staff_member_required
+def retrieve_backup_to_ana_or_rsyncstor(sfid):
+    errmsg = False
+    bup_sfl = rm.StoredFileLoc.objects.filter(sfile_id=sfid,
+            servershare__fileservershare__server__can_backup=True)
+    if ana_sfl := bup_sfl.filter(servershare__fileservershare__server__is_analysis=True):
+        # retrieve straight to analysis share
+        bupjob = create_job('restore_from_pdc_archive', sfloc_id=ana_sfl.get().pk)
+        ana_sfl.update(active=True)
+    elif rssfl := bup_sfl.filter(servershare__fileservershare__server__can_rsync_remote=True):
+        # retrieve to rsync share and put in analysis after
+        bup_sflocid = rssfl.values('pk').get()['pk']
+        bupjob = create_job('restore_from_pdc_archive', sfloc_id=bup_sflocid)
+        rssfl.update(active=True)
+    else:
+        errmsg = 'File is in backup and could not find a storage to retrieve it to'
+    return errmsg
+
+
+def rsync_qc_to_analysis(sfl_q):
+    '''Select sfl to run QC on, if not on analysis server, queue it to one
+    returns either sfl, server_id, False
+    or False, False 'error message'
+    '''
+    fss_q = rm.FileserverShare.objects.filter(server__is_analysis=True, server__active=True,
+            share__function=rm.ShareFunction.RAWDATA)
+    if ana_sfl := sfl_q.filter(servershare__fileservershare__server__is_analysis=True,
+            servershare__fileservershare__server__active=True):
+        sfloc = ana_sfl.get()
+        fss = fss_q.filter(share_id=sfloc.servershare_id).values('server_id').first()
+
+    elif ana_rs_fssq := fss_q.filter(server__can_rsync_remote=True):
+        fss = ana_rs_fssq.values('share_id', 'server_id').first()
+        srcsfl = sfl_q.first()
+        qc_mvjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=srcsfl.pk,
+            dstshare_id=fss['share_id'])
+        sfloc = rm.StoredFileLoc.objects.get(pk=qc_mvjob['kwargs']['dstsfloc_id'])
+
+    elif srcsfloc := sfl_q.filter(servershare__fileservershare__server__can_rsync_remote=True):
+        fss = fss_q.values('share_id', 'server_id').first()
+        qc_mvjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=srcsfloc.first().pk,
+            dstshare_id=fss['share_id'])
+        sfloc = rm.StoredFileLoc.objects.get(pk=qc_mvjob['kwargs']['dstsfloc_id'])
+
+    else:
+        msg = (f'Queued file {rfnq.values("name").get()["name"]} for QC run could not be found '
+        'on any share with either analysis or rsync transfer capabilities')
+        return False, False, msg
+    return sfloc, fss['server_id'], False
+
+
+staff_member_required
 @require_POST
 def new_qcfile(request):
     '''For files without QC data, where it is not known of what type they are,
@@ -81,35 +124,33 @@ def new_qcfile(request):
         # AttributeError is for acqtype is not in the AcquisistionMode
         return JsonResponse({'state': 'error', 'msg': 'Something went wrong, contact admin'},
                 status=400)
+    # Get sfn without QC data, either nonclaimed or has an fjob for QC (but those are claimed?)
+    # Deprecate the filejob= demand, that should not be for NEW qc files, probably bc of some legacy
+    # reason
+
     # I tried with Q(claimed) | Q(filejob__job__funcname) 
     # But that got as many records as there are filejobs due to the JOIN
     # And somehow not filtering the way I wanted it (claimed OR filejob=run_longit) was used
     # so all three filejobs had claim filtering pass, even if only one had jobname filter pass.
     presfnq = presfnq.filter(checked=True, rawfile__qcrun__isnull=True)
     sfnqa = presfnq.filter(rawfile__claimed=False)
-    sfnqb = presfnq.filter(filejob__job__funcname= 'run_longit_qc_workflow')
+    sfnqb = presfnq.filter(rawfile__filejob__job__funcname= 'run_longit_qc_workflow')
     sfnq = sfnqa.union(sfnqb)
     if sfnq.count() == 1:
-        tmpshare = rm.ServerShare.objects.get(name=settings.TMPSHARENAME)
-        sfn = sfnq.get()
-        rm.RawFile.objects.filter(storedfile__pk=data['sfid']).update(claimed=True)
-        # FIXME first is probably not a good idea here!
-        sfloc = rm.StoredFileLoc.objects.filter(sfile=sfn).first()
-        if sfloc.servershare == tmpshare:
-            create_job('move_single_file', sfloc_id=sfloc.pk,
-                    dstsharename=settings.PRIMARY_STORAGESHARENAME,
-                    dst_path=os.path.join(settings.QC_STORAGE_DIR, sfn.rawfile.producer.name))
+        rfnq = rm.RawFile.objects.filter(storedfile__pk=data['sfid'])
+        rfnq.update(claimed=True)
+        sfl_q = rm.StoredFileLoc.objects.filter(sfile_id=data['sfid'], active=True)
+        sfloc, server_id, errmsg = rsync_qc_to_analysis(sfl_q)
+        if errmsg and not sfloc:
+            return JsonResponse({'msg': errmsg, 'state': 'error'}, status=400)
         user_op = get_operator_user()
-        run_singlefile_qc(sfn.rawfile, sfloc, user_op, acqtype)
-        msg = f'Queued file {sfn.filename} for QC run'
+        run_singlefile_qc(sfloc, server_id, user_op, acqtype)
+        msg = f'Queued file {rfnq.values("name").get()["name"]} for QC run'
         state = 'ok'
     else:
         msg = 'Something went wrong, could not get file to run QC on, contact admin'
         state = 'error'
-    if state != 'ok':
-        status = 400
-    else:
-        status = 200
+    status = 200 if state == 'ok' else 400
     return JsonResponse({'msg': msg, 'state': state}, status=status)
 
 
@@ -123,35 +164,37 @@ def rerun_singleqc(request):
         sfid = int(data['sfid'])
     except (KeyError, ValueError):
         return JsonResponse({'state': 'error', 'msg': 'Something went wrong, contact admin'}, status=400)
-    sfs = query_all_qc_files().filter(pk=sfid).select_related('rawfile__qcrun',
-            'rawfile__producer__msinstrument__instrumenttype')
+    # Select QC files with a QC run (can be errored but there DDA/DIA is stored post classify!)
+    sfs = rm.StoredFile.objects.filter(rawfile__usetype=rm.UploadFileType.QC, pk=sfid,
+            mzmlfile__isnull=True, rawfile__qcrun__isnull=False)
     if sfs.count() == 1:
+        fname = sfs.values('filename').get()['filename']
         user_op = get_operator_user()
-        sf = sfs.get()
-        # FIXME first call prob not right
-        sfloc = sf.storedfileloc_set.first()
-        if sf.deleted:
+        sfls = rm.StoredFileLoc.objects.filter(sfile_id=sfid)
+        if not sfls.filter(active=True).exists():
             # retrieve if needed
-            if hasattr(sf, 'pdcbackedupfile') and sf.pdcbackedupfile.success and not sf.pdcbackedupfile.deleted:
-                sfs.update(deleted=False)
-                create_job('restore_from_pdc_archive', sfloc_id=sfloc.pk)
-                run_singlefile_qc(sf.rawfile, sfloc, user_op,
-                        dm.AcquisistionMode(sf.rawfile.qcrun.runtype))
-                msg = f'Queued {sf.filename} QC raw for retrieval from archive and rerun'
-                state = 'ok'
+            if rm.PDCBackedupFile.objects.filter(storedfile__id=sfid, success=True,
+                    deleted=False):
+                if retr_err := retrieve_backup_to_ana_or_rsyncstor(sfid):
+                    return JsonResponse({'msg': msg, 'state': 'error'}, status=400)
             else:
-                msg = (f'QC file {sf.filename} is marked as deleted, but cannot be restored, '
+                msg = (f'QC file {fname} is marked as deleted, but cannot be restored, '
                         'contact admin')
-                state = 'error'
-        else:
-            run_singlefile_qc(sf.rawfile, sfloc, user_op,
-                    dm.AcquisistionMode(sf.rawfile.qcrun.runtype))
-            msg = f'Queued {sf.filename} QC raw for rerun'
-            state = 'ok'
+                return JsonResponse({'msg': msg, 'state': 'error'}, status=400)
+        sfloc, server_id, errmsg = rsync_qc_to_analysis(sfls.filter(active=True))
+        if errmsg and not sfloc:
+            return JsonResponse({'msg': errmsg, 'state': 'error'}, status=400)
+        runtype = dam.QCRun.objects.filter(rawfile__storedfile__storedfileloc=sfloc).values(
+                'runtype').get()['runtype']
+        run_singlefile_qc(sfloc, server_id, user_op, dm.AcquisistionMode(runtype))
+
+        state = 'ok'
+        msg = f'Queued {fname} QC raw for rerun'
     else:
         msg = 'Something went wrong, could not get file to run QC on, contact admin'
         state = 'error'
-    return JsonResponse({'msg': msg, 'state': state})
+    status = 200 if state == 'ok' else 400
+    return JsonResponse({'msg': msg, 'state': state}, status=status)
 
 
 @staff_member_required
@@ -175,14 +218,14 @@ def rerun_qcs(request):
         return JsonResponse({'state': 'error', 'msg': 'Something went wrong, contact admin'}, status=400)
     lastdate = (timezone.now() - timezone.timedelta(days_back)).date()
     # Filter QC files (in path, no dataset, with QCdata, claimed, date)
-    sfs = query_all_qc_files().filter(rawfile__producer__pk__in=instruments,
-            rawfile__date__gte=lastdate).select_related('rawfile__qcrun',
-                'rawfile__producer__msinstrument__instrumenttype')
+    sfs = rm.StoredFile.objects.filter(rawfile__usetype=rm.UploadFileType.QC,
+            mzmlfile__isnull=True, rawfile__qcrun__isnull=False).filter(
+                    rawfile__producer__pk__in=instruments, rawfile__date__gte=lastdate)
+    job_sflids = [x.pk for y in sfs for x in y.storedfileloc_set.all()]
     latest_qcwf = am.NextflowWfVersionParamset.objects.filter(
             userworkflow__wftype=am.UserWorkflow.WFTypeChoices.QC).last()
-    # FIXME Again, using first()
     qcjobs = [x.kwargs['sfloc_id'] for x in jm.Job.objects.filter(funcname='run_longit_qc_workflow',
-        state__in=jj.JOBSTATES_WAIT, kwargs__sfloc_id__in=[x.storedfileloc_set.first().pk for x in sfs])]
+        state__in=jj.JOBSTATES_WAIT, kwargs__sfloc_id__in=job_sflids)]
     duprun_q = Q(rawfile__qcrun__analysis__nextflowsearch__nfwfversionparamset=latest_qcwf)
     retrieve_q = Q(deleted=True, pdcbackedupfile__success=True, pdcbackedupfile__deleted=False)
 
@@ -196,16 +239,18 @@ def rerun_qcs(request):
         if retrieve_archive:
             retrieve_files = deleted_files.filter(retrieve_q)
             for sf in retrieve_files:
-                create_job('restore_from_pdc_archive', sf_id=sf.pk)
+                if retr_msg := retrieve_backup_to_ana_or_rsyncstor(sf.pk):
+                    return JsonResponse({'state': 'error', 'msg': retr_msg})
             sfs = sfs.union(retrieve_files)
             retr_msg = f' - Queued {retrieve_files.count()} QC raw files for retrieval from archive'
         msg = f'Queued {sfs.count()} QC raw files for running{retr_msg}'
         for sf in sfs:
-            # FIXME first call too random!
-            sfloc = sf.storedfileloc_set.first()
-            run_singlefile_qc(sf.rawfile, sfloc, user_op,
-                    dm.AcquisistionMode(sf.rawfile.qcrun.runtype))
+            # here home
+            sfloc, server_id, errmsg = rsync_qc_to_analysis(
+                    rm.StoredFileLoc.objects.filter(sfile=sf, active=True))
+            run_singlefile_qc(sfloc, server_id, user_op, dm.AcquisistionMode(sf.rawfile.qcrun.runtype))
         state = 'ok'
+
     else:
         without_duplicates = sfs.exclude(storedfileloc__pk__in=qcjobs).exclude(duprun_q)
         not_deleted_files = sfs.filter(deleted=False)
@@ -235,7 +280,7 @@ def find_unclaimed_files(request):
     # Find checked+non-qcrun files, that are either not claimed, or have a QC job
     availableq = Q(rawfile__claimed=False) | Q(filejob__job__funcname='run_longit_qc_workflow')
     filtered = rm.StoredFile.objects.filter(checked=True, rawfile__qcrun__isnull=True).filter(
-            availableq).filter(query)
+            rawfile__usetypeavailableq).filter(query)
     if filtered.count() > 50:
         fns = {}
     else:
@@ -246,13 +291,17 @@ def find_unclaimed_files(request):
 @login_required
 @require_GET
 def get_qc_files(request):
+    '''Get all QC files from search terms, defined as usetype=QC && has qcrun
+    Max 50 files for dropdown, or do not return anything
+    '''
     query = Q()
     for searchterm in [x for x in request.GET.get('q', '').split(' ') if x != '']:
         subq = Q()
         subq |= Q(filename__icontains=searchterm)
         subq |= Q(rawfile__producer__name__icontains=searchterm)
         query &= subq
-    filtered = query_all_qc_files().filter(query)
+    filtered = rm.StoredFile.objects.filter(usetype=rm.UploadFileType.QC,
+            rawfile__qcrun__isnull=False).filter(query)
     if filtered.count() > 50:
         fns = {}
     else:

@@ -17,7 +17,6 @@ class BaseQCFileTest(BaseTest):
         super().setUp()
         self.user.is_staff = True
         self.user.save()
-        dm.Operator.objects.create(user=self.user)
 
 class QueueNewFile(BaseQCFileTest):
     url = '/manage/qc/newfile/'
@@ -35,32 +34,34 @@ class QueueNewFile(BaseQCFileTest):
         self.assertEqual(noid_resp.status_code, 400)
 
     def test_run_new_qc(self):
-        mv_jobs = jm.Job.objects.filter(funcname='move_single_file', state=jj.Jobstates.PENDING,
+        mv_jobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare', state=jj.Jobstates.PENDING,
                 kwargs__sfloc_id=self.tmpsss.pk)
         qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow',
-                state=jj.Jobstates.PENDING, kwargs__sfloc_id=self.tmpsss.pk)
+                state=jj.Jobstates.PENDING)
         self.assertEqual(mv_jobs.count(), 0)
         self.assertEqual(mv_jobs.count(), 0)
         resp = self.cl.post(self.url, content_type='application/json', data={
             'sfid': self.tmpsf.pk, 'acqtype': 'DIA'})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(mv_jobs.count(), 1)
-        self.assertEqual(mv_jobs.count(), 1)
+        qc_jobs = qc_jobs.filter(kwargs__sfloc_id=mv_jobs.first().kwargs['dstsfloc_id'])
+        self.assertEqual(qc_jobs.count(), 1)
 
     def test_run_qc_file_already_moved(self):
         jm.Job.objects.create(funcname='run_longit_qc_workflow', state=jj.Jobstates.ERROR,
                 kwargs={'sfloc_id': self.tmpsss.pk}, timestamp=timezone.now())
-        mv_jobs = jm.Job.objects.filter(funcname='move_single_file', state=jj.Jobstates.PENDING,
+        mv_jobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare', state=jj.Jobstates.PENDING,
                 kwargs__sfloc_id=self.tmpsss.pk)
         qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow',
-                state=jj.Jobstates.PENDING, kwargs__sfloc_id=self.tmpsss.pk)
+                state=jj.Jobstates.PENDING)
         self.assertEqual(mv_jobs.count(), 0)
         self.assertEqual(mv_jobs.count(), 0)
         resp = self.cl.post(self.url, content_type='application/json', data={
             'sfid': self.tmpsf.pk, 'acqtype': 'DIA'})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(mv_jobs.count(), 1)
-        self.assertEqual(mv_jobs.count(), 1)
+        qc_jobs = qc_jobs.filter(kwargs__sfloc_id=mv_jobs.first().kwargs['dstsfloc_id'])
+        self.assertEqual(qc_jobs.count(), 1)
 
 
 class RerunSingleQCTest(BaseQCFileTest):
@@ -69,15 +70,16 @@ class RerunSingleQCTest(BaseQCFileTest):
     def setUp(self):
         super().setUp()
         self.bup_jobs = jm.Job.objects.filter(funcname='restore_from_pdc_archive',
-                kwargs__sfloc_id=self.oldsss.pk)
-        self.qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow',
-                kwargs__sfloc_id=self.oldsss.pk)
+                kwargs__sfloc_id__in=[x.pk for x in self.oldsf.storedfileloc_set.all()])
+        self.qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow')
+        self.rs_jobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
+                kwargs__sfloc_id__in=[x.pk for x in self.oldsf.storedfileloc_set.all()])
         ana = am.Analysis.objects.create(name='previousrun', user=self.user, storage_dir='blbala')
         self.qcdata = dashm.QCRun.objects.create(rawfile=self.oldraw, analysis=ana,
                 runtype=dm.AcquisistionMode.DDA)
-        self.oldsss.path = os.path.join(settings.QC_STORAGE_DIR, 'test')
         self.olddsr.delete()
-        self.oldsss.save()
+        self.oldraw.usetype = rm.UploadFileType.QC
+        self.oldraw.save()
 
     def test_fail(self):
         getresp = self.cl.get(self.url)
@@ -100,24 +102,25 @@ class RerunSingleQCTest(BaseQCFileTest):
         self.assertEqual(self.qc_jobs.count(), 2)
 
     def test_run_with_archived_file(self):
-        self.oldsf.deleted, self.oldsss.purged = True, True
+        self.oldsf.deleted, self.oldsss.purged, self.oldsss.active = True, True, False
         self.oldsf.save()
+        self.oldsss.servershare = self.ssinbox
         self.oldsss.save()
         rm.PDCBackedupFile.objects.create(storedfile=self.oldsf, pdcpath='testpath', success=True)
         resp = self.cl.post(self.url, content_type='application/json', data={'sfid': self.oldsf.pk})
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()['msg'], f'Queued {self.oldsf.filename} QC raw for retrieval '
-                'from archive and rerun')
+        self.assertEqual(resp.json()['msg'], f'Queued {self.oldsf.filename} QC raw for rerun')
         self.assertEqual(self.bup_jobs.count(), 1)
+        self.assertEqual(self.rs_jobs.count(), 1)
         self.assertEqual(self.qc_jobs.count(), 1)
 
     def test_not_find_archive(self):
-        self.oldsf.deleted, self.oldsss.purged = True, True
+        self.oldsf.deleted, self.oldsss.purged, self.oldsss.active = True, True, False
         self.oldsf.save()
         self.oldsss.save()
         # No backup
         resp = self.cl.post(self.url, content_type='application/json', data={'sfid': self.oldsf.pk})
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json()['msg'], f'QC file {self.oldsf.filename} is marked as deleted, '
                 'but cannot be restored, contact admin')
         self.assertEqual(self.bup_jobs.count(), 0)
@@ -127,7 +130,7 @@ class RerunSingleQCTest(BaseQCFileTest):
         rm.PDCBackedupFile.objects.create(storedfile=self.oldsf, pdcpath='testpath', success=True,
                 deleted=True)
         resp = self.cl.post(self.url, content_type='application/json', data={'sfid': self.oldsf.pk})
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json()['msg'], f'QC file {self.oldsf.filename} is marked as deleted, '
                 'but cannot be restored, contact admin')
         self.assertEqual(self.bup_jobs.count(), 0)
@@ -145,8 +148,10 @@ class RerunManyQCsTest(BaseQCFileTest):
         pset = am.ParameterSet.objects.create()
         uwf = am.UserWorkflow.objects.create(wftype=am.UserWorkflow.WFTypeChoices.QC, public=False)
         uwf.nfwfversionparamsets.create(nfworkflow=nfrepo, paramset=pset)
-        ana = am.Analysis.objects.create(name='previousrun', user=self.user, storage_dir='blbala')
-        dashm.QCRun.objects.create(rawfile=self.tmpraw, analysis=ana, runtype=dm.AcquisistionMode.DDA)
+        oldana = am.Analysis.objects.create(name='previousrun', user=self.user, storage_dir='blbala')
+        dashm.QCRun.objects.create(rawfile=self.oldraw, analysis=oldana, runtype=dm.AcquisistionMode.DDA)
+        tmpana = am.Analysis.objects.create(name='previousrun', user=self.user, storage_dir='blbala3')
+        dashm.QCRun.objects.create(rawfile=self.tmpraw, analysis=tmpana, runtype=dm.AcquisistionMode.DDA)
 
     def test_fail(self):
         getresp = self.cl.get(self.url)
@@ -161,30 +166,28 @@ class RerunManyQCsTest(BaseQCFileTest):
 
         days_back = 3
         # One too-old file:
-        self.oldsss.path = os.path.join(settings.QC_STORAGE_DIR, 'test')
-        self.oldsss.save()
         self.olddsr.delete()
         self.oldraw.date = (timezone.now() - timezone.timedelta(days_back + 1)).date()
         self.oldraw.save()
 
         # One just old enough
-        self.f3sss.path = os.path.join(settings.QC_STORAGE_DIR, 'test')
+        self.f3raw.usetype = rm.UploadFileType.QC
         self.f3sss.save()
         self.f3dsr.delete()
         self.f3raw.date = (timezone.now() - timezone.timedelta(days_back)).date()
         self.f3raw.save()
 
         # One somewhat newer (date is already "now")
-        self.tmpsss.path = os.path.join(settings.QC_STORAGE_DIR, 'test')
+        self.tmpraw.usetype = rm.UploadFileType.QC
         self.tmpsss.save()
         self.tmpraw.claimed = True
         self.tmpraw.prod = prod2
         self.tmpraw.save()
 
-        nr_files = 2
+        nr_files = 2 # Amount inside date
         nr_duplicates = 2
         nr_deleted = 1
-        nr_ignored = 1
+        nr_ignored = 1 # no QC run
         nr_archived = 1
         cur_nr_queued = 0
         confirm_msg = f'You have selected {nr_files - nr_ignored} QC raw files.'
@@ -213,8 +216,8 @@ class RerunManyQCsTest(BaseQCFileTest):
         self.assertEqual(resp.status_code, 200)
         msg = resp.json()['msg']
         self.assertEqual(self.qc_jobs.count(), nr_files - nr_ignored)
-        self.assertEqual(self.qc_jobs.filter(kwargs__sfloc_id=self.tmpsss.pk).count(), 1)
-        self.assertEqual(self.qc_jobs.filter(kwargs__sfloc_id=self.f3sss.pk).count(), 0)
+        self.assertEqual(self.qc_jobs.filter(kwargs__sfloc_id__in=[x.pk for x in self.tmpsf.storedfileloc_set.all()]).count(), 1)
+        self.assertEqual(self.qc_jobs.filter(kwargs__sfloc_id=[x.pk for x in self.f3sf.storedfileloc_set.all()]).count(), 0)
         self.assertIn(queue_msg, msg)
         cur_nr_queued += nr_files - nr_ignored
 
@@ -278,7 +281,7 @@ class RerunManyQCsTest(BaseQCFileTest):
 
         self.assertEqual(self.qc_jobs.count(), cur_nr_queued)
         bup_jobs = jm.Job.objects.filter(funcname='restore_from_pdc_archive',
-                kwargs__sf_id=self.tmpsf.pk)
+                kwargs__sfloc_id__in=[x.pk for x in self.tmpsf.storedfileloc_set.all()])
         self.assertEqual(bup_jobs.count(), nr_archived)
         self.assertEqual(jm.Job.objects.filter(funcname='restore_from_pdc_archive').count(),
                 nr_archived)

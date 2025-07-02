@@ -70,6 +70,7 @@ class FileServer(models.Model):
     scratchdir = models.TextField()
     # Does the server have rsync private keys for other servers (aka is some kind of controller)
     can_rsync_remote = models.BooleanField(default=False)
+    can_backup = models.BooleanField(default=False)
     # username/keyfilename are for access to this server 
     rsyncusername = models.TextField()
     rsynckeyfile = models.TextField()
@@ -176,6 +177,12 @@ class FileserverShare(models.Model):
         constraints = [models.UniqueConstraint(fields=['server', 'path'], name='uni_fspath')]
 
 
+class UploadFileType(models.IntegerChoices):
+    RAWFILE = 1, 'Raw file'
+    ANALYSIS = 2, 'Analysis result'
+    LIBRARY = 3, 'Shared file for all users'
+    USERFILE = 4, 'User upload'
+    QC = 5, 'MS QC file'
 
 
 class RawFile(models.Model):
@@ -186,7 +193,7 @@ class RawFile(models.Model):
     size = models.BigIntegerField('size in bytes')
     date = models.DateTimeField('date/time created')
     claimed = models.BooleanField()
-    #is_sensitive = models.BooleanField(default=False)
+    usetype = models.IntegerField(choices=UploadFileType)
 
     def __str__(self):
         return self.name
@@ -239,15 +246,6 @@ class StoredFileLoc(models.Model):
 class MSFileData(models.Model):
     rawfile = models.OneToOneField(RawFile, on_delete=models.CASCADE)
     mstime = models.FloatField()
-
-
-class UploadFileType(models.IntegerChoices):
-    RAWFILE = 1, 'Raw file'
-    ANALYSIS = 2, 'Analysis result'
-    LIBRARY = 3, 'Shared file for all users'
-    USERFILE = 4, 'User upload'
-    # QC file for auto processing!? FIXME
-
 
 
 class UploadToken(models.Model):

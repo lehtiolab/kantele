@@ -43,9 +43,9 @@ class BaseFilesTest(BaseTest):
                 expires=timezone.now() - timedelta(1), expired=False, 
                 producer=self.prod, filetype=self.ft, uploadtype=rm.UploadFileType.RAWFILE)
 
-        self.registered_raw, _ = rm.RawFile.objects.get_or_create(name='file1', producer=self.prod,
-                source_md5='b7d55c322fa09ecd8bea141082c5419d',
-                size=100, date=timezone.now(), claimed=False)
+        self.registered_raw = rm.RawFile.objects.create(name='file1', producer=self.prod,
+                source_md5='b7d55c322fa09ecd8bea141082c5419d', size=100, date=timezone.now(),
+                claimed=False, usetype=rm.UploadFileType.RAWFILE)
 
 class TestBrowserUpload(BaseIntegrationTest):
 
@@ -348,7 +348,8 @@ class TestUploadScript(BaseIntegrationTest):
         fpath = os.path.join(settings.SHAREMAP[self.f3sss.servershare.name], self.f3sss.path)
         fullp = os.path.join(fpath, self.f3sf.filename)
         rawfn = rm.RawFile.objects.create(source_md5=self.actual_md5, name='fake_oldname',
-                producer=self.adminprod, size=123, date=timezone.now(), claimed=False)
+                producer=self.adminprod, size=123, date=timezone.now(), claimed=False,
+                usetype=rm.UploadFileType.RAWFILE)
         lastsf = rm.StoredFile.objects.last()
         sp = self.run_script(fullp)
         sleep(1)
@@ -788,11 +789,11 @@ class TransferStateTest(BaseFilesTest):
         super().setUp()
         self.primshare = rm.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
         self.trfraw = rm.RawFile.objects.create(name='filetrf', producer=self.prod, source_md5='defghi123',
-                size=100, date=timezone.now(), claimed=False)
+                size=100, date=timezone.now(), claimed=False, usetype=rm.UploadFileType.RAWFILE)
         self.doneraw = rm.RawFile.objects.create(name='filedone', producer=self.prod, source_md5='jklmnop123',
-                size=100, date=timezone.now(), claimed=False)
+                size=100, date=timezone.now(), claimed=False, usetype=rm.UploadFileType.RAWFILE)
         self.multifileraw = rm.RawFile.objects.create(name='filemulti', producer=self.prod, source_md5='jsldjak8',
-                size=100, date=timezone.now(), claimed=False)
+                size=100, date=timezone.now(), claimed=False, usetype=rm.UploadFileType.RAWFILE)
         self.trfsf = rm.StoredFile.objects.create(rawfile=self.trfraw, filename=self.trfraw.name,
                 md5=self.trfraw.source_md5, filetype=self.ft)
         self.trfsss = rm.StoredFileLoc.objects.create(sfile=self.trfsf, servershare=self.sstmp,
@@ -926,7 +927,7 @@ class TransferStateTest(BaseFilesTest):
         # wrong producer
         prod2 = rm.Producer.objects.create(name='prod2', client_id='secondproducer', shortname='p2')
         p2raw = rm.RawFile.objects.create(name='p2file1', producer=prod2, source_md5='p2rawmd5',
-                size=100, date=timezone.now(), claimed=False)
+                size=100, date=timezone.now(), claimed=False, usetype=rm.UploadFileType.RAWFILE)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'token': self.token, 'fnid': p2raw.id, 'desc': False})
         self.assertEqual(resp.status_code, 403)
@@ -1379,7 +1380,8 @@ class TestRenameFile(BaseIntegrationTest):
         # Create file record
         oldfn = 'rename_oldfn.raw'
         oldraw = rm.RawFile.objects.create(name=oldfn, producer=self.prod,
-                source_md5='rename_oldraw_fakemd5', size=10, date=timezone.now(), claimed=True)
+                source_md5='rename_oldraw_fakemd5', size=10, date=timezone.now(), claimed=True,
+                usetype=rm.UploadFileType.RAWFILE)
         sf = rm.StoredFile.objects.create(rawfile=oldraw, filename=oldfn, md5=oldraw.source_md5,
                 filetype=self.ft, checked=True)
         sfloc = rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.f3sss.servershare, path=self.f3sss.path,
@@ -1450,7 +1452,8 @@ class TestDeleteFile(BaseIntegrationTest):
         '''
         badfn = 'badraw'
         badraw = rm.RawFile.objects.create(name=badfn, producer=self.prod,
-                source_md5='badraw_fakemd5', size=10, date=timezone.now(), claimed=True)
+                source_md5='badraw_fakemd5', size=10, date=timezone.now(), claimed=True,
+                usetype=rm.UploadFileType.RAWFILE)
         badsf = rm.StoredFile.objects.create(rawfile=badraw, filename=badfn,
                     md5=badraw.source_md5, filetype=self.ft, checked=True)
         badloc = rm.StoredFileLoc.objects.create(sfile=badsf, servershare=self.ssnewstore, path=self.storloc)

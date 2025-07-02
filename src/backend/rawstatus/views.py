@@ -166,7 +166,7 @@ def browser_userupload(request):
         dighash = dighash.hexdigest() 
         raw, _ = RawFile.objects.get_or_create(source_md5=dighash, defaults={
                 'name': upfile.name, 'producer': producer, 'size': upfile.size,
-                'date': timezone.now(), 'claimed': True})
+                'date': timezone.now(), 'claimed': True, 'usetype': uploadtype})
         dst = rsjobs.create_upload_dst_web(raw.pk, upload.filetype.filetype)
         # Copy file to target uploadpath, after Tempfile context is gone, it is deleted
         shutil.copy(fp.name, dst)
@@ -373,7 +373,7 @@ def get_files_transferstate(request):
             claimed = False
         rfn, _ = RawFile.objects.get_or_create(source_md5=md5, defaults={
             'name': fn, 'producer': upload.producer, 'size': size, 'date': file_date,
-            'claimed': claimed})
+            'claimed': claimed, 'usetype': upload.uploadtype})
     else:
         rfn = RawFile.objects.filter(pk=fnid).select_related('producer')
         if not rfn.count():
@@ -484,6 +484,7 @@ def classified_rawfile_treatment(request):
         already_classified_or_error = True
     elif is_qc_acqtype:
         sfloc.sfile.rawfile.claimed = True
+        sfloc.sfile.rawfile.usetype = UploadFileType.QC
         sfloc.sfile.rawfile.save()
         # Rsync file to analysis server
         fss = FileserverShare.objects.filter(share__function=ShareFunction.RAWDATA,
@@ -590,20 +591,24 @@ def file_uploaded(request):
     if producer['msinstrument__filetype'] is not None:
         filetype = producer['msinstrument__filetype']
         is_active_ms = producer['internal'] and producer['msinstrument__active']
+        uploadtype = UploadFileType.RAWFILE
     elif instrument_id == settings.ANALYSISCLIENT_APIKEY:
         analysis  = Analysis.objects.get(pk=analysis_id)
         is_active_ms = False
         filetype = StoredFileType.objects.get(name=settings.ANALYSIS_FT_NAME)
+        uploadtype = UploadFileType.ANALYSIS
     elif data['is_library']:
         is_active_ms = False
         filetype = StoredFileType.objects.get(pk=data['filetype_id'])
+        uploadtype = UploadFileType.LIBRARY
     else:
         return JsonResponse({'error': f'Could not identify uploading client for file {fn} on '
             'server {share__name}'}, status=403)
 
     # Create file entries
     rfn, raw_created = RawFile.objects.get_or_create(source_md5=md5, defaults={
-        'name': fn, 'producer_id': producer['pk'], 'size': size, 'date': file_date, 'claimed': claimed})
+        'name': fn, 'producer_id': producer['pk'], 'size': size, 'date': file_date,
+        'claimed': claimed, 'usetype': uploadtype})
     if not raw_created:
         # FIXME if it somehow crashed, maybe theres a rawfile but not
         # a backup? - make sure to check also backups and sflocs available

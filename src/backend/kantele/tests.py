@@ -49,7 +49,7 @@ class BaseTest(TestCase):
         # storage backend
         self.storagecontroller = rm.FileServer.objects.create(name='storage1', uri='s1.test',
                 fqdn='storage_ssh_1', can_rsync_remote=True, is_analysis=False, rsyncusername='kantele',
-                rsynckeyfile='/kantelessh/rsync_key')
+                rsynckeyfile='/kantelessh/rsync_key', can_backup=True)
         self.anaserver = rm.FileServer.objects.create(name='analysis1', uri='ana.test',
                 fqdn='analysis_ssh_1', is_analysis=True, rsyncusername='kantele', rsynckeyfile='/kantelessh/rsync_key')
         self.ssinbox = rm.ServerShare.objects.create(name='inbox', max_security=2,
@@ -150,7 +150,7 @@ class BaseTest(TestCase):
         # of a new file in tests
         self.f3raw = rm.RawFile.objects.create(name=fn3, producer=self.prod,
                 source_md5='f3_fakemd5',
-                size=f3size, date=timezone.now(), claimed=True)
+                size=f3size, date=timezone.now(), claimed=True, usetype=rm.UploadFileType.RAWFILE)
         self.f3dsr = dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=self.f3raw)
         self.f3sf = rm.StoredFile.objects.create(rawfile=self.f3raw, filename=fn3,
                 md5=self.f3raw.source_md5, filetype=self.ft, checked=True)
@@ -198,7 +198,7 @@ class BaseTest(TestCase):
         self.oldfpath = os.path.join(settings.SHAREMAP[self.analocalstor.name], self.oldstorloc)
         oldsize = os.path.getsize(os.path.join(self.oldfpath, oldfn))
         self.oldraw = rm.RawFile.objects.create(name=oldfn, producer=self.prod,
-                source_md5='old_to_new_fakemd5', size=oldsize, date=timezone.now(), claimed=True)
+                source_md5='old_to_new_fakemd5', size=oldsize, date=timezone.now(), claimed=True, usetype=rm.UploadFileType.RAWFILE)
         self.olddsr = dm.DatasetRawFile.objects.create(dataset=self.oldds, rawfile=self.oldraw)
         self.oldsf = rm.StoredFile.objects.create(rawfile=self.oldraw, filename=oldfn,
                     md5=self.oldraw.source_md5, filetype=self.ft, checked=True)
@@ -211,7 +211,7 @@ class BaseTest(TestCase):
         tmpfpathfn = os.path.join(self.inboxctrl.path, tmpfn)
         tmpsize = os.path.getsize(tmpfpathfn)
         self.tmpraw = rm.RawFile.objects.create(name=tmpfn, producer=self.prod,
-                source_md5='tmpraw_fakemd5', size=tmpsize, date=timezone.now(), claimed=False)
+                source_md5='tmpraw_fakemd5', size=tmpsize, date=timezone.now(), claimed=False, usetype=rm.UploadFileType.RAWFILE)
         self.tmpsf = rm.StoredFile.objects.create(rawfile=self.tmpraw, md5=self.tmpraw.source_md5,
                 filename=tmpfn, checked=True, filetype=self.ft)
         self.tmpsss = rm.StoredFileLoc.objects.create(sfile=self.tmpsf, servershare=self.ssinbox,
@@ -221,7 +221,7 @@ class BaseTest(TestCase):
         self.lft = rm.StoredFileType.objects.create(name=settings.DBFA_FT_NAME, filetype='fasta',
                 is_rawdata=False, user_uploadable=True)
         self.libraw = rm.RawFile.objects.create(name='db.fa', producer=self.prod,
-                source_md5='libfilemd5', size=100, claimed=True, date=timezone.now())
+                source_md5='libfilemd5', size=100, claimed=True, date=timezone.now(), usetype=rm.UploadFileType.LIBRARY)
         self.sflib = rm.StoredFile.objects.create(rawfile=self.libraw, md5=self.libraw.source_md5,
                 filetype=self.lft, checked=True, filename=self.libraw.name)
         self.sflibloc = rm.StoredFileLoc.objects.create(sfile=self.sflib,
@@ -235,15 +235,17 @@ class BaseTest(TestCase):
         anaft = rm.StoredFileType.objects.create(name=settings.ANALYSIS_FT_NAME, filetype='ana',
                 is_rawdata=False)
         self.anaprod = rm.Producer.objects.create(name='analysisprod', client_id=settings.ANALYSISCLIENT_APIKEY, shortname=settings.PRODUCER_ANALYSIS_NAME)
-        self.ana_raw, _ = rm.RawFile.objects.get_or_create(name='ana_file', producer=self.anaprod, source_md5='kjlmnop1234',
-                size=100, defaults={'date': timezone.now(), 'claimed': True})
+        self.ana_raw = rm.RawFile.objects.create(name='ana_file', producer=self.anaprod,
+                source_md5='kjlmnop1234', size=100, date=timezone.now(), claimed=True,
+                usetype=rm.UploadFileType.ANALYSIS)
         self.anasfile = rm.StoredFile.objects.create(rawfile=self.ana_raw, filetype=anaft,
 
                 filename=self.ana_raw.name, md5=self.ana_raw.source_md5)
         rm.StoredFileLoc.objects.create(sfile=self.anasfile, servershare=self.sstmp, path='',
                 active=True, purged=False)
-        self.ana_raw2, _ = rm.RawFile.objects.get_or_create(name='ana_file2', producer=self.anaprod,
-                source_md5='anarawabc1234', size=100, defaults={'date': timezone.now(), 'claimed': True})
+        self.ana_raw2 = rm.RawFile.objects.create(name='ana_file2', producer=self.anaprod,
+                source_md5='anarawabc1234', size=100, date=timezone.now(), claimed=True,
+                usetype=rm.UploadFileType.ANALYSIS)
         self.anasfile2 = rm.StoredFile.objects.create(rawfile=self.ana_raw2,
                 filetype_id=self.ft.id, filename=self.ana_raw2.name, filetype=anaft,
                     md5=self.ana_raw2.source_md5)
