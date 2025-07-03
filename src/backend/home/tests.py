@@ -45,8 +45,8 @@ class TestCreateMzmls(MzmlTests):
         self.assertEqual(resp.status_code, 403)
         self.assertIn('does not exist or is deleted', resp.json()['error'])
         # dset with diff raw files
-        timsraw = rm.RawFile.objects.create(name='file2', producer=self.prodtims,
-                source_md5='timsmd4', size=100, date=timezone.now(), claimed=True)
+        timsraw = rm.RawFile.objects.create(name='file2', producer=self.prodtims, source_md5='timsmd4', 
+                size=100, date=timezone.now(), claimed=True, usetype=rm.UploadFileType.RAWFILE)
         timsdsr = dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=timsraw)
         resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pwiz.pk,
             'dsid': self.ds.pk})
@@ -77,7 +77,7 @@ class TestCreateMzmls(MzmlTests):
         # Second dss
         rawfn = os.path.join(self.f3path, self.f3raw.name)
         dss2path = 'testdss2'
-        dss2_fpath = os.path.join(settings.SHAREMAP[self.analocalstor.name], dss2path)
+        dss2_fpath = os.path.join(self.oldstorctrl.path, dss2path)
         os.makedirs(dss2_fpath)
         rawfn_dss2 = os.path.join(dss2_fpath, self.f3raw.name)
         copytree(rawfn, rawfn_dss2)
@@ -159,7 +159,7 @@ class TestCreateMzmls(MzmlTests):
 
         rawfn = os.path.join(self.f3path, self.f3raw.name)
         dss2path = 'testdss2'
-        dss2_fpath = os.path.join(settings.SHAREMAP[self.analocalstor.name], dss2path)
+        dss2_fpath = os.path.join(self.oldstorctrl.path, dss2path)
         os.makedirs(dss2_fpath)
         rawfn_dss2 = os.path.join(dss2_fpath, self.f3raw.name)
         copytree(rawfn, rawfn_dss2)
@@ -251,7 +251,7 @@ class TestCreateMzmls(MzmlTests):
         self.f3raw.save()
         rawfn = os.path.join(self.f3path, self.f3raw.name)
         dss2path = 'testdss2'
-        dss2_fpath = os.path.join(settings.SHAREMAP[self.sstmp.name], dss2path)
+        dss2_fpath = os.path.join(self.tmpctrl.path, dss2path)
         os.makedirs(dss2_fpath)
         rawfn_dss2 = os.path.join(dss2_fpath, self.f3raw.name)
         copytree(rawfn, rawfn_dss2)
@@ -326,8 +326,8 @@ class TestRefineMzmls(MzmlTests):
         resp = self.cl.post(self.url, content_type='application/json', data={'dsid': 10000})
         self.assertEqual(resp.status_code, 403)
         self.assertIn('does not exist or is deleted', resp.json()['error'])
-        timsraw = rm.RawFile.objects.create(name='file2', producer=self.prodtims,
-                source_md5='timsmd4', size=100, date=timezone.now(), claimed=True)
+        timsraw = rm.RawFile.objects.create(name='file2', producer=self.prodtims, source_md5='timsmd4',
+                size=100, date=timezone.now(), claimed=True, usetype=rm.UploadFileType.RAWFILE)
         dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=timsraw)
         resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pwiz.pk,
             'dsid': self.ds.pk, 'dbid': self.sflib.pk})
@@ -360,8 +360,8 @@ class TestRefineMzmls(MzmlTests):
     def test_refine_mzml_move_dbfile(self):
         '''Do a refine, test its correctness, then make sure there is no dataset servershare
         move on the current dataset, unlike the test_with_filemove (old data to new share)'''
-        dbraw = rm.RawFile.objects.create(name='db2.fa', producer=self.prod,
-                source_md5='db2md5', size=100, claimed=True, date=timezone.now())
+        dbraw = rm.RawFile.objects.create(name='db2.fa', producer=self.prod, source_md5='db2md5',
+                size=100, claimed=True, date=timezone.now(), usetype=rm.UploadFileType.LIBRARY)
         dbsf = rm.StoredFile.objects.create(rawfile=dbraw, md5=dbraw.source_md5,
                 filetype=self.lft, checked=True, filename=dbraw.name)
         rm.StoredFileLoc.objects.create(sfile=dbsf, servershare=self.analocalstor, path='libfiles',

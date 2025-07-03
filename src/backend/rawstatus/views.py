@@ -127,7 +127,6 @@ def browser_userupload(request):
     except StoredFileType.DoesNotExist:
         return JsonResponse({'success': False, 'msg': 'Illegal file type to upload'}, status=403)
     try:
-        archive_only = bool(int(data['archive_only']))
         uploadtype = int(data['uploadtype'])
     except (ValueError, KeyError):
         return JsonResponse({'success': False, 'msg': 'Bad request, contact admin'}, status=400)
@@ -696,7 +695,8 @@ def process_file_confirmed_ready(rfn, sfn, sfloc, upload, desc):
             create_job('rename_file', sfloc_id=sfloc.pk, newname=newname)
             for ss in ServerShare.objects.exclude(pk=sfloc.servershare_id).filter(
                     function=ShareFunction.LIBRARY):
-                create_job('rsync_otherfiles_to_servershare', sfloc_id=sfloc.id, dstshare_id=ss.pk)
+                create_job('rsync_otherfiles_to_servershare', sfloc_id=sfloc.id, dstshare_id=ss.pk,
+                        dstpath=settings.LIBRARY_FILE_PATH)
         elif upload.uploadtype == UploadFileType.ANALYSIS:
             # TODO which analysis uploads go to Kantele? Skip any sens data
             # results, so possibly only reports (aggregates)
@@ -1176,9 +1176,27 @@ def restore_file_from_cold(request):
     elif hasattr(sfile, 'mzmlfile'):
         return JsonResponse({'error': 'mzML derived files are not archived, please regenerate it from RAW data'}, status=403)
     # File is set to deleted, purged = False, False in the post-job-view
-    # FIXME future: always restore to same share, i.e. PRIMARY, not whichever
-    sfloc = sfile.storedfileloc_set.get(servershare=settings.PRIMARY_STORAGESHARENAME)
-    create_job('restore_from_pdc_archive', sfloc_id=sfloc.pk)
+    sfloc_q = sfile.storedfileloc_set.filter(servershare__fileservershare__server__can_backup=True)
+    if sfl_bup_q := sfloc_q.filter(servershare_id__in=data['share_ids']):
+        # determine where to back up to, preferably a place the user wants to
+        sfl_bup = sfl_bup_q.first()
+    elif sfl_inbox_q := sfloq_q.filter(servershare__function=ShareFunction.INBOX):
+        # if that is not avail, pick inbox
+        sfl_bup = sfl_inbox_q.first()
+    else:
+        # Otherwise take first historical available share
+        sfl_bup = sfloc_q.first()
+    # Now restore, then distribute to other dst shares
+    create_job('restore_from_pdc_archive', sfloc_id=sfl_bup.pk)
+    sfl_bup.active = True
+    sfl_bup.save()
+    rsjob_kws = []
+    for dstsfl in sfloc_q.exclude(pk=sfl_bup.pk).values('pk'):
+        rsjkw = {'sfloc_id': sfl_bup.pk, 'dstsfloc_id': dstsfl['pk']}
+        if rsjoberr := check_job_error('rsync_otherfiles_to_servershare', **rsjkw):
+            return JsonResponse({'error': rsjoberr}, status=400)
+        rsjob_kws.append(rsjkw)
+    [create_job('rsync_otherfiles_to_servershare', **kw) for kw in rsjob_kws]
     return JsonResponse({'state': 'ok'})
 
 
@@ -1194,7 +1212,7 @@ def archive_file(request):
         return JsonResponse({'error': 'File does not exist, maybe it is deleted?'}, status=404)
     except KeyError:
         return JsonResponse({'error': 'Bad request'}, status=400)
-    sfloc_q = StoredFileLoc.objects.filter(sfile=sfile, purged=False)
+    sfloc_q = StoredFileLoc.objects.filter(sfile=sfile, active=True)
     if not sfloc_q.exists():
         return JsonResponse({'error': 'File is possibly deleted, but not marked as such, please '
             'inform admin -- can not archive'}, status=403)
@@ -1204,12 +1222,21 @@ def archive_file(request):
         return JsonResponse({'error': 'File is already archived'}, status=403)
     elif hasattr(sfile, 'mzmlfile'):
         return JsonResponse({'error': 'Derived mzML files are not archived, they can be regenerated from RAW data'}, status=403)
-    sfloc = sfloc_q.first()
-    create_job('create_pdc_archive', sfloc_id=sfloc.pk, isdir=sfile.filetype.is_folder)
+    if sfl_q_bup := sfloc_q.filter(servershare__fileservershare__server__can_backup=True):
+        sflocid = sfl_q_bup.values('pk').first()['pk']
+        create_job('create_pdc_archive', sfloc_id=sflocid, isdir=sfile.filetype.is_folder)
+    else:
+        sflocid = sfloc_q.values('pk').first()['pk']
+        sfloc_inbox = StoredFileLoc.objects.filter(sfile=sfile,
+                servershare__function=ShareFunction.INBOX)
+        rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflocid,
+                dstsfloc_id=sfloc_inbox.first().pk)
+        sfloc_inbox.update(active=True)
+        create_job('create_pdc_archive', sfloc_id=sfloc_inbox.pk, isdir=sfile.filetype.is_folder)
     # sfloc is set to purged=True in the post-job-view for purge
     sfile.deleted = True
     sfile.save()
-    create_job('purge_files', sfloc_ids=[sfloc.pk], need_archive=True)
+    create_job('purge_files', sfloc_ids=[x['pk'] for x in sfloc_q.values('pk')])
     return JsonResponse({'state': 'ok'})
 
 

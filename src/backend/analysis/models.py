@@ -324,7 +324,7 @@ class NextflowSearch(models.Model):
 
 class AnalysisResultFile(models.Model):
     analysis = models.ForeignKey(Analysis, on_delete=models.CASCADE)
-    sfile = models.OneToOneField(filemodels.StoredFile, on_delete=models.CASCADE)
+    sfile = models.ForeignKey(filemodels.StoredFile, on_delete=models.CASCADE)
 
 
 class Proteowizard(models.Model):

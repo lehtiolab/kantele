@@ -127,6 +127,7 @@ USERFILEDIR = 'uploadfiles'
 NXF_COMMAND = os.environ.get('NXF_COMMAND', 'nextflow run').split(' ')
 
 LIBRARY_FILE_PATH = ''
+LIBRARY_FILE_PATH_INBOX = 'library'
 
 NF_RUNDIR = os.environ.get('NEXTFLOW_RUNDIR', 'nf_runs')
 

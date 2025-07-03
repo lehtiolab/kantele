@@ -460,7 +460,7 @@ def populate_dset(dsids, dbdsets, user):
             'runname__experiment__project_id', 'datatype__name',
             'prefractionationdataset__prefractionation__name', 'prefractionationdataset__hiriefdataset__hirief'):
         dsfiles = filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dset['pk'])
-        storestate, nrfiles = get_dset_storestate(dset['pk'])
+        storestate, nrfiles = get_dset_storestate(dset['pk'], dset['deleted'])
         ana_ids = [x['id'] for x in anmodels.Analysis.objects.filter(datasetanalysis__dataset_id=dset['pk']).values('id')]
         dsfiles_ids = [x['pk'] for x in dsfiles.values('pk')]
         ownerq = dsmodels.DatasetOwner.objects.filter(dataset_id=dset['pk'])
@@ -712,6 +712,7 @@ def get_dset_info(request, dataset_id):
     dset = dsmodels.Dataset.objects.filter(pk=dataset_id).select_related(
         'runname__experiment__project').get()
     info = fetch_dset_details(dset)
+    info['deleted'] = dset.deleted
     return JsonResponse(info)
 
 
@@ -778,6 +779,10 @@ def fetch_dset_details(dset):
     # FIXME add more datatypes and microscopy is hardcoded
     info = {'owners': {x.user_id: x.user.username for x in dset.datasetowner_set.select_related('user').all()},
             'allowners': {x.id: '{} {}'.format(x.first_name, x.last_name) for x in User.objects.filter(is_active=True)}, 
+            'storage_shares': [x.storageshare_id for x in dsmodels.DatasetServer.objects.filter(
+                dataset=dset, active=True)],
+            'all_storlocs': {x.id: {'name': x.name, 'id': x.pk, 'description': x.description}
+                for x in filemodels.ServerShare.objects.filter(active=True, has_rawdata=True)},
             }
     try:
         info['qtype'] = {'name': dset.quantdataset.quanttype.name, 
@@ -790,7 +795,6 @@ def fetch_dset_details(dset):
     files = filemodels.StoredFile.objects.select_related('rawfile__producer', 'filetype').filter(
         rawfile__datasetrawfile__dataset_id=dset.id)
     servers = [x[0] for x in files.distinct('storedfileloc__servershare').values_list('storedfileloc__servershare__server__uri')]
-    info['storage_loc'] = '{} - {}'.format(';'.join(servers), dset.storage_loc)
     info['instruments'] = list(set([x.rawfile.producer.name for x in files]))
     info['instrument_types'] = list(set([x.rawfile.producer.shortname for x in files]))
     rawfiles = files.filter(mzmlfile__isnull=True)
@@ -936,15 +940,15 @@ def create_mzmls(request):
     other_pwiz_mz = mzmls_exist.exclude(mzmlfile__pwiz=pwiz)
     if other_pwiz_mz.count():
         del_sf_pk = [x['pk'] for x in other_pwiz_mz.values('pk')]
-        filemodels.StoredFile.objects.filter(pk__in=del_sf_pk).update(deleted=True)
         del_sfl_q = filemodels.StoredFileLoc.objects.filter(sfile_id__in=del_sf_pk)
-        del_sfl_q.update(active=False)
         # redefine query since now all the mzmls to deleted are marked deleted=T
         for dss in dsmodels.DatasetServer.objects.filter(dataset=dset, active=True).values('pk',
                 'storageshare_id'):
             sfl_pk_rm = [x['pk'] for x in del_sfl_q.filter(servershare_id=dss['storageshare_id']
                 ).values('pk')]
             create_job('remove_dset_files_servershare', dss_id=dss['pk'], sfloc_ids=sfl_pk_rm)
+        other_pwiz_mz.update(deleted=True)
+        del_sfl_q.update(active=False)
     # Now queue the convert, then queue redistribution to other places
     # Pick one but any servershare which is reachable on an analysis server:
     source_ssid = rawsfl.values('servershare_id').first()['servershare_id']
@@ -964,12 +968,14 @@ def create_mzmls(request):
                 dstshare_ids_dss.keys(), mzjob['kwargs']['server_id'])
         # First put result in local-to-analysis-server share
         for dstshare_id in share_classes['local']:
-            create_job('rsync_dset_files_to_servershare', dss_id=dstshare_ids_dss[dstshare_id],
+            local_rsjob = create_job('rsync_dset_files_to_servershare',
+                    dss_id=dstshare_ids_dss[dstshare_id],
                     sfloc_ids=mzjob['kwargs']['dstsfloc_ids'], dstshare_id=dstshare_id)
         # Then put result in rsync-accessible share
         for dstshare_id in share_classes['rsync_sourcable']:
             srcjob = create_job('rsync_dset_files_to_servershare', dstshare_id=dstshare_id,
-                    dss_id=dstshare_ids_dss[dstshare_id], sfloc_ids=mzjob['kwargs']['dstsfloc_ids'])
+                    dss_id=dstshare_ids_dss[dstshare_id],
+                    sfloc_ids=local_rsjob['kwargs']['dstsfloc_ids'])
             src_sflids_for_remote = srcjob['kwargs']['dstsfloc_ids']
         if share_classes['remote'] and not share_classes['rsync_sourcable']:
             # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
@@ -1080,12 +1086,13 @@ def refine_mzmls(request):
                 dstshare_ids_dss.keys(), job['kwargs']['server_id'])
         # First put result in local-to-analysis-server share
         for dstshare_id in share_classes['local']:
-            create_job('rsync_dset_files_to_servershare', dss_id=dstshare_ids_dss[dstshare_id],
+            local_rsjob = create_job('rsync_dset_files_to_servershare',
+                    dss_id=dstshare_ids_dss[dstshare_id],
                     sfloc_ids=job['kwargs']['dstsfloc_ids'], dstshare_id=dstshare_id)
         # Then put result in rsync-accessible share
         for dstshare_id in share_classes['rsync_sourcable']:
             srcjob = create_job('rsync_dset_files_to_servershare', dstshare_id=dstshare_id,
-                    dss_id=dstshare_ids_dss[dstshare_id], sfloc_ids=job['kwargs']['dstsfloc_ids'])
+                    dss_id=dstshare_ids_dss[dstshare_id], sfloc_ids=local_rsjob['kwargs']['dstsfloc_ids'])
             src_sflids_for_remote = srcjob['kwargs']['dstsfloc_ids']
         if share_classes['remote'] and not share_classes['rsync_sourcable']:
             # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
@@ -1093,7 +1100,7 @@ def refine_mzmls(request):
             dstshare = filemodels.ServerShare.objects.filter(function=filemodels.ShareFunction.INBOX
                     ).values('pk').first()
             src_sflids_for_remote = []
-            for sflpk in job['kwargs']['dstsfloc_ids']:
+            for sflpk in local_rsjob['kwargs']['dstsfloc_ids']:
                 srcjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflpk,
                         dstshare_id=dstshare['pk'], dstpath=filemodels.ServerShare.get_inbox_path(
                             dset_id=dset.pk))

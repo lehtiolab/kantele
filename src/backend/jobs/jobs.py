@@ -4,7 +4,7 @@ from celery import states
 
 from kantele import settings
 from jobs.models import Task, Job, JobError
-from rawstatus.models import RawFile, StoredFile, StoredFileLoc, DataSecurityClass
+from rawstatus.models import RawFile, StoredFile, StoredFileLoc, DataSecurityClass, ShareFunction, ServerShare
 from datasets import models as dm
 
 
@@ -98,45 +98,43 @@ class BaseJob:
     def on_create_addkwargs(self, **kwargs):
         return {}
 
-    def on_create_extrajobs(self, **kwargs):
-        return []
-
     def _get_extrafiles_to_rsync(self, **kwargs):
         return []
-
-    def _get_source_sfloc_for_transfers(self, allsfl):
-        # FIXME - need to error when False (file not available)
-        sfl_primshare = allsfl.filter(servershare__name=settings.TMPSHARENAME)
-        open_sfl = allsfl.filter(servershare__max_security=DataSecurityClass.NOSECURITY)
-        if sfl_primshare.exists():
-            srcsfl = sfl_primshare.get()
-        elif open_sfl.exists():
-            srcsfl = open_sfl.first()
-        else:
-            # FIXME fetch from backup to primshare if needed (when job queuing)!
-            srcsfl = False # keep linter happy until we have fixed backup retrieval
-        return srcsfl
 
     def on_create_prep_rsync_jobs(self, **kwargs):
         '''If needed, rsync the DB and other singlefiles which is not on the analysis share'''
         newjobs = []
         if all_exfiles_sfpk := self._get_extrafiles_to_rsync(**kwargs):
-            sfl = self.getfiles_query(**kwargs).values('servershare_id').first()
             extra_sfl_q = StoredFileLoc.objects.filter(sfile_id__in=all_exfiles_sfpk, active=True)
             if extra_sfl_q.distinct('sfile').count() < len(all_exfiles_sfpk):
                 raise RuntimeError('Not all parameter files could be found on disk, make sure they exist')
             # Make rsync jobs for those extrafiles which there is no sfl in the servershare we want:
+            sfl = self.getfiles_query(**kwargs).values('servershare_id', 'servershare__function').first()
             newjobs = []
             for extra_sf in StoredFile.objects.filter(
                     pk__in=set(all_exfiles_sfpk).difference([x['sfile_id'] for x in 
                         extra_sfl_q.filter(servershare_id=sfl['servershare_id']).values('sfile_id')])):
-                if extra_sfl := self._get_source_sfloc_for_transfers(
-                        extra_sf.storedfileloc_set.filter(active=True)):
-                    newjobs.append({'name': 'rsync_otherfiles_to_servershare',
-                        'kwargs': {'sfloc_id': extra_sfl.pk, 'dstshare_id': sfl['servershare_id']}})
+                extra_sfls_q = extra_sf.storedfileloc_set.filter(active=True)
+                if rs_extra_sfl := extra_sfls_q.filter(
+                        servershare__fileservershare__server__can_rsync_remote=True):
+                    # either the extra sfl is on an rsync-capable server:
+                    extra_sfl = rs_extra_sfl.values('pk', 'servershare__function', 'path').get()
+                elif ServerShare.objects.filter(pk=sfl['servershare_id'],
+                        fileservershare__server__can_rsync_remote=True):
+                    # or the target server is rsync capable
+                    extra_sfl = extra_sfls_q.values('pk', 'servershare__function', 'path').first()
                 else:
                     raise RuntimeError('Could not find a source file to upload to analysis server for '
-                            f'{extra_sf.filename}')
+                        f'{extra_sf.filename}')
+                blankpathshares = [ShareFunction.LIBRARY, ShareFunction.INBOX]
+                if extra_sfl['servershare__function'] in blankpathshares and sfl['servershare__function'] not in blankpathshares:
+                    # e.g. libfile from path '' needs a path in the dst if that is rawdata!
+                    path = '__kantele_library'
+                else:
+                    path = extra_sfl['path']
+                newjobs.append({'name': 'rsync_otherfiles_to_servershare',
+                    'kwargs': {'sfloc_id': extra_sfl['pk'], 'dstshare_id': sfl['servershare_id'],
+                        'dstpath': path}})
         return newjobs
 
     def get_jobs_with_single_sfloc_to_wait_for(self, **kwargs):

@@ -440,7 +440,7 @@ def do_retry_job(job, force=False):
     revoke_and_delete_tasks(tasks.exclude(state=states.SUCCESS))
     # Redo file jobs (for runner) in case the job has been in WAITING state and other jobs 
     # have changed files associated to a dset or such.
-    jwrap = jobmap[job.name](job.pk)
+    jwrap = jobmap[job.funcname](job.pk)
     FileJob.objects.filter(job_id=job.pk).delete()
     FileJob.objects.bulk_create([FileJob(rawfile_id=rf_id, job_id=job.id) for rf_id in 
         jwrap.get_rf_ids_for_filejobs(**job.kwargs)])

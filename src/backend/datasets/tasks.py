@@ -56,43 +56,11 @@ def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profile
 
 
 @shared_task(bind=True)
-def rename_top_level_project_storage_dir(self, projsharename, srcname, newname, proj_id, sfloc_ids):
-    """Renames a project, including the below experiments/datasets"""
-    msg = False
-    projectshare = settings.SHAREMAP[projsharename]
-    srcpath = os.path.join(projectshare, srcname)
-    dstpath = os.path.join(projectshare, newname)
-    if not os.path.exists(srcpath):
-        msg = f'Cannot move project name {srcname} to {newname}, does not exist'
-    elif not os.path.isdir(srcpath):
-        msg = f'Cannot move project name {srcname} to {newname}, {srcname} is not a directory'
-    elif os.path.exists(dstpath):
-        msg = f'Cannot move project name {srcname} to {newname}, already exists'
-    if msg:
-        taskfail_update_db(self.request.id, msg)
-        raise RuntimeError(msg)
-    try:
-        os.rename(srcpath, dstpath)
-    except NotADirectoryError:
-        taskfail_update_db(self.request.id, msg=f'Failed renaming project {srcpath} is a directory '
-                f'but {dstpath} is a file')
-        raise
-    except Exception:
-        taskfail_update_db(self.request.id, msg='Failed renaming project for unknown reason')
-        raise
-    postdata = {'proj_id': proj_id, 'newname': newname, 'sfloc_ids': sfloc_ids,
-            'task': self.request.id, 'client_id': settings.APIKEY}
-    url = urljoin(settings.KANTELEHOST, reverse('jobs:renameproject'))
-    update_db(url, json=postdata)
-
-
-@shared_task(bind=True)
-def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, sfloc_ids, dss_id):
+def rename_dset_storage_location(self, sharepath, srcpath, dstpath, sfloc_ids, dss_id):
     """This expects one dataset per dir, as it will rename the whole dir"""
     print(f'Renaming dataset storage {srcpath} to {dstpath}')
-    ds_share = settings.SHAREMAP[ds_sharename]
-    srcfull = os.path.join(ds_share, srcpath)
-    dstfull = os.path.join(ds_share, dstpath)
+    srcfull = os.path.join(sharepath, srcpath)
+    dstfull = os.path.join(sharepath, dstpath)
     try:
         # os.renames can rename recursively so not only leaf node
         # can change, but we can rename a project directly for each
@@ -110,7 +78,7 @@ def rename_dset_storage_location(self, ds_sharename, srcpath, dstpath, sfloc_ids
     splitpath = srcpath.split(os.sep)
     for pathlen in range(0, len(splitpath))[::-1]:
         # no rmdir on the leaf dir (would be pathlen+1) since that's been moved
-        checkpath = os.path.join(ds_share, os.sep.join(splitpath[:pathlen]))
+        checkpath = os.path.join(sharepath, os.sep.join(splitpath[:pathlen]))
         if os.path.exists(checkpath) and os.path.isdir(checkpath) and not os.listdir(checkpath):
             try:
                 os.rmdir(checkpath)

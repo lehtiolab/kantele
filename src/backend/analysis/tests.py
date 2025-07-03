@@ -22,7 +22,8 @@ class TestDownloadFasta(BaseIntegrationTest):
     def test_ensembl(self):
         call_command('download_latest_fasta', species='escherichia_coli_str_k_12_substr_mg1655_gca_000005845', dbtype='ensembl', ensembl_ver=61)
         self.run_job()
-        fafns = glob(os.path.join(self.inboxctrl.path, 'library', 'ENS61*'))
+        sleep(2)
+        fafns = glob(os.path.join(self.inboxctrl.path, settings.LIBRARY_FILE_PATH_INBOX, 'ENS61*'))
         self.assertEqual(len(fafns), 1)
         self.run_job()
         self.assertTrue(os.path.exists(os.path.join(self.libctrl.path, fafns[0])))
@@ -30,7 +31,8 @@ class TestDownloadFasta(BaseIntegrationTest):
     def test_uniprot(self):
         call_command('download_latest_fasta', species='Escherichia coli K12', dbtype='uniprot', uptype='SWISS')
         self.run_job()
-        fafns = glob(os.path.join(self.inboxctrl.path, 'library', 'Uniprot*'))
+        sleep(2)
+        fafns = glob(os.path.join(self.inboxctrl.path, settings.LIBRARY_FILE_PATH_INBOX, 'Uniprot*'))
         self.assertEqual(len(fafns), 1)
         self.run_job()
         self.assertTrue(os.path.exists(os.path.join(self.libctrl.path, fafns[0])))
@@ -44,7 +46,8 @@ class AnalysisPageTest(BaseIntegrationTest):
         self.ds.locked = True
         self.ds.save()
         self.usrfraw = rm.RawFile.objects.create(name='usrfiledone', producer=self.prod, 
-                source_md5='usrfmd5', size=100, claimed=True, date=timezone.now())
+                source_md5='usrfmd5', size=100, claimed=True, date=timezone.now(),
+                usetype=rm.UploadFileType.USERFILE)
         self.sfusr = rm.StoredFile.objects.create(rawfile=self.usrfraw, md5=self.usrfraw.source_md5,
                 filetype=self.uft, filename=self.usrfraw.name, checked=True)
         rm.StoredFileLoc.objects.create(sfile=self.sfusr, servershare=self.ssnewstore, path='',
@@ -69,7 +72,8 @@ class AnalysisPageTest(BaseIntegrationTest):
         self.ft2 = rm.StoredFileType.objects.create(name='result ft', filetype='txt')
         self.pfn2 = am.FileParam.objects.create(name='fp1', nfparam='--fp2', filetype=self.ft2, help='helppi')
         self.txtraw = rm.RawFile.objects.create(name='txtfn', producer=self.anaprod,
-                source_md5='txtraw_fakemd5', size=1234, date=timezone.now(), claimed=False)
+                source_md5='txtraw_fakemd5', size=1234, date=timezone.now(), claimed=False,
+                usetype=rm.UploadFileType.ANALYSIS)
         self.txtsf = rm.StoredFile.objects.create(rawfile=self.txtraw, md5=self.txtraw.source_md5,
                 filename=self.txtraw.name, checked=True, filetype=self.ft2)
         rm.StoredFileLoc.objects.create(sfile=self.txtsf, servershare=self.sstmp, path='',
@@ -96,7 +100,7 @@ class AnalysisPageTest(BaseIntegrationTest):
         self.ssweb = rm.ServerShare.objects.create(name='web', max_security=1,
                 function=rm.ShareFunction.REPORTS)
         webserver = rm.FileServer.objects.create(name='web', uri='kantele.test',
-                fqdn='web', can_rsync=False, is_analysis=False, rsyncusername='',
+                fqdn='web', can_rsync_remote=False, is_analysis=False, rsyncusername='',
                 rsynckeyfile='')
         self.webshare = rm.FileserverShare.objects.create(server=webserver,
                 share=self.ssweb, path=os.path.join(self.rootdir, 'web'))
@@ -189,11 +193,14 @@ class LoadBaseAnaTestIso(AnalysisPageTest):
         am.NextflowSearch.objects.create(analysis=self.newana, nfwfversionparamset=self.nfwf,
                 workflow=self.wf, token='addedres_ana', job=job)
         raw = rm.RawFile.objects.create(name='new_ana_file', producer=self.anaprod,
-                source_md5='added_ana.result', size=100, date=timezone.now(), claimed=True)
+                source_md5='added_ana.result', size=100, date=timezone.now(), claimed=True,
+                usetype=rm.UploadFileType.ANALYSIS)
         self.newanasfile = rm.StoredFile.objects.create(rawfile=raw, filetype_id=self.ft.id,
                 filename=raw.name, md5=raw.source_md5)
-        rm.StoredFileLoc.objects.create(sfile=self.newanasfile, servershare=self.sstmp, path='') 
-        new_resultfn = am.AnalysisResultFile.objects.create(analysis=self.newana, sfile=self.newanasfile)
+        rm.StoredFileLoc.objects.create(sfile=self.newanasfile, servershare=self.sstmp, path='',
+                purged=False, active=True)
+        new_resultfn = am.AnalysisResultFile.objects.create(analysis=self.newana,
+                sfile=self.newanasfile)
         self.anafparam.sfile = self.newanasfile
         self.anafparam.save()
 
@@ -365,21 +372,23 @@ class TestGetDatasetsBad(AnalysisPageTest):
         resp = self.cl.get(f'{self.url}{self.nfwf.pk}/')
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(['Something wrong when asking datasets, contact admin'], resp.json()['errmsg'])
+
     def test_error_dset(self):
         '''This test is on single dataset which will fail, in various ways'''
         # No quant details
         fn = 'noqt_fn'
         path = 'noqt_stor'
-        raw = rm.RawFile.objects.create(name=fn, producer=self.prod,
-                source_md5='noqt_fakemd5',
-                size=100, date=timezone.now(), claimed=True)
+        raw = rm.RawFile.objects.create(name=fn, producer=self.prod, source_md5='noqt_fakemd5',
+                usetype=rm.UploadFileType.RAWFILE, size=100, date=timezone.now(), claimed=True)
         sf = rm.StoredFile.objects.create(rawfile=raw, filename=fn, md5=raw.source_md5, 
                 filetype=self.ft, checked=True)
-        rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.ssnewstore, path=path)
+        rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.ssnewstore, path=path,
+                purged=False, active=True)
         newrun = dm.RunName.objects.create(experiment=self.ds.runname.experiment, name='noqt_ds')
         newds = dm.Dataset.objects.create(runname=newrun, datatype=self.ds.datatype, 
-                storage_loc=path, storageshare=self.ds.storageshare, date=timezone.now(),
-                securityclass=1)
+                date=timezone.now(), securityclass=1)
+        dm.DatasetServer.objects.create(dataset=newds, storage_loc=path,
+                storageshare=self.dss.storageshare, startdate=timezone.now())
         dsr = dm.DatasetRawFile.objects.create(dataset=newds, rawfile=raw)
         dm.DatasetOwner.objects.create(dataset=newds, user=self.user)
         resp = self.cl.get(f'{self.url}{self.nfwf.pk}/', data={'dsids': f'{newds.pk}', 'anid': 0})
@@ -391,16 +400,15 @@ class TestGetDatasetsBad(AnalysisPageTest):
 
         # raw file without a storedfile and some more
         dsname = f'{self.ds.runname.experiment.project.name} / {self.ds.runname.experiment.name} / {self.ds.runname.name}'
-        raw = rm.RawFile.objects.create(name='nosf', producer=self.prod,
-                source_md5='nosf_fakemd5',
-                size=100, date=timezone.now(), claimed=True)
+        raw = rm.RawFile.objects.create(name='nosf', producer=self.prod, source_md5='nosf_fakemd5',
+                usetype=rm.UploadFileType.RAWFILE, size=100, date=timezone.now(), claimed=True)
         dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=raw)
-        raw2 = rm.RawFile.objects.create(name='nosf2', producer=self.prod,
-                source_md5='nosf2_fakemd5',
-                size=100, date=timezone.now(), claimed=True)
+        raw2 = rm.RawFile.objects.create(name='nosf2', producer=self.prod, source_md5='nosf2_fakemd5',
+                usetype=rm.UploadFileType.RAWFILE, size=100, date=timezone.now(), claimed=True)
         sf2 = rm.StoredFile.objects.create(rawfile=raw2, filename=raw2.name, md5=raw.source_md5,
                 filetype=self.ft2, checked=True)
-        rm.StoredFileLoc.objects.create(sfile=sf2, servershare=self.ssnewstore, path=path)
+        rm.StoredFileLoc.objects.create(sfile=sf2, servershare=self.ssnewstore, path=path,
+                purged=False, active=True)
         dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=raw2)
         resp = self.cl.get(f'{self.url}{self.nfwf.pk}/', data={'dsids': f'{self.ds.pk}', 'anid': 0})
         self.assertEqual(resp.status_code, 400)
@@ -411,7 +419,7 @@ class TestGetDatasetsBad(AnalysisPageTest):
         self.assertNotIn('dsets', rj)
 
 
-class TestGetDatasetsIso(AnalysisTest):
+class TestGetDatasetsIso(AnalysisPageTest):
     url = '/analysis/dsets/'
 
     def test_new_ok(self):
@@ -431,7 +439,7 @@ class TestGetDatasetsIso(AnalysisTest):
                     'hr': False,
                     'setname': '',
                     'locked': self.ds.locked,
-                    'storage': f'{self.ds.storage_loc.replace(os.path.sep, f" {os.path.sep} ")}',
+                    'storage': f'{self.p1.name} - {self.exp1.name} - {self.dtype.name} - {self.run1.name}',
                     'fields': {'fake': '', '__regex': am.PsetComponent.objects.get(pset=self.pset,
                         component=am.PsetComponent.ComponentChoices.PREFRAC).value},
                     'instruments': [self.prod.name],
@@ -469,7 +477,7 @@ class TestGetDatasetsIso(AnalysisTest):
                     'hr': False,
                     'setname': self.ads1.setname.setname,
                     'locked': self.ds.locked,
-                    'storage': f'{self.ds.storage_loc.replace(os.path.sep, f" {os.path.sep} ")}',
+                    'storage': f'{self.p1.name} - {self.exp1.name} - {self.dtype.name} - {self.run1.name}',
                     'fields': {'fake': '', '__regex': self.ads1.value},
                     'instruments': [self.prod.name],
                     'instrument_types': [self.prod.shortname],
@@ -510,7 +518,7 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
                     'hr': False,
                     'setname': '',
                     'locked': self.oldds.locked,
-                    'storage': f'{self.oldds.storage_loc.replace(os.path.sep, f" {os.path.sep} ")}',
+                    'storage': f'{self.oldp.name} - {self.oldexp.name} - {self.dtype.name} - {self.oldrun.name}',
                     'fields': {'fake': '', '__regex': am.PsetComponent.objects.get(pset=self.pset,
                         component=am.PsetComponent.ComponentChoices.PREFRAC).value},
                     'instruments': [self.prod.name],
@@ -548,7 +556,7 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
                     'hr': False,
                     'setname': '',
                     'locked': self.oldds.locked,
-                    'storage': f'{self.oldds.storage_loc.replace(os.path.sep, f" {os.path.sep} ")}',
+                    'storage': f'{self.oldp.name} - {self.oldexp.name} - {self.dtype.name} - {self.oldrun.name}',
                     'fields': {'fake': '', '__regex': am.PsetComponent.objects.get(pset=self.pset,
                         component=am.PsetComponent.ComponentChoices.PREFRAC).value},
                     'instruments': [self.prod.name],
@@ -588,12 +596,13 @@ class TestGetWorkflowVersionDetails(AnalysisPageTest):
     def test_ok(self):
         # Add some usr file to make it show up in the dropdown, and make sure the other
         # userfile is not (wrong filetype)
-        usrfraw_ft, _ = rm.RawFile.objects.update_or_create(name='userfile_right_ft', 
-                producer=self.prod, source_md5='usrf_rightft_md5',
-                size=100, defaults={'claimed': False, 'date': timezone.now()})
+        usrfraw_ft = rm.RawFile.objects.create(name='userfile_right_ft', producer=self.prod, 
+                source_md5='usrf_rightft_md5', size=100, claimed=False, date=timezone.now(),
+                usetype=rm.UploadFileType.USERFILE)
         sfusr_ft = rm.StoredFile.objects.create(rawfile=usrfraw_ft, md5=usrfraw_ft.source_md5,
                 filetype=self.ft2, filename=usrfraw_ft.name, checked=True)
-        rm.StoredFileLoc.objects.create(sfile=sfusr_ft, servershare=self.sstmp, path='')
+        rm.StoredFileLoc.objects.create(sfile=sfusr_ft, servershare=self.sstmp, path='',
+                purged=False, active=True)
         utoken_ft = rm.UploadToken.objects.create(user=self.user, token='token_ft', expired=False,
                 producer=self.prod, filetype=sfusr_ft.filetype, expires=timezone.now() + timedelta(1),
                 uploadtype=rm.UploadFileType.USERFILE)
@@ -732,11 +741,13 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.assertTrue(os.path.exists(nfrunfn))
 
         anasfl = reports.filter(servershare=self.ssana, path=ana.storage_dir).get()
-        anafn = os.path.join(self.anashare.path, anasfl.path, 'report.html')
+        anadir = os.path.join(self.anashare.path, anasfl.path)
+        anafn = os.path.join(anadir, 'report.html')
         self.assertTrue(os.path.exists(anafn))
 
         websfl = reports.filter(servershare=self.ssweb, path=ana.get_run_base_dir()).get()
-        webfn = os.path.join(self.webshare.path, websfl.path, 'report.html')
+        webdir = os.path.join(self.webshare.path, websfl.path)
+        webfn = os.path.join(webdir, 'report.html')
         self.assertTrue(os.path.exists(webfn))
 
         self.run_job() # Queue backup (no task for it)
@@ -754,6 +765,9 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.assertFalse(os.path.exists(webfn))
         self.assertTrue(os.path.exists(anafn))
         self.assertTrue(os.path.exists(nfrunfn))
+        # Two purge jobs and two delete dir jobs, this test is getting slow
+        self.run_job()
+        self.run_job()
         self.run_job()
         self.run_job()
         self.assertFalse(os.path.exists(anafn))
@@ -834,19 +848,17 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
         self.assertEqual(self.ana.name, postdata['analysisname'])
         fullname = f'{self.ana.pk}_{self.wftype.name}_{self.ana.name}_{timestamp}'
         # This test flakes if executed right at midnight due to timestamp in assert string
-        storedir =  f'{self.ana.user.username}/{fullname}'
+        storedir =  f'{self.ana.user.username}/{fullname}'.replace(' ', '_')
         self.assertEqual(self.ana.storage_dir, storedir)
         self.anajob.refresh_from_db()
         c_ch = am.PsetComponent.ComponentChoices
         self.maxDiff = 50000
         job_check_kwargs = {'analysis_id': self.ana.pk,
-          'dstsharename': settings.ANALYSISSHARENAME,
           'filefields': {},
           'filesamples': {self.f3sfmz.pk: 'setA'},
-          'fullname': fullname,
           'infiles': {self.f3sfmz.pk: 1},
           'fserver_id': self.anaserver.pk,
-          'dss_ids': [self.ds.pk],
+          'dss_ids': [self.dss.pk],
           'sfloc_ids': [self.f3mzsss.pk],
           'inputs': {'components': {c_ch.INPUTDEF.name: self.inputdef.value,
               c_ch.PREFRAC.name: '.*fr([0-9]+).*mzML$', c_ch.ISOQUANT.name: {},
@@ -855,18 +867,19 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
               'multifiles': {self.pfn1.nfparam: [self.sfusr.pk]},
               'params': ['--isobaric', f'setA:{self.qt.shortname}:{self.qch.name}',
                   self.param2.nfparam, self.popt1.value, 
-                  self.param1.nfparam, '',
+                  self.param1.nfparam, # flag so no value
                   self.param3.nfparam, '42',
                   self.param4.nfparam, self.popt4.value,
                   ],
               'singlefiles': {f'{self.pfn2.nfparam}': self.sflib.pk}},
-              'platenames': {}, 'storagepath': storedir, 'wfv_id': self.nfwf.pk}
+              'platenames': {}, 'wfv_id': self.nfwf.pk}
 
         self.assertJSONEqual(json.dumps(self.anajob.kwargs), json.dumps(job_check_kwargs))
         checkjson = {'error': False, 'analysis_id': self.ana.pk, 'token': False}
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
         self.assertFalse(hasattr(self.ana, 'analysisbaseanalysis'))
 
+        
 
 class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
     url = '/analysis/store/'
@@ -979,7 +992,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         self.assertEqual(self.analf.analysisfileparam_set.count(), 2)
         fullname = f'{self.analf.pk}_{self.wftype.name}_{self.analf.name}_{timestamp}'
         # This test flakes if executed right at midnight due to timestamp in assert string
-        self.assertEqual(self.analf.storage_dir[:-5], f'{self.analf.user.username}/{fullname}')
+        self.assertEqual(self.analf.storage_dir[:-5], f'{self.analf.user.username}/{fullname}'.replace(' ', '_'))
         checkjson = {'error': False, 'analysis_id': self.analf.pk, 'token': False}
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
         ba = am.AnalysisBaseanalysis.objects.get(analysis=self.analf)
@@ -1001,9 +1014,8 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         # raw but not sf stored
         fn = 'noqt_fn'
         path = 'noqt_stor'
-        raw = rm.RawFile.objects.create(name=fn, producer=self.prod,
-                source_md5='noqt_fakemd5',
-                size=100, date=timezone.now(), claimed=True)
+        raw = rm.RawFile.objects.create(name=fn, producer=self.prod, source_md5='noqt_fakemd5',
+                usetype=rm.UploadFileType.RAWFILE, size=100, date=timezone.now(), claimed=True)
         newrun = dm.RunName.objects.create(experiment=self.ds.runname.experiment, name='noqt_ds')
         newds = dm.Dataset.objects.create(runname=newrun, datatype=self.ds.datatype, 
                 date=timezone.now(), locked=True, securityclass=1)
@@ -1058,8 +1070,8 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.ssnewstore, path=path,
                 purged=False, active=True)
         raw2 = rm.RawFile.objects.create(name='second_rawfn', producer=self.prod,
-                source_md5='fewer_fakemd5',
-                size=100, date=timezone.now(), claimed=True)
+                source_md5='fewer_fakemd5', size=100, date=timezone.now(), claimed=True,
+                usetype=rm.UploadFileType.RAWFILE)
         dsr = dm.DatasetRawFile.objects.create(dataset=newds, rawfile=raw2)
         sf2 = rm.StoredFile.objects.create(rawfile=raw2, filename=raw2.name, md5=raw2.source_md5, 
                 filetype=self.ft, checked=True)

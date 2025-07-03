@@ -61,12 +61,12 @@ class BaseTest(TestCase):
         self.libctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
                 share=self.sslib, path=os.path.join(self.rootdir, 'libshare'))
 
-        self.sstmp = rm.ServerShare.objects.create(name=settings.TMPSHARENAME, max_security=1,
+        self.sstmp = rm.ServerShare.objects.create(name='tmpshare', max_security=1,
                 function=rm.ShareFunction.RAWDATA)
-        rm.FileserverShare.objects.create(server=self.storagecontroller, share=self.sstmp,
-                path=os.path.join(self.rootdir, 'tmp'))
-        self.ssnewstore = rm.ServerShare.objects.create(name=settings.PRIMARY_STORAGESHARENAME,
-                max_security=1, function=rm.ShareFunction.RAWDATA)
+        self.tmpctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
+                share=self.sstmp, path=os.path.join(self.rootdir, 'tmp'))
+        self.ssnewstore = rm.ServerShare.objects.create(name='ssnewstore', max_security=1,
+                function=rm.ShareFunction.RAWDATA)
         self.newstorctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
                 share=self.ssnewstore, path=os.path.join(self.rootdir, 'newstorage'))
         self.ana_newstor = rm.FileserverShare.objects.create(server=self.anaserver,
@@ -87,7 +87,7 @@ class BaseTest(TestCase):
         self.remoteanaserver = rm.FileServer.objects.create(name='analysis2', uri='s0.test',
                 fqdn='analysis_ssh_2', can_rsync_remote=False, is_analysis=True, rsyncusername='kantele',
                 rsynckeyfile='/kantelessh/rsync_key')
-        self.analocalstor = rm.ServerShare.objects.create(name=settings.STORAGESHARENAMES[0],
+        self.analocalstor = rm.ServerShare.objects.create(name='analocalstor',
                 max_security=1, function=rm.ShareFunction.RAWDATA)
         self.ssanaruns2 = rm.ServerShare.objects.create(name='analysisruns2', max_security=1,
                 function=rm.ShareFunction.NFRUNS)
@@ -117,6 +117,7 @@ class BaseTest(TestCase):
         self.ft = rm.StoredFileType.objects.create(name='testft_bruker', filetype='tst',
                 is_rawdata=True, is_folder=True, stablefiles=['analysis.tdf'])
         self.prod = rm.Producer.objects.create(name='prod1', client_id='abcdefg', shortname='p1', internal=True)
+        self.adminprod = rm.Producer.objects.create(name='adminprod', client_id=settings.STORAGECLIENT_APIKEY, shortname=settings.PRODUCER_ADMIN_NAME, internal=True)
         self.msit = rm.MSInstrumentType.objects.create(name='test')
         rm.MSInstrument.objects.create(producer=self.prod, instrumenttype=self.msit, filetype=self.ft)
         self.qt, _ = dm.QuantType.objects.get_or_create(name='testqt', shortname='testqtplex')
@@ -141,7 +142,7 @@ class BaseTest(TestCase):
         self.contact, _ = dm.ExternalDatasetContact.objects.get_or_create(dataset=self.ds,
                 defaults={'email': 'contactname'})
         dm.DatasetOwner.objects.get_or_create(dataset=self.ds, user=self.user)
-        self.f3path = os.path.join(settings.SHAREMAP[self.ssnewstore.name], self.storloc)
+        self.f3path = os.path.join(self.newstorctrl.path, self.storloc)
         fn3 = 'raw3.raw' # directory to pretend its bruker file with analysis.tdf
         f3size = sum(os.path.getsize(os.path.join(wpath, subfile))
                 for wpath, subdirs, files in os.walk(os.path.join(self.f3path, fn3))
@@ -195,7 +196,7 @@ class BaseTest(TestCase):
         self.contact, _ = dm.ExternalDatasetContact.objects.get_or_create(dataset=self.oldds,
                 email='contactname')
         dm.DatasetOwner.objects.get_or_create(dataset=self.oldds, user=self.user)
-        self.oldfpath = os.path.join(settings.SHAREMAP[self.analocalstor.name], self.oldstorloc)
+        self.oldfpath = os.path.join(self.oldstorctrl.path, self.oldstorloc)
         oldsize = os.path.getsize(os.path.join(self.oldfpath, oldfn))
         self.oldraw = rm.RawFile.objects.create(name=oldfn, producer=self.prod,
                 source_md5='old_to_new_fakemd5', size=oldsize, date=timezone.now(), claimed=True, usetype=rm.UploadFileType.RAWFILE)

@@ -190,7 +190,7 @@ class RsyncFileTransferFromWeb(SingleFileJob):
         sfloc = self.getfiles_query(**kwargs).select_related('sfile').get()
         dstpath = os.path.join(sfloc.path, sfloc.sfile.filename)
         fss = rm.FileserverShare.objects.filter(share=sfloc.servershare).first()
-        self.run_tasks.append((sfloc.sfile_id, get_host_upload_dst(kwargs['src_path']),
+        self.run_tasks.append((sfloc.pk, get_host_upload_dst(kwargs['src_path']),
             fss.path, dstpath, sfloc.servershare.name, sfloc.sfile.filetype.is_folder,
             sfloc.sfile.filetype.stablefiles))
 
@@ -228,6 +228,39 @@ class RestoreFromPDC(SingleFileJob):
         print('PDC restore task queued')
 
 
+class BackupPDCDataset(DatasetJob):
+    # Deprecate, files are backed up when incoming
+    """Transfers all raw files in dataset to backup"""
+    refname = 'backup_dataset'
+    task = tasks.pdc_archive
+    queue = settings.QUEUE_BACKUP
+    
+    def process(self, **kwargs):
+        for fn in self.getfiles_query(**kwargs).exclude(sfile__mzmlfile__isnull=False).exclude(
+                sfile__pdcbackedupfile__success=True, sfile__pdcbackedupfile__deleted=False):
+            isdir = hasattr(fn.sfile.rawfile.producer, 'msinstrument') and fn.sfile.filetype.is_folder
+            self.run_tasks.append(upload_file_pdc_runtask(fn, isdir=isdir))
+
+
+class ReactivateDeletedDataset(DatasetJob):
+    '''Reactivation to fetch a dataset from the backup.
+    Datasets are placed in whatever is passed but that is likely
+    a sens tmp share from which they can be uploaded to e.g. PX,
+    rsynced to open, or to analysis cluster'''
+
+    refname = 'reactivate_dataset'
+    task = tasks.pdc_restore
+    queue = settings.QUEUE_BACKUP
+
+    def getfiles_query(self, **kwargs):
+        '''In this case, the sflocs are dst files and will have purged=True instead of False'''
+        return self.oncreate_getfiles_query(**kwargs).filter(purged=True)
+
+    def process(self, **kwargs):
+        for sfloc in self.getfiles_query(**kwargs).select_related('sfile'):
+            self.run_tasks.append(restore_file_pdc_runtask(sfloc))
+
+
 class RenameFile(SingleFileJob):
     refname = 'rename_file'
     task = tasks.rename_file
@@ -239,9 +272,8 @@ class RenameFile(SingleFileJob):
     It will also rename all mzML attached converted files.
     """
 
-    def check_error(self, **kwargs):
-        '''Check for file name collisions, also with directories'''
-        src_sf = self.getfiles_query(**kwargs).get()
+    def check_error_on_creation(self, **kwargs):
+        src_sf = self.oncreate_getfiles_query(**kwargs).get()
         fullnewpath = os.path.join(src_sf.path, kwargs["newname"])
         if rm.StoredFileLoc.objects.filter(sfile__filename=kwargs['newname'], path=src_sf.path,
                 servershare_id=src_sf.servershare_id).exists():
@@ -332,10 +364,9 @@ class DeleteEmptyDirectory(MultiFileJob):
                 purged=False):
             ssname = rm.ServerShare.objects.filter(pk=kwargs['share_id']).values('name').get()['name']
             return f'Cannot queue job to delete dir {kwargs["path"]} on {ssname}, there are files in it'
+
     def process(self, **kwargs):
-        # Use oncreate_getfiles_query since the normal getfiles_query filters on purged=False,
-        # whereas here we need the files to be purged
-        fss = rm.FileserverShare.objects.filter(share_id=kwargs['share_id'], active=True,
+        fss = rm.FileserverShare.objects.filter(share_id=kwargs['share_id'],
                 server__active=True).values('server__name', 'path').first()
         self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_FASTSTORAGE)
         self.run_tasks.append(((fss['path'], kwargs['path'])))
@@ -349,13 +380,14 @@ class RegisterExternalFile(MultiFileJob):
     registers to dataset
     """
 
-    def getfiles_query(self, **kwargs):
-        return super().getfiles_query(**kwargs).filter(checked=False).values('path', 'sfile__filename', 'sfile_id', 'sfile__rawfile_id')
+   # def getfiles_query(self, **kwargs):
+   #     return super().getfiles_query(**kwargs).filter(checked=False)
     
     def process(self, **kwargs):
-        for fn in self.getfiles_query(**kwargs):
-            self.run_tasks.append(((os.path.join(fn['path'], fn['sfile__filename']), fn['sfile_id'],
-                fn['sfile__rawfile_id'], kwargs['sharename'], kwargs['dset_id']), {}))
+        for fn in self.getfiles_query(**kwargs).values('path', 'sfile__filename', 'sfile_id',
+                'sfile__rawfile_id'):
+            self.run_tasks.append((os.path.join(fn['path'], fn['sfile__filename']), fn['sfile_id'],
+                fn['sfile__rawfile_id'], kwargs['sharename'], kwargs['dset_id']))
 
 
 class DownloadPXProject(DatasetJob):
@@ -367,8 +399,9 @@ class DownloadPXProject(DatasetJob):
     checks pride, fires tasks for files not yet downloaded. 
     """
 
-    def getfiles_query(self, **kwargs):
-        return models.StoredFileLoc.objects.filter(sfile__rawfile_id__in=kwargs['shasums'], 
+    def oncreate_getfiles_query(self, **kwargs):
+        # FIXME not used
+        return rm.StoredFileLoc.objects.filter(sfile__rawfile_id__in=kwargs['shasums'], 
             checked=False).select_related('rawfile')
     
     def process(self, **kwargs):
@@ -388,49 +421,25 @@ class DownloadPXProject(DatasetJob):
 def upload_file_pdc_runtask(sfloc, isdir):
     """Generates the arguments for task to upload file to PDC. Reused in dataset jobs"""
     yearmonth = datetime.strftime(sfloc.sfile.regdate, '%Y%m')
-    pdcfile, _cr = models.PDCBackedupFile.objects.get_or_create(storedfile=sfloc.sfile, is_dir=isdir,
-            defaults={'pdcpath': '', 'success': False, 'deleted': False})
+    pdcfile, _cr = rm.PDCBackedupFile.objects.get_or_create(storedfile_id=sfloc.sfile_id,
+            is_dir=isdir, defaults={'pdcpath': '', 'success': False})
+    if not _cr and pdcfile.success and not pdcfile.deleted:
+        return
+    fss = rm.FileserverShare.objects.filter(server__can_backup=True, share=sfloc.servershare).values('path').first()
+    if not fss:
+        raise RuntimeError('Cannot find server to backup file from, please'
+                'configure system for backups')
     fnpath = os.path.join(sfloc.path, sfloc.sfile.filename)
-    return (sfloc.sfile.md5, yearmonth, sfloc.servershare.name, fnpath, sfloc.sfile.id, isdir)
-
-
-class BackupPDCDataset(DatasetJob):
-    """Transfers all raw files in dataset to backup"""
-    refname = 'backup_dataset'
-    task = tasks.pdc_archive
-    queue = settings.QUEUE_BACKUP
-    
-    def process(self, **kwargs):
-        for fn in self.getfiles_query(**kwargs).exclude(sfile__mzmlfile__isnull=False).exclude(
-                sfile__pdcbackedupfile__success=True, sfile__pdcbackedupfile__deleted=False):
-            isdir = hasattr(fn.sfile.rawfile.producer, 'msinstrument') and fn.sfile.filetype.is_folder
-            self.run_tasks.append((upload_file_pdc_runtask(fn, isdir=isdir), {}))
-
-
-class ReactivateDeletedDataset(DatasetJob):
-    '''Reactivation to fetch a dataset from the backup.
-    Datasets are placed in whatever is passed but that is likely
-    a sens tmp share from which they can be uploaded to e.g. PX,
-    rsynced to open, or to analysis cluster'''
-
-    refname = 'reactivate_dataset'
-    task = tasks.pdc_restore
-    queue = settings.QUEUE_BACKUP
-
-    def getfiles_query(self, **kwargs):
-        '''In this case, the sflocs are dst files and will have purged=True instead of False'''
-        return models.StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'], purged=True)
-
-    def process(self, **kwargs):
-        for sfloc in self.getfiles_query(**kwargs).select_related('sfile'):
-            self.run_tasks.append((restore_file_pdc_runtask(sfloc), {}))
+    return (sfloc.sfile.md5, yearmonth, fss['path'], fnpath, sfloc.sfile.id, isdir)
 
 
 def restore_file_pdc_runtask(sfloc):
-    backupfile = rm.PDCBackedupFile.objects.get(storedfile=sfloc.sfile)
+    backupfile = rm.PDCBackedupFile.objects.get(storedfile_id=sfloc.sfile_id)
     fnpath = os.path.join(sfloc.path, sfloc.sfile.filename)
     yearmonth = datetime.strftime(sfloc.sfile.regdate, '%Y%m')
-    return (settings.PRIMARY_STORAGESHARENAME, fnpath, backupfile.pdcpath, sfloc.id, backupfile.is_dir)
+    fss = rm.FileserverShare.objects.filter(server__can_backup=True,
+            share__function=rm.ShareFunction.INBOX).values('path').first()
+    return (fss['path'], fnpath, backupfile.pdcpath, sfloc.id, backupfile.is_dir)
 
 
 def call_proteomexchange(pxacc):

@@ -97,4 +97,4 @@ class ProcessAnalysis(BaseJob):
                 all_genefile_arg[output.pk] = (genefile['sfile__servershare__name'],
                         os.path.join(genefile['sfile__path'], genefile['sfile__filename']))
 
-        self.run_tasks.append(((kwargs['token'], kwargs['organism_id'], all_pepfile_arg, all_psmfile_arg, all_genefile_arg, headers, all_fa_files), {}))
+        self.run_tasks.append((kwargs['token'], kwargs['organism_id'], all_pepfile_arg, all_psmfile_arg, all_genefile_arg, headers, all_fa_files))

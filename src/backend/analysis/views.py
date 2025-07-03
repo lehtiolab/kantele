@@ -20,6 +20,7 @@ from kantele import settings
 from analysis import models as am
 from analysis import jobs as aj
 from datasets import models as dm
+from datasets.views import get_quantprot_id
 from rawstatus import models as rm
 from rawstatus.views import create_upload_token
 from home import views as hv
@@ -27,6 +28,16 @@ from jobs import jobs as jj
 from jobs import views as jv
 from jobs.jobutil import create_job
 from jobs import models as jm
+
+
+def get_dset_prefrac_hiriefrange(d):
+    prefrac, hrrange_id = False, False
+    if hasattr(d, 'prefractionationdataset') and hasattr(d.prefractionationdataset, 'hiriefdataset'):
+        hrrange_id = d.prefractionationdataset.hiriefdataset.hirief_id
+        prefrac = d.prefractionationdataset.prefractionation
+    elif hasattr(d, 'prefractionationdataset'):
+        prefrac = d.prefractionationdataset.prefractionation
+    return prefrac, hrrange_id
 
 
 @login_required
@@ -44,8 +55,16 @@ def get_analysis_init(request):
         dserrors.append('Deleted datasets can not be analysed')
     if dbdsets.filter(deleted=False).count() + deleted < len(dsids):
         dserrors.append('Some datasets could not be found, they may not exist')
-    dsnames = {d.pk: format_dset_tag(d) for d in dbdsets}
-    dslocks = {d.pk: d.locked for d in dbdsets}
+    qpid = get_quantprot_id()
+    dsnames, dslocks = {}, {}
+    for d in dbdsets.select_related('runname__experiment__project',
+            'datatype', 'prefractionationdataset__hiriefdataset',
+
+            'prefractionationdataset__prefractionation'):
+        prefrac, hrrange_id = get_dset_prefrac_hiriefrange(d)
+        dsnames[d.pk] = format_dset_tag(qpid, d.runname.experiment.project, d.runname.experiment,
+                d, d.datatype, prefrac, hrrange_id)
+        dslocks[d.pk] = d.locked
     context = {'dsets': {'names': dsnames, 'locks': dslocks}, 'ds_errors': dserrors, 'analysis': False, 'wfs': get_allwfs()}
     return render(request, 'analysis/analysis.html', context)
 
@@ -112,7 +131,7 @@ def load_base_analysis(request, wfversion_id, baseanid):
         ana = am.Analysis.objects.select_related('nextflowsearch__workflow').get(pk=baseanid)
     except am.Analysis.DoesNotExist:
         return JsonResponse({'error': 'Base analysis not found'}, status=403)
-    baseana_dsids = [dss.dataset_id for dss in ana.datasetanalysis_set.all()]
+    baseana_dsids = [dsa.dataset_id for dsa in ana.datasetanalysis_set.all()]
     analysis = {
             'analysis_id': ana.pk,
             'dsets_identical': set(baseana_dsids) == set(new_ana_dsids),
@@ -258,8 +277,13 @@ def get_analysis(request, anid):
             'base_analysis': {},
             }
     dsets, dslocks = {}, {}
-    for x in ana.datasetanalysis_set.select_related('dataset').all():
-        dsets[x.dataset_id] = format_dset_tag(x.dataset) 
+    qpid = get_quantprot_id()
+    for x in ana.datasetanalysis_set.select_related('dataset__runname__experiment__project',
+            'dataset__datatype', 'dataset__prefractionationdataset__hiriefdataset',
+            'dataset__prefractionationdataset__prefractionation').all():
+        prefrac, hrrange_id = get_dset_prefrac_hiriefrange(x.dataset)
+        dsets[x.dataset_id] = format_dset_tag(qpid, x.dataset.runname.experiment.project,
+                x.dataset.runname.experiment, x.dataset, x.dataset.datatype, prefrac, hrrange_id)
         dslocks[x.dataset_id] = x.dataset.locked
     prev_resultfiles_ids = get_prev_resultfiles(dsets.keys(), only_ids=True)
     if hasattr(ana, 'nextflowsearch'):
@@ -454,8 +478,9 @@ def get_datasets(request, wfversion_id):
         analysis_dsfiles = {x for x in has_filesamples}
     
     # FIXME accumulate errors across data sets and show all, but do not report other stuff if error
-    for dset in dbdsets.select_related('runname__experiment__project', 'prefractionationdataset',
-            'quantdataset'):
+    qpid = get_quantprot_id()
+    for dset in dbdsets.select_related('runname__experiment__project', 'datatype', 'quantdataset',
+            'prefractionationdataset__hiriefdataset', 'prefractionationdataset__prefractionation'):
         # For error reporting per dset:
         dsname = f'{dset.runname.experiment.project.name} / {dset.runname.experiment.name} / {dset.runname.name}'
         # Fractionation
@@ -595,12 +620,15 @@ def get_datasets(request, wfversion_id):
 
         # Fill response object
         producers = dsrawfiles.distinct('rawfile__producer')
+        prefrac, hrrange_id = get_dset_prefrac_hiriefrange(dset)
+        tag = format_dset_tag(qpid, dset.runname.experiment.project, dset.runname.experiment,
+                dset, dset.datatype, prefrac, hrrange_id)
         dsetinfo[dset.pk] = {
                 'id': dset.pk,
                 'proj': dset.runname.experiment.project.name,
                 'exp': dset.runname.experiment.name,
                 'run': dset.runname.name,
-                'storage': format_dset_tag(dset),
+                'storage': tag,
                 'locked': dset.locked,
                 'dtype': dset.datatype.name,
                 'prefrac': prefrac,
@@ -709,10 +737,8 @@ def get_prev_resultfiles(dsids, only_ids=False):
 
 
 def get_added_analysis_contents(afp, prev_or_base_resultfns, added_results):
-    if (hasattr(afp.sfile, 'analysisresultfile') and not hasattr(afp.sfile, 'libraryfile')
-            and not afp.sfile_id in prev_or_base_resultfns
-            and afp.sfile.analysisresultfile.analysis_id not in added_results):
-        arf = afp.sfile.analysisresultfile
+    for arf in afp.sfile.analysisresultfile_set.filter(analysis__deleted=False).exclude(
+            analysis_id__in=added_results, sfile_id__in=prev_or_base_resultfns):
         arf_date = datetime.strftime(arf.analysis.date, '%Y-%m-%d')
         if hasattr(arf.analysis, 'nextflowsearch'):
             wftype = arf.analysis.nextflowsearch.workflow.wftype
@@ -1462,11 +1488,14 @@ def upload_servable_file(request):
 def find_datasets(request):
     searchterms = [x for x in request.GET['q'].split() if x != '']
     dbdsets = hv.dataset_query_creator(searchterms).filter(deleted=False)
-    dsets = {d.id: {
-        'id': d.id,
-        'name': format_dset_tag(d),
-        'locked': d.locked, 
-        } for d in dbdsets}
+    dsets = {}
+    qpid = get_quantprot_id()
+    for d in dsets.select_related('runname__experiment__project', 'datatype',
+            'prefractionationdataset__hiriefdataset', 'prefractionationdataset__prefractionation'):
+        prefrac, hrrange_id = get_dset_prefrac_hiriefrange(d)
+        tag = format_dset_tag(qpid, d.runname.experiment.project, d.runname.experiment,
+                d, d.datatype, prefrac, hrrange_id)
+        dsets[d.pk] = {'id': d.pk, 'name': tag, 'locked': d.locked}
     return JsonResponse(dsets)
     
 
@@ -1504,8 +1533,18 @@ def nextflow_analysis_log(request):
     return HttpResponse()
 
 
-def format_dset_tag(dset):
-    return f'{dset.storage_loc.replace(os.path.sep, f" {os.path.sep} ")}'
+def format_dset_tag(quantprot_id, project, exp, dset, dtype, prefrac, hiriefrange_id):
+    tag = ''
+    if dtype.id in settings.LC_DTYPE_IDS:
+        return f'{project.name} - {exp.name} - {dset.runname_id}'
+    if dtype.pk != quantprot_id:
+        tag = dtype.name
+    if prefrac and hiriefrange_id:
+        hr = dm.HiriefRange.objects.get(pk=hiriefrange_id)
+        tag = f'{tag} - {hr}'
+    elif prefrac:
+        tag = f'{tag} - {prefrac.name}'
+    return f'{project.name} - {exp.name} - {tag} - {dset.runname.name}'
 
 
 def append_analysis_log(request):

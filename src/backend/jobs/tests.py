@@ -65,7 +65,7 @@ class TestRenamedProject(BaseJobTest):
 
 
 class TestUpdateStorageLocDset(BaseJobTest):
-    url = '/jobs/set/dsstoragepath/'
+    url = '/jobs/set/storagepathds/'
     jobname = 'rename_dset_storage_loc'
 
     def test_wrong_client(self):
@@ -78,17 +78,19 @@ class TestUpdateStorageLocDset(BaseJobTest):
 
     def test_dset_storupdate_ok(self):
         newstorloc = 'another/location'
-        resp = self.cl.post(self.url, content_type='application/json',
-                data={'client_id': settings.STORAGECLIENT_APIKEY,
-                    'dset_id': self.ds.pk, 'storage_loc': newstorloc,
-                    'newsharename': False, 'task' : self.task.asyncid})
+        sfls = rm.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=self.ds,
+                servershare_id=self.dss.storageshare_id).values('pk')
+        resp = self.cl.post(self.url, content_type='application/json', data={
+            'client_id': settings.STORAGECLIENT_APIKEY, 'dss_id': self.dss.pk,
+            'dst_path': newstorloc, 'sfloc_ids': [x['pk'] for x in sfls], 'task': self.task.asyncid})
         self.assertEqual(resp.status_code, 200)
-        self.ds.refresh_from_db()
-        self.assertEqual(self.ds.storage_loc, newstorloc)
+        self.dss.refresh_from_db()
+        self.assertEqual(self.dss.storage_loc, newstorloc)
         self.task.refresh_from_db()
         self.assertEqual(self.task.state, cstates.SUCCESS)
 
 
+# This is already tested in the integration tests
 class TestDownloadedFile(BaseJobTest):
     url = '/jobs/set/downloaded/'
     jobname = 'rsync_transfer'
@@ -97,10 +99,12 @@ class TestDownloadedFile(BaseJobTest):
         super().setUp()
         self.fn = 'testrf.zip' 
         self.rf = rm.RawFile.objects.create(name=self.fn, producer=self.prod,
-                source_md5='testdownloaded', size=10, date=datetime.now(), claimed=True)
+                source_md5='testdownloaded', size=10, date=datetime.now(), claimed=True,
+                usetype=rm.UploadFileType.RAWFILE)
         self.sf = rm.StoredFile.objects.create(rawfile=self.rf, filename=self.rf.name,
             md5=self.rf.source_md5, checked=False, filetype=self.ft)
-        rm.StoredFileLoc.objects.create(sfile=self.sf, servershare=self.sstmp, path='')
+        self.sfl = rm.StoredFileLoc.objects.create(sfile=self.sf, servershare=self.sstmp, path='',
+                purged=False, active=True)
         self.fpath = f'{self.rf.pk}.{self.sf.filetype.filetype}'
 
     def test_wrong_client(self):
@@ -117,7 +121,8 @@ class TestDownloadedFile(BaseJobTest):
             pass
         resp = self.cl.post(self.url, content_type='application/json', data={
             'task': self.task.asyncid, 'client_id': settings.STORAGECLIENT_APIKEY,
-            'sf_id': self.sf.pk, 'do_md5check': True, 'md5': self.rf.source_md5, 'unzipped': False})
+            'sfloc_id': self.sfl.pk, 'do_md5check': True, 'md5': self.rf.source_md5,
+            'unzipped': False})
         self.assertEqual(resp.status_code, 200)
         self.sf.refresh_from_db()
         self.rf.refresh_from_db()
@@ -127,14 +132,14 @@ class TestDownloadedFile(BaseJobTest):
         self.task.refresh_from_db()
         self.assertEqual(self.task.state, cstates.SUCCESS)
 
-
     def test_no_md5_but_unzip(self):
         with open(os.path.join(settings.TMP_UPLOADPATH, self.fpath), 'w') as fp:
             # touch a file
             pass
         resp = self.cl.post(self.url, content_type='application/json', data={
             'task': self.task.asyncid, 'client_id': settings.STORAGECLIENT_APIKEY,
-            'sf_id': self.sf.pk, 'do_md5check': False, 'md5': self.rf.source_md5, 'unzipped': True})
+            'sfloc_id': self.sfl.pk, 'do_md5check': False, 'md5': self.rf.source_md5,
+            'unzipped': True})
         self.assertEqual(resp.status_code, 200)
         self.sf.refresh_from_db()
         self.rf.refresh_from_db()
@@ -161,38 +166,30 @@ class TestUpdateStorageLocFile(BaseJobTest):
     def test_one_fnid(self):
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'client_id': settings.ANALYSISCLIENT_APIKEY, 'sfloc_id': self.oldsf.pk,
-                    'dst_path': 'new_path', 'servershare': self.ssnewstore.name,
-                    'task': self.taskid, 'newname': 'newfilename',
-                    })
+                    'dst_path': 'new_path', 'task': self.taskid, 'newname': 'newfilename'})
         self.assertEqual(resp.status_code, 200)
         self.oldsss.refresh_from_db()
         self.oldsf.refresh_from_db()
         self.assertEqual(self.oldsss.path, 'new_path')
-        self.assertEqual(self.oldsss.servershare, self.ssnewstore)
         self.assertEqual(self.oldsf.filename, 'newfilename')
         self.task.refresh_from_db()
         self.assertEqual(self.task.state, 'SUCCESS')
          
     def test_multifiles(self):
         raw2 = rm.RawFile.objects.create(name='file2', producer=self.prod,
-                source_md5='r328j9dqhj32qh98ddh3982q',
+                source_md5='r328j9dqhj32qh98ddh3982q', usetype=rm.UploadFileType.RAWFILE,
                 size=100, date=timezone.now(), claimed=False)
         sf2 = rm.StoredFile.objects.create(rawfile=raw2, filename=raw2.name,
                 md5=raw2.source_md5, filetype=self.ft)
-        sf2loc = rm.StoredFileLoc.objects.create(sfile=sf2, servershare=self.ssnewstore, path='')
-        newshare = rm.ServerShare.objects.create(name='newshare', server=self.newfserver, share='/',
-                max_security=1)
+        sf2loc = rm.StoredFileLoc.objects.create(sfile=sf2, servershare=self.ssnewstore, path='',
+                purged=False, active=True)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'client_id': settings.ANALYSISCLIENT_APIKEY, 'sfloc_ids': [self.oldsf.pk, sf2.pk],
-                    'dst_path': 'new_path', 'servershare': newshare.name, 'task': self.taskid,
-                    'newname': 'newfilename',
-                    })
+                data={'client_id': settings.ANALYSISCLIENT_APIKEY, 'sfloc_ids': [self.oldsf.pk,
+                    sf2.pk], 'dst_path': 'new_path', 'task': self.taskid, 'newname': 'newfilename'})
         self.assertEqual(resp.status_code, 200)
         self.oldsss.refresh_from_db()
         self.assertEqual(self.oldsss.path, 'new_path')
-        self.assertEqual(self.oldsss.servershare, newshare)
         sf2loc.refresh_from_db()
         self.assertEqual(sf2loc.path, 'new_path')
-        self.assertEqual(sf2loc.servershare, newshare)
         self.task.refresh_from_db()
         self.assertEqual(self.task.state, 'SUCCESS')

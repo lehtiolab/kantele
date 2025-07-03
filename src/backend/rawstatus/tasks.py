@@ -323,7 +323,7 @@ def rename_file(self, fn, srcsharepath, srcpath, dstpath, sfloc_id, newname):
     except Exception as e:
         taskfail_update_db(self.request.id)
         raise RuntimeError('Could not move file tot storage:', e)
-    postdata = {'sfloc_id': sfloc_id, 'servershare': srcshare, 'dst_path': dstpath,
+    postdata = {'sfloc_id': sfloc_id, 'dst_path': dstpath,
             'client_id': settings.APIKEY, 'task': self.request.id}
     if newname:
         postdata['newname'] = newname
@@ -376,14 +376,13 @@ def delete_empty_dir(self, sharepath, directory):
 
 
 @shared_task(bind=True)
-def pdc_archive(self, md5, yearmonth, servershare, filepath, fn_id, isdir):
+def pdc_archive(self, md5, yearmonth, sharepath, filepath, fn_id, isdir):
     print('Archiving file {} to PDC tape'.format(filepath))
-    basedir = settings.SHAREMAP[servershare]
-    fileloc = os.path.join(basedir, filepath)
+    fileloc = os.path.join(sharepath, filepath)
     if not os.path.exists(fileloc):
         taskfail_update_db(self.request.id, msg='Cannot find file to archive: {}'.format(fileloc))
         return
-    link = os.path.join(settings.BACKUPSHARE, yearmonth, md5)
+    link = os.path.join(sharepath, settings.BACKUP_LINKPATH, yearmonth, md5)
     linkdir = os.path.dirname(link)
     try:
         os.makedirs(linkdir)
@@ -441,18 +440,20 @@ def pdc_archive(self, md5, yearmonth, servershare, filepath, fn_id, isdir):
 
 
 @shared_task(bind=True)
-def pdc_restore(self, servershare, filepath, pdcpath, sfloc_id, isdir):
+def pdc_restore(self, sharepath, filepath, pdcpath, sfloc_id, isdir):
     print('Restoring file {} from PDC tape'.format(filepath))
-    basedir = settings.SHAREMAP[servershare]
-    fileloc = os.path.join(basedir, filepath)
+    fileloc = os.path.join(sharepath, filepath)
     # restore to fileloc
     if isdir:
-        dstpath = os.path.join(settings.BACKUPSHARE, 'retrievals', '') # with slash
+        # dir (.d etc) files are retrieved to a specific folder first, then moved
+        # this is because they get downloaded as the pdcpath (an md5 hash of the file)
+        dstpath = os.path.join(sharepath, settings.BACKUP_LINKPATH, '') # this '' -> with slash
         if not os.path.exists(dstpath):
             os.makedirs(dstpath)
         pdcdirpath = os.path.join(pdcpath, '') # append a slash
         cmd = ['dsmc', 'retrieve', '-subdir=yes', '-replace=no', pdcdirpath, dstpath]
     else:
+        # direct retrieval to fileloc of normal raw files
         cmd = ['dsmc', 'retrieve', '-replace=no', pdcpath, fileloc]
     env = os.environ
     env['DSM_DIR'] = settings.DSM_DIR

@@ -65,7 +65,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.dss.refresh_from_db()
         self.assertEqual(self.dss.storage_loc, new_ds_loc)
         self.assertFalse(os.path.exists(self.f3path))
-        self.assertTrue(os.path.exists(os.path.join(settings.SHAREMAP[self.dss.storageshare.name],
+        self.assertTrue(os.path.exists(os.path.join(self.newstorctrl.path,
             self.dss.storage_loc_ui, self.f3sf.filename)))
 
     def test_remove_files_wait_for_rename(self):
@@ -107,8 +107,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertEqual(self.f3sss.servershare, self.ssnewstore)
         self.assertEqual(self.f3sss.path, self.dss.storage_loc_ui)
         self.assertEqual(self.f3sss.path, self.dss.storage_loc)
-        f3sf_path = os.path.join(settings.SHAREMAP[self.f3sss.servershare.name], self.f3sss.path,
-                self.f3sf.filename)
+        f3sf_path = os.path.join(self.newstorctrl.path, self.f3sss.path, self.f3sf.filename)
         self.assertTrue(os.path.exists(f3sf_path))
         # Now we actually run the rm operation
         self.run_job()
@@ -142,7 +141,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         newdsr = dm.DatasetRawFile.objects.filter(dataset=self.ds, rawfile=self.tmpraw)
         self.assertEqual(newdsr.count(), 1)
         self.assertFalse(self.tmpraw.claimed)
-        self.assertEqual(self.tmpsss.servershare, self.sstmp)
+        self.assertEqual(self.tmpsss.servershare, self.ssinbox)
         self.assertEqual(self.tmpsss.path, '')
         self.tmpraw.refresh_from_db()
         self.assertTrue(self.tmpraw.claimed)
@@ -152,15 +151,14 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertEqual(mvjob.state, Jobstates.PENDING)
         self.ds.refresh_from_db()
         self.dss.refresh_from_db()
-        newtmpsf_path = os.path.join(settings.SHAREMAP[self.ssnewstore.name], self.dss.storage_loc,
-                self.tmpsf.filename)
+        newtmpsf_path = os.path.join(self.newstorctrl.path, self.dss.storage_loc, self.tmpsf.filename)
         self.assertFalse(os.path.exists(newtmpsf_path))
         self.run_job()
         mvjob.refresh_from_db()
         self.assertEqual(mvjob.state, Jobstates.PROCESSING)
         # a new file should now exist in dset folder
         self.tmpsss.refresh_from_db()
-        self.assertEqual(self.tmpsss.servershare, self.sstmp)
+        self.assertEqual(self.tmpsss.servershare, self.ssinbox)
         self.assertEqual(self.tmpsss.path, '')
         self.assertTrue(os.path.exists(newtmpsf_path))
         newsfl = rm.StoredFileLoc.objects.filter(sfile=self.tmpsss.sfile_id, path=self.dss.storage_loc,
@@ -171,7 +169,8 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         # Create file with dset storloc path/name
         fpath, fname = os.path.join(self.p1.name, self.exp1.name, self.dtype.name), 'file_dirname'
         raw = rm.RawFile.objects.create(name=fname, producer=self.prod,
-                source_md5='storloc_raw_fakemd5', size=100, date=timezone.now(), claimed=False)
+                source_md5='storloc_raw_fakemd5', size=100, date=timezone.now(), claimed=False,
+                usetype=rm.UploadFileType.RAWFILE)
         sf = rm.StoredFile.objects.create(rawfile=raw, md5=raw.source_md5,
                 filename=raw.name, checked=True, filetype=self.ft)
         rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.ssnewstore, path=fpath,
@@ -214,7 +213,7 @@ class UpdateFilesTest(BaseIntegrationTest):
         newdsr = dm.DatasetRawFile.objects.filter(dataset=self.ds, rawfile=self.tmpraw)
         self.assertEqual(newdsr.count(), 1)
         self.assertFalse(self.tmpraw.claimed)
-        self.assertEqual(self.tmpsss.servershare, self.sstmp)
+        self.assertEqual(self.tmpsss.servershare, self.ssinbox)
         self.assertEqual(self.tmpsss.path, '')
         self.tmpraw.refresh_from_db()
         self.assertTrue(self.tmpraw.claimed)
@@ -224,10 +223,9 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.run_job()
         self.tmpsss.refresh_from_db()
         self.assertTrue(newsfl.exists())
-        self.assertTrue(os.path.exists(os.path.join(settings.SHAREMAP[self.ssnewstore.name], 
-            self.dss.storage_loc, self.tmpsf.filename)))
-        self.assertTrue(os.path.exists(os.path.join(settings.SHAREMAP[self.sstmp.name], 
+        self.assertTrue(os.path.exists(os.path.join(self.newstorctrl.path,  self.dss.storage_loc,
             self.tmpsf.filename)))
+        self.assertTrue(os.path.exists(os.path.join(self.inboxctrl.path, self.tmpsf.filename)))
         self.assertTrue(self.ds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles,
             state=dm.DCStates.OK).exists())
     
@@ -235,7 +233,8 @@ class UpdateFilesTest(BaseIntegrationTest):
         # Fail because there is no storedfile
         fn = 'raw_no_sf'
         raw = rm.RawFile.objects.create(name=fn, producer=self.prod, claimed=False,
-                source_md5='raw_no_sf_fakemd5', size=1024, date=timezone.now())
+                source_md5='raw_no_sf_fakemd5', size=1024, date=timezone.now(),
+                usetype=rm.UploadFileType.RAWFILE)
         self.ds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles).update(state=dm.DCStates.NEW)
         resp = self.post_json({'dataset_id': self.ds.pk, 'added_files': {raw.pk: {'id': raw.pk}},
             'removed_files': {}})
@@ -262,7 +261,7 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.assertFalse(dsr.exists())
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(self.f3raw.claimed)
-        self.assertFalse(os.path.exists(os.path.join(settings.SHAREMAP[self.ssnewstore.name], 
+        self.assertFalse(os.path.exists(os.path.join(self.newstorctrl.path,
             self.dss.storage_loc, self.f3sf.filename)))
         self.assertEqual(self.f3sss.servershare, self.dss.storageshare)
         self.assertEqual(self.f3sss.path, self.dss.storage_loc)
@@ -276,10 +275,11 @@ class UpdateFilesTest(BaseIntegrationTest):
     def test_trigger_movejob_errors(self):
         # add file with same name as one already in dset
         dupe_raw = rm.RawFile.objects.create(name=self.f3raw.name, producer=self.prod,
-                source_md5='tmpraw_dupe_fakemd5', size=100, date=timezone.now(), claimed=False)
+                source_md5='tmpraw_dupe_fakemd5', size=100, date=timezone.now(), claimed=False,
+                usetype=rm.UploadFileType.RAWFILE)
         dupe_sf = rm.StoredFile.objects.create(rawfile=dupe_raw, md5=dupe_raw.source_md5,
                 filename=dupe_raw.name, checked=True, filetype=self.ft)
-        dupeloc = rm.StoredFileLoc.objects.create(sfile=dupe_sf, servershare=self.sstmp, path='',
+        dupeloc = rm.StoredFileLoc.objects.create(sfile=dupe_sf, servershare=self.ssinbox, path='',
                 purged=False, active=True)
         self.ds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles).update(state=dm.DCStates.NEW)
         resp = self.cl.post(self.url, content_type='application/json', data={
@@ -290,7 +290,7 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.assertEqual(resp.status_code, 403)
         self.assertFalse(dupe_raw.claimed)
         self.assertIn(f'There is already a file existing with the same name', resp.json()['error'])
-        self.assertEqual(dupeloc.servershare, self.sstmp)
+        self.assertEqual(dupeloc.servershare, self.ssinbox)
         self.assertEqual(dupeloc.path, '')
         self.assertFalse(dm.ProjectLog.objects.exists())
 
@@ -316,7 +316,7 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.assertIn(f'There is already a dataset with the exact path as the target file', resp.json()['error'])
         self.assertFalse(dm.ProjectLog.objects.exists())
         self.tmpsss.refresh_from_db()
-        self.assertEqual(self.tmpsss.servershare, self.sstmp)
+        self.assertEqual(self.tmpsss.servershare, self.ssinbox)
         self.assertEqual(self.tmpsss.path, '')
         dtc.refresh_from_db()
         self.assertEqual(dtc.state, dm.DCStates.NEW)
@@ -355,7 +355,7 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
         self.run_job()
         self.newsfl.refresh_from_db()
         self.assertFalse(self.newsfl.purged)
-        self.assertTrue(os.path.exists(os.path.join(settings.SHAREMAP[self.ssnewstore.name], 
+        self.assertTrue(os.path.exists(os.path.join(self.newstorctrl.path,
             self.dss.storage_loc, self.tmpsf.filename)))
         self.assertTrue(self.ds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles,
             state=dm.DCStates.OK).exists())
@@ -374,18 +374,17 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
         self.tmpraw.refresh_from_db()
         self.assertFalse(self.tmpraw.claimed)
         self.run_job()
-        self.assertTrue(os.path.exists(os.path.join(settings.SHAREMAP[self.sstmp.name],
-            self.tmpsf.filename)))
+        self.assertTrue(os.path.exists(os.path.join(self.inboxctrl.path, self.tmpsf.filename)))
         self.assertFalse(self.ds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles,
             state=dm.DCStates.OK).exists())
 
     def test_accept_some_files(self):
         rejraw = rm.RawFile.objects.create(name='reject.raw', producer=self.prod,
                 source_md5='rejectit_fakemd5', size=123, date=timezone.now(),
-                claimed=True)
+                claimed=True, usetype=rm.UploadFileType.RAWFILE)
         rejsf = rm.StoredFile.objects.create(rawfile=rejraw, filename=rejraw.name,
                 filetype=self.ft, md5=rejraw.source_md5, checked=True)
-        rejsfl = rm.StoredFileLoc.objects.create(sfile=rejsf, servershare=self.sstmp, path='',
+        rejsfl = rm.StoredFileLoc.objects.create(sfile=rejsf, servershare=self.ssinbox, path='',
                 purged=False, active=True)
         rejdstsfl = rm.StoredFileLoc.objects.create(sfile=rejsf, servershare=self.ssnewstore,
                 path=self.dss.storage_loc)
@@ -408,10 +407,12 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
         self.newsfl.refresh_from_db()
         self.assertTrue(self.newsfl.active)
         self.assertTrue(self.newsfl.purged)
+        rejdstsfl.refresh_from_db()
+        self.assertFalse(rejdstsfl.active)
         self.run_job()
         self.newsfl.refresh_from_db()
         self.assertFalse(self.newsfl.purged)
-        self.assertTrue(os.path.exists(os.path.join(settings.SHAREMAP[self.ssnewstore.name], 
+        self.assertTrue(os.path.exists(os.path.join(self.newstorctrl.path,
             self.dss.storage_loc, self.tmpsf.filename)))
         self.assertTrue(self.ds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles,
             state=dm.DCStates.OK).exists())
@@ -475,7 +476,7 @@ class RenameProjectTest(BaseIntegrationTest):
         self.assertEqual(self.dss.storage_loc, old_loc)
         self.dss.refresh_from_db()
         self.assertEqual(self.dss.storage_loc, new_loc)
-        self.assertTrue(os.path.exists(os.path.join(settings.SHAREMAP[self.dss.storageshare.name],
+        self.assertTrue(os.path.exists(os.path.join(self.newstorctrl.path,
             self.dss.storage_loc, self.f3sf.filename)))
 
     def test_if_added_removed_files_ok(self):
@@ -513,19 +514,18 @@ class RenameProjectTest(BaseIntegrationTest):
         self.assertFalse(os.path.exists(self.f3path))
         self.dss.refresh_from_db()
         self.assertEqual(self.dss.storage_loc, new_loc)
-        self.assertTrue(os.path.exists(os.path.join(settings.SHAREMAP[self.dss.storageshare.name],
+        self.assertTrue(os.path.exists(os.path.join(self.newstorctrl.path,
             self.dss.storage_loc, self.f3sf.filename)))
         # Check if added files are not there yet, being waited
         mvjob = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare').last()
         self.assertEqual(mvjob.state, Jobstates.PENDING)
-        self.assertEqual(self.tmpsss.servershare, self.sstmp)
+        self.assertEqual(self.tmpsss.servershare, self.ssinbox)
         self.assertEqual(self.tmpsss.path, '')
         self.ds.refresh_from_db()
         self.tmpsss.refresh_from_db()
-        self.assertEqual(self.tmpsss.servershare, self.sstmp)
+        self.assertEqual(self.tmpsss.servershare, self.ssinbox)
         self.assertEqual(self.tmpsss.path, '')
-        newtmpsf_path = os.path.join(settings.SHAREMAP[self.ssnewstore.name], new_loc,
-                self.tmpsf.filename)
+        newtmpsf_path = os.path.join(self.newstorctrl.path, new_loc, self.tmpsf.filename)
         self.assertFalse(os.path.exists(newtmpsf_path))
         newsfl = rm.StoredFileLoc.objects.filter(sfile=self.tmpsss.sfile,
                 servershare=self.ssnewstore, path=self.dss.storage_loc, purged=False)
@@ -627,7 +627,7 @@ class SaveSamples(BaseTest):
         fn = 'raw_lf_dset'
         raw = rm.RawFile.objects.create(name=fn, producer=self.prod,
                 source_md5='rawlf_ds_fakemd5', size=2024, date=timezone.now(),
-                claimed=True)
+                claimed=True, usetype=rm.UploadFileType.RAWFILE)
         dsr = dm.DatasetRawFile.objects.create(dataset=newds, rawfile=raw)
 
         samplename = 'new proj sample B'
@@ -970,7 +970,8 @@ class MergeProjectsTest(BaseTest):
                 storage_loc_ui=oldstorloc, storageshare=self.ssnewstore, startdate=timezone.now())
         dm.DatasetOwner.objects.create(dataset=ds2, user=self.user)
         raw = rm.RawFile.objects.create(name='testmerge', producer=self.prod,
-                source_md5='testmerge_fake', size=1234, date=timezone.now(), claimed=True)
+                source_md5='testmerge_fake', size=1234, date=timezone.now(), claimed=True,
+                usetype=rm.UploadFileType.RAWFILE)
         dm.DatasetRawFile.objects.create(dataset=ds2, rawfile=raw)
         sf = rm.StoredFile.objects.create(rawfile=raw, filename=raw.name, md5=raw.source_md5,
                 filetype=self.ft, checked=True)
@@ -1013,7 +1014,8 @@ class MergeProjectsTest(BaseTest):
                 storage_loc_ui=oldstorloc, storageshare=self.ssnewstore, startdate=timezone.now())
         own3 = dm.DatasetOwner.objects.create(dataset=ds3, user=self.user)
         raw = rm.RawFile.objects.create(name='testmerge', producer=self.prod,
-                source_md5='testmerge_fake', size=1234, date=timezone.now(), claimed=True)
+                source_md5='testmerge_fake', size=1234, date=timezone.now(), claimed=True,
+                usetype=rm.UploadFileType.RAWFILE)
         dm.DatasetRawFile.objects.create(dataset=ds3, rawfile=raw)
         sf = rm.StoredFile.objects.create(rawfile=raw, filename=raw.name, md5=raw.source_md5,
                 filetype=self.ft, checked=True)
@@ -1047,9 +1049,9 @@ class TestDeleteDataset(ProcessJobTest):
         queue = f'{self.storagecontroller.name}__{settings.QUEUE_FASTSTORAGE}'
         self.job.process(**kwargs)
         exp_t = [
-                ((self.f3sss.servershare.name, self.f3sss.path, self.f3sf.filename,
+                ((self.newstorctrl.path, self.f3sss.path, self.f3sf.filename,
                     self.f3sss.pk, self.f3sf.filetype.is_folder), queue),
-                ((self.f3mzsss.servershare.name, self.f3mzsss.path, self.f3sfmz.filename,
+                ((self.newstorctrl.path, self.f3mzsss.path, self.f3sfmz.filename,
                     self.f3mzsss.pk, self.f3sfmz.filetype.is_folder), queue)
                 ]
         self.check(exp_t)
@@ -1060,9 +1062,9 @@ class TestDeleteDataset(ProcessJobTest):
         queue = f'{self.storagecontroller.name}__{settings.QUEUE_FASTSTORAGE}'
         self.job.process(**kwargs)
         exp_t = [
-                ((self.f3sss.servershare.name, self.f3sss.path, self.f3sf.filename,
+                ((self.newstorctrl.path, self.f3sss.path, self.f3sf.filename,
                     self.f3sss.pk, self.f3sf.filetype.is_folder), queue),
-                ((self.f3mzsss.servershare.name, self.f3mzsss.path, self.f3sfmz.filename,
+                ((self.newstorctrl.path, self.f3mzsss.path, self.f3sfmz.filename,
                     self.f3mzsss.pk, False), queue)
                 ]
         self.check(exp_t)
@@ -1216,6 +1218,10 @@ class TestArchiveDataset(BaseTest):
         self.assertEqual(resp.json()['error'], 'Cannot archive dataset, no permission for user')
 
     def test_ok(self):
+        self.user.is_staff = True
+        self.user.save()
+        self.ds.deleted = True
+        self.ds.save()
         dsfiles = rm.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=self.ds)
         dsfiles.filter(sfile__mzmlfile__isnull=False).delete()
         dsfiles.update(active=False)
@@ -1224,14 +1230,11 @@ class TestArchiveDataset(BaseTest):
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.ds.pk})
         self.assertEqual(resp.status_code, 500)
-        self.assertEqual(resp.json()['error'], 'Cannot archive dataset, already cold')
+        self.assertEqual(resp.json()['error'], 'Cannot archive dataset, it is already in deleted state')
 
+        self.ds.deleted = False
+        self.ds.save()
         rm.PDCBackedupFile.objects.all().delete()
-        resp = self.cl.post(self.url, content_type='application/json',
-                data={'item_id': self.ds.pk})
-        self.assertEqual(resp.status_code, 500)
-        self.assertEqual(resp.json()['error'], 'Cannot archive dataset, already purged')
-
         dsfiles.update(active=True)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.ds.pk})

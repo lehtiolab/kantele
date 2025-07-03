@@ -65,7 +65,7 @@ class RenameDatasetStorageLoc(DatasetJob):
 
     def process(self, **kwargs):
         srcsfs = self.getfiles_query(**kwargs)
-        srcloc = srcsfs.distinct('path', 'servershare__name').values('path', 'servershare__name')
+        srcloc = srcsfs.distinct('path', 'servershare__name').values('path', 'servershare__pk')
 
         # Error check too many src locations for dataset:
         if srcloc.count() > 1:
@@ -73,9 +73,11 @@ class RenameDatasetStorageLoc(DatasetJob):
                     'contact admin to make sure files are consolicated before renaming path')
 
         srcloc = srcloc.get()
-        self.queue = f'{srcloc["servershare__name"]}__{settings.QUEUE_STORAGE}'
-        self.run_tasks = [((srcloc["servershare__name"], srcloc['path'], kwargs['newpath'], 
-            [x['pk'] for x in srcsfs.values('pk')], kwargs['dss_id']), {})]
+        fss = FileserverShare.objects.filter(share=srcloc['servershare__pk']).values(
+                'server__name', 'path').first()
+        self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_STORAGE)
+        self.run_tasks = [(fss['path'], srcloc['path'], kwargs['newpath'], 
+            [x['pk'] for x in srcsfs.values('pk')], kwargs['dss_id'])]
 
 
 class RsyncDatasetServershare(DatasetJob):
@@ -107,7 +109,7 @@ class RsyncDatasetServershare(DatasetJob):
         if StoredFileLoc.objects.filter(sfile__filename__in=[x['sfile__filename'] for x in srcsfl],
                 path=dst_dss['storage_loc_ui'], servershare_id=kwargs['dstshare_id'], active=True).exists():
             return ('There is already a file existing with the same name as a the target file'
-                    f' in path {dstpath}')
+                    f' in path {dst_dss["storage_loc_ui"]}')
         return self._check_error_either(srcsfl, dst_dss['storage_loc_ui'], **kwargs)
 
     def _check_error_either(self, srcsfl, dstpath, **kwargs):

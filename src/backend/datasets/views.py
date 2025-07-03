@@ -111,7 +111,7 @@ def dataset_info(request, project_id, dataset_id=False):
                 'runname': dset.runname.name,
                 'datatype_id': dset.datatype_id,
                 'storage_locations': ds_servers,
-                'storage_servers': ds_servers.keys(),
+                'storage_servers': [x for x in ds_servers.keys()],
                 'locked': dset.locked,
             }
         if hasattr(dset, 'prefractionationdataset'):
@@ -126,22 +126,21 @@ def dataset_info(request, project_id, dataset_id=False):
 @login_required
 def dataset_files(request, dataset_id=False):
     newfiles = filemodels.StoredFile.objects.select_related('rawfile__producer').filter(
-            claimed=False, checked=True, rawfile__date__gt=datetime.now() - timedelta(200)).values(
-                    'id', 'filename', 'rawfile__size', 'rawfile__producer__name')
+            rawfile__claimed=False, checked=True, rawfile__date__gt=datetime.now() - timedelta(200)).values(
+                    'id', 'filename', 'rawfile__size', 'rawfile__producer__name', 'rawfile__date')
     response_json = {'instruments': [x.name for x in filemodels.Producer.objects.all()],
             'datasetFiles': [],
-            'newfn_order': [x['id'] for x in newfiles.order_by('-date')],
-            'newFiles': {x['id']: {'id': x['id'], 'name': x['name'],
-                'size': round(x['size'] / (2**20), 1), 'date': x['rawfile__date'].timestamp() * 1000,
+            'newfn_order': [x['id'] for x in newfiles.order_by('-rawfile__date')],
+            'newFiles': {x['id']: {'id': x['id'], 'name': x['filename'],
+                'size': round(x['rawfile__size'] / (2**20), 1),
+                'date': x['rawfile__date'].timestamp() * 1000,
                 'instrument': x['rawfile__producer__name'], 'checked': False}
                 for x in newfiles}}
     if dataset_id:
         if not models.Dataset.objects.filter(purged=False, pk=dataset_id).count():
             return HttpResponseNotFound()
         dss_ids = models.DatasetServer.objects.filter(dataset_id=dataset_id).values('pk')
-        #ds_files = models.DatasetRawFile.objects.filter(dataset_id=dataset_id).values(
-        #        'pk', 'rawfile__name', '').order_by('rawfile__date')
-        ds_files = models.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dataset_id,
+        ds_files = filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dataset_id,
                 mzmlfile__isnull=True).values('pk', 'filename', 'rawfile__producer__name',
                         'rawfile__size', 'rawfile__date', 'rawfile__datasetrawfile__id').order_by(
                                 'rawfile__date')
@@ -153,7 +152,7 @@ def dataset_files(request, dataset_id=False):
         else:
             pending_files = []
         response_json.update({
-            'dsfn_order': [x.pk for x in ds_files],
+            'dsfn_order': [x['pk'] for x in ds_files],
             'pendingFiles': pending_files,
             'datasetFiles':
             {x['pk']:
@@ -362,15 +361,22 @@ def get_admin_params_for_dset(response, dset_id, category):
 
 
 def get_source_dss_for_transfers(alldss):
-    dss_primshare = alldss.filter(storageshare__name=settings.TMPSHARENAME)
-    open_dss = alldss.filter(storageshare__max_security=models.DataSecurityClass.NOSECURITY)
-    if dss_primshare.exists():
-        srcdss = dss_primshare.get()
-    elif open_dss.exists():
-        srcdss = open_dss.first()
+    '''Given a queryset of datasetserver, this returns the first of:
+    - a share which is accessible to an rsync-key-having controller
+    - False
+    Maybe make function of storeshare?'''
+    rsync_dss = alldss.filter(storageshare__fileservershare__server__can_rsync_remote=True)
+    if rsync_dss.exists():
+        srcdss = rsync_dss.get()
+    elif alldss.exists():
+        # dataset is on other share, need to pull from via rsync
+        # FIXME first queue rsync to inbox or open?
+        srcdss = False
     else:
+        # dataset is no longer available except from backup
         # FIXME fetch from backup to primshare if needed (when job queuing)!
-        srcdss = False # keep linter happy until we have fixed backup retrieval
+        # Or should user do that themselves?
+        srcdss = False
     return srcdss
 
 
@@ -430,24 +436,26 @@ def update_dataset(data, user_id):
     hrrange_id = data['hiriefrange'] if 'hiriefrange' in data and data['hiriefrange'] else False
     shares_q = filemodels.ServerShare.objects.filter(active=True, has_rawdata=True)
     alldsshares_q = models.DatasetServer.objects.filter(dataset=dset, active=True)
-    srcdss = get_source_dss_for_transfers(alldsshares_q)
     existing_sfl = filemodels.StoredFileLoc.objects.filter(active=True,
             sfile__rawfile__datasetrawfile__dataset=dset)
-    dsshare_upds, dsshare_jobs, rsync_jobs, retrieve_jobs = [], [], [], []
+    dsshare_upds, dsshare_mvjobs, rsync_jobs, retrieve_jobs = [], [], [], []
     sfls_dss = {}
+    qpid = get_quantprot_id()
     for sshare_id in data['storage_servers']:
         try:
             share = shares_q.get(pk=sshare_id)
         except filemodels.ServerShare.DoesNotExist:
             return JsonResponse({'error': 'Servershare asked to store on does not exist'}, status=403)
+        if share.max_security < int(data['secclass']):
+            return JsonResponse({'error': 'Servershare asked to store on has too low security class'
+                'for this dataset'}, status=403)
         # Get new storage location if moving stuff, and path/file names for error check on storedfile
-        new_storage_loc = share.set_dset_storage_location(get_quantprot_id(), project, experiment,
+        new_storage_loc = share.set_dset_storage_location(qpid, project, experiment,
                 dset, dtype, prefrac, hrrange_id)
         err_fpath, err_fname = os.path.split(new_storage_loc)
         # dsshare_q already has shares that are active etc, through share
         dsshare_q = alldsshares_q.filter(storageshare=share)
         is_new_storloc = not dsshare_q.filter(storage_loc_ui=new_storage_loc).exists()
-        active_old_storloc_on_share = dsshare_q.filter(active=True).exists()
         ## FIXME check, rsync job already checks this errors? Maybe same for the rename job
         # or maybe do so that is done! Centralize -> less code, and it is checked on job creation
         # anyway so we can do it here.
@@ -464,7 +472,7 @@ def update_dataset(data, user_id):
             # we do a rename job. If no dss_sflocs exist for that share, we need to rsync them there
             dsshare_upds.append((share, {'storage_loc_ui': new_storage_loc, 'active': True}))
             # Can do .get() since dsshare is Unique per dset/share
-            if is_new_storloc and active_old_storloc_on_share:
+            if is_new_storloc and dsshare_q.exists():
                 dss = dsshare_q.get()
                 renamesfl = [x['pk'] for x in 
                         existing_sfl.filter(servershare=dss.storageshare).values('pk')]
@@ -474,7 +482,7 @@ def update_dataset(data, user_id):
                     return JsonResponse({'error': joberror}, status=403)
                 else:
                     # Add dss.storage_loc here since it will change before the job is launched!
-                    dsshare_jobs.append((dss, dss.storage_loc_ui))
+                    dsshare_mvjobs.append((dss, dss.storage_loc_ui))
             elif is_new_storloc:
                 # No active dataset on share, so rsync it over.
                 # If we need to fetch dset from other source than primary
@@ -484,24 +492,28 @@ def update_dataset(data, user_id):
                     return JsonResponse({'error': 'Error while trying to upload dset files to new '
                         'file server: some files already exist on that server according to DB'},
                         status=403)
-                srcsfl = existing_sfl.filter(servershare=srcdss.storageshare)
-                rsync_jobs.append((srcdss, share))
+                rsync_jobs.append(share)
                 # FIXME append params for rsync job here if no sflocs.exists()?
 
     # From here we start updating, first delete files from disabled shares:
     for rmdss in alldsshares_q.exclude(storageshare_id__in=data['storage_servers']):
-        dss_rmsfl = existing_sfl.filter(servershare=dss.storageshare)
+        dss_rmsfl = existing_sfl.filter(servershare=rmdss.storageshare)
         dssrmsfl_ids = [x['pk'] for x in dss_rmsfl.values('pk')]
         create_job('remove_dset_files_servershare', dss_id=rmdss.pk, sfloc_ids=dssrmsfl_ids)
         dss_rmsfl.update(active=False)
-    # Update remaining shares
+    alldsshares_q.exclude(storageshare_id__in=data['storage_servers']).update(active=False)
+    # Before adding dss, create non-changing pre_alldss_pks for source to rsync from:
+    pre_alldss_pks = [x['pk'] for x in alldsshares_q.values('pk')]
+
+    # Update/create remaining shares
     dss_shares = {}
     for share, upd_defaults in dsshare_upds:
-        dss, _cr = alldsshares_q.update_or_create(storageshare=share, defaults=upd_defaults,
-                create_defaults={**upd_defaults, 'startdate': timezone.now()})
+        dss, _cr = models.DatasetServer.objects.update_or_create(dataset=dset, storageshare=share,
+                defaults=upd_defaults, create_defaults={**upd_defaults, 'startdate': timezone.now()})
         dss_shares[share] = dss
+
     # Rename any existing dataset sites
-    for dss, oldpath in dsshare_jobs:
+    for dss, oldpath in dsshare_mvjobs:
         create_job_without_check('rename_dset_storage_loc', dss_id=dss.pk, sfloc_ids=sfls_dss[dss.pk],
                 newpath=new_storage_loc)
         models.ProjectLog.objects.create(project=dset.runname.experiment.project,
@@ -509,12 +521,66 @@ def update_dataset(data, user_id):
                 f'{dset.pk} path to {new_storage_loc} from {oldpath}')
 
     # Create rsync jobs to new storage shares if needed
-    for srcdss, dstshare in rsync_jobs:
-        src_sfloc_ids = [x['pk'] for x in filemodels.StoredFileLoc.objects.filter(
-            servershare=srcdss.storageshare, sfile__rawfile__datasetrawfile__dataset=dset).values('pk')]
-        dstdss = dss_shares[dstshare]
-        create_job('rsync_dset_files_to_servershare', dss_id=dstdss.pk, sfloc_ids=src_sfloc_ids,
-                dstshare_id=dstshare.pk)
+    if rsync_jobs:
+        pre_alldss = alldss_q.filter(pk__in=pre_alldss_pks)
+        # FIXME went  home
+        rsync_dss = pre_alldss.filter(storageshare__fileservershare__server__can_rsync_remote=True)
+        if rsync_dss.exists():
+            # we have a dss local on an rsync server
+            srcdss = rsync_dss.first()
+            for dstshare in rsync_jobs:
+                src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
+                    servershare=srcdss.storageshare,
+                    sfile__rawfile__datasetrawfile__dataset=dset).values('pk')]
+                dstdss = dss_shares[dstshare]
+                create_job('rsync_dset_files_to_servershare', dss_id=dstdss.pk, sfloc_ids=src_sfloc_ids,
+                        dstshare_id=dstshare.pk)
+
+        elif pre_alldss.exists():
+            # there is a live dss somewhere, get it onto an rsync source first
+            # This is VERY similar to what we do in home/views for mzml, except the local storage
+            src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
+                servershare=pre_alldss.first().storageshare,
+                    sfile__rawfile__datasetrawfile__dataset=dset).values('pk')]
+            share_ids_dss_map = {x.servershare_id: x.pk for x in alldss_q}
+            rsync_server = filemodels.FileServer.objects.filter(can_rsync_remote=True
+                    ).values('pk').first()
+            dstshare_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
+                    rsync_server['pk'], [x.pk for x in rsync_jobs])
+            for dstshare_id in dstshare_classes['rsync_sourcable']:
+                rsjob = create_job('rsync_dset_files_to_servershare', dstshare_id=dstshare_id,
+                        dss_id=share_ids_dss_map[dstshare_id], sfloc_ids=src_sfloc_ids)
+                src_sflids_for_remote = srcjob['kwargs']['dstsfloc_ids']
+            if dstshare_classes['remote'] and not dstshare_classes['rsync_sourcable']:
+                # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
+                # controller (and sensitive classed)
+                dstshare = filemodels.ServerShare.objects.filter(function=filemodels.ShareFunction.INBOX
+                        ).values('pk').first()
+                src_sflids_for_remote = []
+                for sflpk in rsjob['kwargs']['dstsfloc_ids']:
+                    inboxjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflpk,
+                            dstshare_id=dstshare['pk'], dstpath=filemodels.ServerShare.get_inbox_path(
+                                dset_id=dset.pk))
+                    src_sflids_for_remote.append(srcjob['kwargs']['dstsfloc_id'])
+            for dstshare_id in dstshare_classes['remote']:
+                create_job('rsync_dset_files_to_servershare', dss_id=share_ids_dss_map[dstshare_id],
+                        sfloc_ids=src_sflids_for_remote, dstshare_id=dstshare_id)
+        else:
+            # This should not happen! dset.deleted should have been set, show error to user
+            return JsonResponse({'error': 'Dataset is not set to deleted but has no storage. - '
+                        'This should not happen, please inform admin (copy paste this message)!'})
+
+
+        # Filter on storage_servers to avoid those which have been deleted from
+        srcdss = get_source_dss_for_transfers(alldsshares_q.filter(
+            storageshare_id__in=data['storage_servers']))
+        for dstshare in rsync_jobs:
+            src_sfloc_ids = [x['pk'] for x in filemodels.StoredFileLoc.objects.filter(
+                servershare=srcdss.storageshare,
+                sfile__rawfile__datasetrawfile__dataset=dset).values('pk')]
+            dstdss = dss_shares[dstshare]
+            create_job('rsync_dset_files_to_servershare', dss_id=dstdss.pk, sfloc_ids=src_sfloc_ids,
+                    dstshare_id=dstshare.pk)
 
     # update prefrac
     try:
@@ -748,9 +814,11 @@ def check_save_permission(dset_id, logged_in_user, action=False):
     return (False, 200) if ok,
     return e.g. ('errmsg', 403) if not ok
     '''
-    dsq = models.Dataset.objects.filter(purged=False, deleted=False, pk=dset_id)
+    dsq = models.Dataset.objects.filter(purged=False, deleted=False, pk=dset_id,
+            runname__experiment__project__active=True)
     if not dsq.exists():
-        return ('Cannot find dataset to edit, maybe it is deleted?', 404)
+        return ('Cannot find dataset to edit, maybe it is deleted, or is its project no longer '
+                'active?', 404)
     elif action != 'unlock' and dsq.filter(locked=True).exists():
         return ('You cannot edit a locked dataset', 403)
     elif action == 'unlock' and dsq.filter(locked=False).exists():
@@ -789,11 +857,12 @@ def save_new_dataset(data, project, experiment, runname, user_id):
     dset = models.Dataset.objects.create(date=timezone.now(), runname_id=runname.id,
             datatype=dtype, securityclass=data['secclass'])
     shares_q = filemodels.ServerShare.objects.filter(active=True, has_rawdata=True)
+    qpid = get_quantprot_id()
     for sshare_id in data['storage_servers']:
         dsshares = []
         if shares_q.filter(pk=sshare_id).exists():
             share = shares_q.get(pk=sshare_id)
-            storloc = share.set_dset_storage_location(get_quantprot_id(), project, experiment, dset,
+            storloc = share.set_dset_storage_location(qpid, project, experiment, dset,
                     dtype, prefrac, hrrange_id)
             err_fpath, err_fname = os.path.split(storloc)
             other_dss = models.DatasetServer.objects.filter(
@@ -854,7 +923,7 @@ def move_project_cold(request):
     # Cold store all datasets, delete them from active
     result = {'errormsgs': []}
     for dso in dsetowners.distinct('dataset'):
-        archived = archive_dataset(dso.dataset)
+        archived = archive_and_delete_dataset(dso.dataset)
         if archived['state'] == 'error':
             result.update({'state': 'error', 'error': 'Not all datasets could be updated.'})
             result['errormsgs'].append(archived['error'])
@@ -890,7 +959,7 @@ def merge_projects(request):
         return JsonResponse({'error': 'Only {projs.count()} of the {len(data["projids"])}'
             'project(s) you have passed exist in the system, possibly project ' 
             'input is out of date?'}, status=400)
-
+    qpid = get_quantprot_id()
     for proj in projs[1:]:
         # Refresh oldexps with every merged project
         oldexps = {x.name: x for x in projs[0].experiment_set.all()}
@@ -926,7 +995,7 @@ def merge_projects(request):
                 hrrange_id = pfds.hiriefdataset.hirief_id if hasattr(pfds, 'hiriefdataset') else False
                 for dss in models.DatasetServer.objects.filter(active=True, dataset=dset):
                     # Get new storage location if moving stuff, and path/file names for error check on storedfile
-                    new_storage_loc = dss.storageshare.set_dset_storage_location(get_quantprot_id(),
+                    new_storage_loc = dss.storageshare.set_dset_storage_location(qpid,
                             projs[0], exp, dset, dset.datatype, prefrac, hrrange_id)
 
                     err_fpath, err_fname = os.path.split(new_storage_loc)
@@ -944,7 +1013,7 @@ def merge_projects(request):
                         # If files are in it that are not marked as (future) deleted,
                         # we do a rename job.
                         dss_sflocs = filemodels.StoredFileLoc.objects.filter(
-                                sfile__rawfile__datasetrawfile__dataset_id=runname.dset.id,
+                                sfile__rawfile__datasetrawfile__dataset_id=dset.id,
                                 servershare=dss.storageshare, sfile__deleted=False)
                         if is_new_storloc and dss_sflocs.exists():
                             dsshare_upds.append((dss, new_storage_loc))
@@ -1031,12 +1100,12 @@ def move_project_active(request):
         reactivated = reactivate_dataset(dso.dataset)
         if reactivated['state'] == 'error':
             result.update({'state': 'error', 'error': 'Not all project datasets could be reactivated.'})
-            result['errormsgs'].append(reactivated['error'])
+            result['errormsgs'].append(f'Problem with dataset {dso.dataset.pk}: {reactivated["error"]}')
         else:
             # if ANY dataset gets reactivated, project is active
             projquery.update(active=True)
     if result['errormsgs']:
-        result['error'] = f'{result["error"]} Errors: {"; ".join(result.pop("errormsgs"))}'
+        result['error'] = f'{result["error"]} {"; ".join(result.pop("errormsgs"))}'
         return JsonResponse(result, status=500)
     else:
         models.ProjectLog.objects.create(project_id=data['item_id'], level=models.ProjLogLevels.INFO,
@@ -1073,72 +1142,93 @@ def purge_project(request):
         return JsonResponse({})
 
 
-def get_dset_storestate(dset_id):
+def get_dset_storestate(dset_id, ds_deleted):
     '''Count SFLoc associated with a dataset (created when adding/removing), in different 
     servershares and in backup - return a state for the dataset (currently a string)'''
-    dsfl = filemodels.StoredFileLoc.objects.exclude(sfile__mzmlfile__isnull=False).filter(
-                sfile__rawfile__datasetrawfile__dataset_id=dset_id)
     dsf_c = filemodels.StoredFile.objects.exclude(mzmlfile__isnull=False).filter(
                 rawfile__datasetrawfile__dataset_id=dset_id).count()
     if dsf_c == 0:
         return 'empty', '-'
-    nrs_active = dsfl.filter(active=True).values('servershare').annotate(nrss=Count('pk'))
-    if nrs_active.exists():
-        max_nr_active = max(x['nrss'] for x in nrs_active)
+    nr_active_coldfiles = filemodels.PDCBackedupFile.objects.filter(
+            storedfile__rawfile__datasetrawfile__dataset_id=dset_id).filter(deleted=False).count()
+    if ds_deleted:
+        if dsf_c == nr_active_coldfiles:
+            storestate = 'cold'
+        elif max_nr_active == 0:
+            storestate = 'purged'
+        else:
+            storestate = 'broken'
     else:
-        max_nr_active = 0
-    coldfiles = filemodels.PDCBackedupFile.objects.filter(
-            storedfile__rawfile__datasetrawfile__dataset_id=dset_id)
-    nr_active_coldfiles = coldfiles.filter(deleted=False).count()
-    if max_nr_active == 0 and dsf_c == nr_active_coldfiles:
-        storestate = 'cold'
-    elif max_nr_active == 0:
-        storestate = 'purged'
-    elif max_nr_active == dsf_c == nr_active_coldfiles:
-        storestate = 'complete'
-    elif dsf_c == max_nr_active:
-        storestate = 'active-only'
-    else:
-        storestate = 'broken'
+        nrs_active = filemodels.StoredFileLoc.objects.exclude(sfile__mzmlfile__isnull=False).filter(
+                    sfile__rawfile__datasetrawfile__dataset_id=dset_id, active=True).values(
+                            'servershare').annotate(nrss=Count('pk'))
+        if nrs_active.exists():
+            max_nr_active = max(x['nrss'] for x in nrs_active)
+        else:
+            max_nr_active = 0
+        if max_nr_active == dsf_c == nr_active_coldfiles:
+            storestate = 'complete'
+        elif dsf_c == max_nr_active:
+            storestate = 'active-only'
+        else:
+            storestate = 'broken'
     return storestate, dsf_c
 
 
-def archive_dataset(dset):
+def archive_and_delete_dataset(dset):
     # TODO - archiving datasets should not really be done anymore, is done on individual incoming files now
     # we can archive any non-archived dataset left on the system?
 
     # FIXME dataset reactivating and archiving reports error when ok and vv? I mean, if you click archive and reactivate quickly, you will get error (still in active storage), and also in this func, storestate is not updated at same time as DB (it is result of jobs)
-    storestate, _ = get_dset_storestate(dset.pk)
-    backing_up = False
-    alldss = models.DatasetServer.objects.filter(dataset=dset, active=True)
-    if storestate in ['cold', 'purged']:
-        return {'state': 'error', 'error': f'Cannot archive dataset, already {storestate}'}
-    elif storestate == 'broken':
-        return {'state': 'error', 'error': 'Cannot archive dataset, files missing on active storage'}
-    elif storestate == 'active-only':
-        backing_up = True
+    if dset.deleted:
+        return {'state': 'error', 'error': 'Cannot archive dataset, it is already in '
+                'deleted state'}
+    else:
+        backing_up = False
+        storestate, _ = get_dset_storestate(dset.pk, dset.deleted)
+        alldss = models.DatasetServer.objects.filter(dataset=dset, active=True)
+        if storestate == 'broken':
+            return {'state': 'error', 'error': 'Cannot archive dataset, files missing on storage'}
+        elif storestate == 'active-only':
+            srcdss = get_source_dss_for_transfers(alldss)
+            srcsfl = filemodels.StoredFileLoc.objects.exclude(sfile__mzmlfile__isnull=False).filter(
+                    sfile__rawfile__datasetrawfile__dataset__datasetserver=srcdss).values('pk')
+            create_job('backup_dataset', dss_id=srcdss.pk, sfloc_ids=[x['pk'] for x in srcsfl])
+            backing_up = True
 
-        srcdss = get_source_dss_for_transfers(alldss)
-        srcsfl = filemodels.StoredFileLoc.objects.exclude(sfile__mzmlfile__isnull=False).filter(
-                sfile__rawfile__datasetrawfile__dataset__datasetserver=srcdss).values('pk')
-        create_job('backup_dataset', dss_id=srcdss.pk, sfloc_ids=[x['pk'] for x in srcsfl])
+        # If you reach this point, the dataset is either backed up or has a job queued for that, so queue delete job
+        bup_msg = 'Files are already in backup'
+        if storestate != 'empty':
+            rmjobs, rmsfls, rmdirjobs = [], [], []
+            alldss.update(active=False)
+            for dss in alldss.values('pk', 'storage_loc', 'storageshare_id'):
+                rmsfl = filemodels.StoredFileLoc.objects.filter(active=True,
+                        sfile__rawfile__datasetrawfile__dataset__datasetserver__id=dss['pk'])
+                sfloc_pks = [x['pk'] for x in rmsfl.values('pk')]
+                rmkw = {'dss_id': dss['pk'], 'sfloc_ids': sfloc_pks}
+                if joberror := check_job_error('remove_dset_files_servershare', **rmkw):
+                    bup_msg = 'Files are queued for backup' if backing_up else 'Files already backed up'
+                    return JsonResponse({'error': f'{joberror} -- {bup_msg}'}, status=403)
+                rmjobs.append(rmkw)
+                rmsfls.append(rmsfl)
+                rmdirkw = {'path': dss['storage_loc'], 'share_id': dss['storageshare_id'],
+                        'sfloc_ids': sfloc_pks}
+                if joberror := check_job_error('delete_empty_directory', **rmdirkw):
+                    return JsonResponse({'error': f'{joberror} -- {bup_msg}'}, status=403)
+                rmdirjobs.append(rmdirkw)
+            # Errors checked for all dss, now queue jobs
+            for (rmjobkw, rmsfl), rmdirkw in zip(rmjobs, rmdirjobs):
+                create_job_without_check('remove_dset_files_servershare', **rmkw)
+                rmsfl.update(active=False)
+                create_job('delete_empty_directory', **rmdirkw)
 
-    # If you reach this point, the dataset is either backed up or has a job queued for that, so queue delete job
-    prim_share = filemodels.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
-    if storestate != 'empty':
-        alldss.update(active=False)
-        for dss in alldss.values('pk'):
-            rmsfl = filemodels.StoredFileLoc.objects.filter(active=True,
-                    sfile__rawfile__datasetrawfile__dataset__datasetserver__id=dss['pk']).values('pk')
-            create_job('delete_active_dataset', dss_id=dss['pk'], sfloc_ids=[x['pk'] for x in rmsfl])
-            create_job('delete_empty_directory', sfloc_ids=rmsfl)
-
-    dset.deleted, dset.purged = True, False
-    dset.save()
-    return {'state': 'ok', 'error': 'Dataset queued for archival'}
+        dset.deleted, dset.purged = True, False
+        dset.save()
+        return {'state': 'ok', 'error': f'Dataset queued for removal -- {bup_msg}'}
 
 
-def reactivate_dataset(dset):
+def reactivate_dataset(dss, share_ids):
+    '''Tries to reactivate a dataset, restoring it to dataset inbox share'''
     # FIXME if reactivated quickly after archiving, you get an error. Because archive job is queued and it will execute, 
     # but that is not done yet, so we wont queue a reactivate job. Fine. But, if archive job is deleted, 
     # the dataset is still marked as deleted. In that case, we could set undelete on dset here, but that is not correct
@@ -1150,41 +1240,50 @@ def reactivate_dataset(dset):
     #  - delete/undelete ALSO in post-job view - bad UI, dataset keeps showing in interface, should not
     #  - reactivate cancels delete job (if it is pending
     #  - 
-    storestate, _ = get_dset_storestate(dset.pk)
-    if storestate == 'purged':
-        return {'state': 'error', 'error': 'Cannot reactivate purged dataset'}
-    elif storestate == 'broken':
-        return {'state': 'error', 'error': 'Cannot reactivate dataset, files missing in backup storage'}
-    elif storestate in ['active-only', 'complete']:
-        return {'state': 'error', 'error': 'Dataset already in active storage'}
-    elif storestate == 'empty':
-        dset.deleted, dset.purged, dset.runname.experiment.project.active = False, False, True
-        dset.save()
-        dset.runname.experiment.project.save()
-        return {'state': 'ok', 'error': 'Empty dataset (contains no files) re-activated'}
-    elif storestate == 'cold':
-        dset.deleted, dset.purged, dset.runname.experiment.project.active = False, False, True
-        dset.save()
-        dset.runname.experiment.project.save()
-        tmpshare = filemodels.ServerShare.objects.get(name=settings.TMPSHARENAME)
-        buppath = os.path.join(settings.BACKUPPATH, str(dset.pk))
-        bupdss, _ = models.DatasetServer.objects.update_or_create(dataset=dset,
-                storageshare=tmpshare, defaults={'storage_loc': buppath,
-                    'active': True, 'storage_loc_ui': buppath},
-                create_defaults={'startdate': timezone.now()})
-        sfls = filemodels.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=dset,
-                sfile__mzmlfile__isnull=True, active=False, servershare__name=settings.TMPSHARENAME
-                )
-        filemodels.StoredFile.objects.filter(storedfileloc__in=sfls).update(deleted=False)
-        sflids = [x['pk'] for x in sfls.values('pk')]
-        sfls.update(path=buppath, active=True)
-        create_job('reactivate_dataset', dss_id=bupdss.pk, sfloc_ids=sflids)
-        return {'state': 'ok'}
+
+    storestate, _ = get_dset_storestate(dset.pk, dset.deleted)
+    if dset.deleted:
+        if storestate == 'purged':
+            return {'state': 'error', 'error': 'Cannot reactivate purged dataset'}
+        elif storestate == 'empty':
+            dset.deleted, dset.purged, dset.runname.experiment.project.active = False, False, True
+            dset.save()
+            dset.runname.experiment.project.save()
+            return {'state': 'ok', 'error': 'Empty dataset (contains no files) re-activated'}
+        elif storestate == 'cold':
+            dset.deleted, dset.purged, dset.runname.experiment.project.active = False, False, True
+            dset.save()
+            dset.runname.experiment.project.save()
+            # retrieve to inbox - a guaranteed sensitive data share on the backup controller
+            inbox_share = filemodels.ServerShare.objects.get(function=filemodels.ShareFunction.INBOX)
+            buppath = filemodels.ServerShare.get_inbox_path(dset_id=dset.pk)
+            bupdss, _ = models.DatasetServer.objects.update_or_create(dataset=dset,
+                    storageshare=inbox_share, defaults={'storage_loc': buppath,
+                        'active': True, 'storage_loc_ui': buppath},
+                    create_defaults={'startdate': timezone.now()})
+            sfls = filemodels.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=dset,
+                    sfile__mzmlfile__isnull=True, active=False, servershare=inbox_share)
+            filemodels.StoredFile.objects.filter(storedfileloc__in=sfls).update(deleted=False)
+            sflids = [x['pk'] for x in sfls.values('pk')]
+            sfls.update(path=buppath, active=True)
+            create_job('reactivate_dataset', dss_id=bupdss.pk, sfloc_ids=sflids)
+            return {'state': 'ok'}
+
+    else:
+        if storestate == 'broken':
+            return {'state': 'error', 'error': 'Cannot reactivate dataset, files missing in backup storage'}
+        elif storestate in ['active-only', 'complete']:
+            return {'state': 'error', 'error': 'Dataset already in active storage'}
+        elif storestate == 'empty':
+            dset.deleted, dset.purged, dset.runname.experiment.project.active = False, False, True
+            dset.save()
+            dset.runname.experiment.project.save()
+            return {'state': 'ok', 'error': 'Empty dataset (contains no files) re-activated'}
 
 
 @login_required
 def move_dataset_cold(request):
-    '''Calls archive_dataset (shared with project -> cold) to remove
+    '''Calls archive_and_delete_dataset (shared with project -> cold) to remove
     dataset from all active storage after (if needed) backing it up'''
     data = json.loads(request.body.decode('utf-8'))
     try:
@@ -1195,7 +1294,7 @@ def move_dataset_cold(request):
     if not check_ownership(request.user, dset.runname.experiment.project.ptype_id,
             dset.deleted, [x['user_id'] for x in dsownq.values('user_id')]):
         return JsonResponse({'error': 'Cannot archive dataset, no permission for user'}, status=403)
-    archived = archive_dataset(dset)
+    archived = archive_and_delete_dataset(dset)
     if archived['state'] == 'error':
         return JsonResponse(archived, status=500)
     else:
@@ -1226,7 +1325,7 @@ def move_dataset_active(request):
             models.UserPtype.objects.get(ptype_id=pt_id, user_id=request.user.id)
         except models.UserPtype.DoesNotExist:
             return JsonResponse({'error': 'Cannot reactivate dataset, no permission for user'}, status=403)
-    reactivated_msg = reactivate_dataset(dset)
+    reactivated_msg = reactivate_dataset(dset, data['storage_shares'])
     if reactivated_msg['state'] == 'error':
         return JsonResponse(reactivated_msg, status=500)
     else:
@@ -1245,9 +1344,9 @@ def delete_dataset_from_cold(dset):
     dset.save()
     # Also create delete active job just in case files are lying around
     # FIXME add check if active on primary share
-    create_job('delete_active_dataset', dset_id=dset.id)
+    create_job('remove_dset_files_servershare', dset_id=dset.id, sfloc_ids=[]) # FIXME dss, sfloc_ids
     create_job('delete_empty_directory', sf_ids=[x.id for x in filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=dset)])
-    storestate, _ = get_dset_storestate(dset.pk)
+    storestate, _ = get_dset_storestate(dset.pk, dset.deleted)
     if storestate != 'empty':
         create_job('delete_dataset_coldstorage', dset_id=dset.id)
     sfids = [sf.id for dsrf in dset.datasetrawfile_set.select_related('rawfile') for sf in dsrf.rawfile.storedfile_set.all()]
@@ -1548,7 +1647,7 @@ def find_files(request):
         subquery |= Q(producer__name__icontains=term)
         query &= subquery
     newfiles = filemodels.RawFile.objects.filter(query).filter(claimed=False,
-            storedfile__checked=True)
+            storedfile__checked=True, storedfile__storedfileloc__servershare__function=filemodels.INBOX)
     return JsonResponse({
         'newfn_order': [x.id for x in newfiles.order_by('-date')],
         'newFiles': {x.id:
@@ -1566,10 +1665,10 @@ def save_or_update_files(data, user_id):
     added_fnids = [x['id'] for x in data['added_files'].values()]
     removed_ids = [int(x['id']) for x in data['removed_files'].values()]
     dset = models.Dataset.objects.select_related('runname__experiment').get(pk=dset_id)
-    tmpshare = filemodels.ServerShare.objects.get(name=settings.TMPSHARENAME)
     alldss = dset.datasetserver_set.filter(active=True).values('pk', 'storageshare_id', 'storage_loc_ui')
     addsfl = filemodels.StoredFileLoc.objects.filter(sfile_id__in=added_fnids, sfile__checked=True,
-            servershare__name=settings.TMPSHARENAME)
+            servershare__function=filemodels.ShareFunction.INBOX)
+    # TODO what if addsfl files no longer on tmpshare? Need to retrieve from backup
     pre_addsfl = addsfl.filter(sfile__rawfile__claimed=False)
     rmsfl = filemodels.StoredFileLoc.objects.filter(sfile_id__in=removed_ids, sfile__checked=True,
             sfile__rawfile__claimed=True)
@@ -1578,8 +1677,9 @@ def save_or_update_files(data, user_id):
         # so not from another dataset/analysis etc.
         if len(added_fnids) > pre_addsfl.count():
             return {'error': 'Cannot find some of the files asked to store. They may have been '
-                    'added to another dataset while your browser window was opened. Contact admin '
-                    'in case you cant figure it out'}, 403
+                    'added to another dataset while your browser window was opened. They could '
+                    'also have been removed from the inbox share and may need to be retrieved '
+                    'from backup. Contact admin in case you cant figure it out'}, 403
         elif len(added_fnids) < pre_addsfl.count():
             return {'error': 'Something is wrong, added files are available but likely already exist '
                     'on multiple file servers. This should not happen, please contact admin'}, 403
@@ -1611,10 +1711,6 @@ def save_or_update_files(data, user_id):
                 message=f'User {user_id} added files {",".join([str(x) for x in added_fnids])} '
                 f'to dataset {dset_id}')
         filemodels.RawFile.objects.filter(storedfile__id__in=added_fnids).update(claimed=True)
-        for sfloc in addsfl.filter(purged=True):
-            # FIXME create backup jobs first
-            # create_job('restore_from_pdc_archive', sfloc_id=sfloc.pk)
-            pass
         for dss in alldss:
             # Error check already done above before any creation to be able to return 403
             # without side effects
@@ -1667,29 +1763,30 @@ def accept_or_reject_dset_preassoc_files(request):
     if len(data['rejected_files']):
         rejsfl = filemodels.StoredFileLoc.objects.filter(sfile_id__in=data['rejected_files'])
         rej_sflocs = [x['pk'] for x in rejsfl.values('pk')]
-        deleted = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare',
+        rsjobs = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare',
                 state=jj.Jobstates.HOLD, kwargs__dss_id__in=dss_ids,
-                kwargs__sfloc_ids__0__in=rej_sflocs, kwargs__dstsfloc_ids__0__in=rej_sflocs).delete()
-        if deleted:
+                kwargs__sfloc_ids__0__in=rej_sflocs, kwargs__dstsfloc_ids__0__in=rej_sflocs)
+        dstsfloc_ids = [x for j in rsjobs for x in j.kwargs['dstsfloc_ids']]
+        filemodels.StoredFileLoc.objects.filter(pk__in=dstsfloc_ids).update(active=False)
+        deleted = rsjobs.delete()
+        if deleted[0]:
             filemodels.RawFile.objects.filter(
                     storedfile__pk__in=data['rejected_files']).update(claimed=False)
-            rejsfl.update(active=False)
     # Now start jobs for accepted files
     if len(data['accepted_files']):
         acc_sflocs = filemodels.StoredFileLoc.objects.filter(sfile_id__in=data['accepted_files'])
         acc_sfloc_ids = [x['pk'] for x in acc_sflocs.values('pk')]
+        # FIXME what if acc_sflocs no longer on TMPSHARE because time deleted?
+        # Need to retrieve from backup!
+
         # Take advantage of the accepting files always only contain 1 file in the job,
         # as it is a result from classify_msrawfile
         accjobs = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare',
                 state=jj.Jobstates.HOLD, kwargs__dss_id__in=dss_ids,
                 kwargs__dstsfloc_ids__0__in=acc_sfloc_ids, kwargs__sfloc_ids__0__in=acc_sfloc_ids)
-        print(accjobs)
-        print(acc_sfloc_ids)
         acc_dstsfl_ids = []
         for accjob in accjobs:
             acc_dstsfl_ids.extend(accjob.kwargs['dstsfloc_ids'])
-        print(acc_dstsfl_ids)
-        print(acc_sflocs.filter(pk__in=acc_dstsfl_ids).update(active=True))
         accjobs.update(state=jj.Jobstates.PENDING)
         models.DatasetRawFile.objects.bulk_create([
             models.DatasetRawFile(dataset_id=data['dataset_id'], rawfile_id=x['rawfile_id'])
