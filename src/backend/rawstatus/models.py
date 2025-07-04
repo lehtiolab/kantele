@@ -111,8 +111,7 @@ class ServerShare(models.Model):
         else:
             return self.get_non_open_dset_path(project_id, dset_id)
 
-    def set_dset_storage_location(self, quantprot_id, project, exp, dset, dtype, prefrac, hiriefrange_id):
-        # FIXME adapt to multiple server shares
+    def set_dset_storage_location(self, quantprot_id, project, exp, dset, dtype, prefrac, hiriefrange):
         """
         Governs rules for storage path naming of datasets on "open" servershares.
         Project name is always top level, this is also used in 
@@ -122,9 +121,8 @@ class ServerShare(models.Model):
             subdir = ''
             if dtype.pk != quantprot_id:
                 subdir = dtype.name
-            if prefrac and hiriefrange_id:
-                subdir = os.path.join(subdir, models.HiriefRange.objects.get(
-                    pk=hiriefrange_id).get_path())
+            if prefrac and hiriefrange:
+                subdir = os.path.join(subdir, hiriefrange.get_path())
             elif prefrac:
                 subdir = os.path.join(subdir, prefrac.name)
             subdir = re.sub('[^a-zA-Z0-9_\-\/\.]', '_', subdir)

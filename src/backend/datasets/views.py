@@ -36,7 +36,7 @@ def get_dset_context(proj_id):
         'securityclasses': [{'id': x[0], 'name': x[1]} for x in models.DataSecurityClass.choices],
         'all_projects': {x.id: {'name': x.name, 'id': x.id} for x in models.Project.objects.filter(active=True)},
         'all_storlocs': {x.id: {'name': x.name, 'id': x.pk, 'description': x.description} for x in
-            filemodels.ServerShare.objects.filter(active=True, has_rawdata=True)}
+            filemodels.ServerShare.objects.filter(active=True, function=filemodels.ShareFunction.RAWDATA)}
         }
         }
 
@@ -53,15 +53,16 @@ def show_dataset(request, dataset_id):
     try:
         dset = models.Dataset.objects.filter(purged=False, pk=dataset_id).values('pk', 'deleted',
                 'runname__experiment__project_id', 'runname__experiment__project__ptype_id',
-                'securityclass').get()
+                'date', 'securityclass').get()
     except models.Dataset.DoesNotExist:
         return HttpResponseNotFound()
     dsown_ids = [x['user_id'] for x in models.DatasetOwner.objects.filter(dataset_id=dset['pk']).values('user_id')]
     is_owner = check_ownership(request.user, dset['runname__experiment__project__ptype_id'],
         dset['deleted'], dsown_ids)
     context = get_dset_context(dset['runname__experiment__project_id'])
-    context.update({'dataset_id': dataset_id, 'is_owner': json.dumps(is_owner),
-        'secclass': dset['securityclass']})
+    context.update({'dataset_id': dataset_id, 'is_owner': json.dumps(is_owner)})
+    context['initdata'].update({'secclass': dset['securityclass'],
+        'date': datetime.strftime(dset['date'], '%Y-%m-%d')})
     return render(request, 'datasets/dataset.html', context)
 
 
@@ -433,7 +434,7 @@ def update_dataset(data, user_id):
 
     dtype = models.Datatype.objects.get(pk=data['datatype_id'])
     prefrac = models.Prefractionation.objects.get(pk=data['prefrac_id']) if data['prefrac_id'] else False
-    hrrange_id = data['hiriefrange'] if 'hiriefrange' in data and data['hiriefrange'] else False
+    hrrange = models.HiriefRange.objects.get(pk=data['hiriefrange']) if data.get('hiriefrange', False) else False
     shares_q = filemodels.ServerShare.objects.filter(active=True, has_rawdata=True)
     alldsshares_q = models.DatasetServer.objects.filter(dataset=dset, active=True)
     existing_sfl = filemodels.StoredFileLoc.objects.filter(active=True,
@@ -451,7 +452,7 @@ def update_dataset(data, user_id):
                 'for this dataset'}, status=403)
         # Get new storage location if moving stuff, and path/file names for error check on storedfile
         new_storage_loc = share.set_dset_storage_location(qpid, project, experiment,
-                dset, dtype, prefrac, hrrange_id)
+                dset, dtype, prefrac, hrrange)
         err_fpath, err_fname = os.path.split(new_storage_loc)
         # dsshare_q already has shares that are active etc, through share
         dsshare_q = alldsshares_q.filter(storageshare=share)
@@ -853,7 +854,7 @@ def get_or_create_px_dset(exp, px_acc, user_id):
 def save_new_dataset(data, project, experiment, runname, user_id):
     dtype = models.Datatype.objects.get(pk=data['datatype_id'])
     prefrac = models.Prefractionation.objects.get(pk=data['prefrac_id']) if data['prefrac_id'] else False
-    hrrange_id = data['hiriefrange'] if 'hiriefrange' in data and data['hiriefrange'] else False
+    hrrange = models.HiriefRange.objects.get(pk=data['hiriefrange']) if data.get('hiriefrange', False) else False
     dset = models.Dataset.objects.create(date=timezone.now(), runname_id=runname.id,
             datatype=dtype, securityclass=data['secclass'])
     shares_q = filemodels.ServerShare.objects.filter(active=True, has_rawdata=True)
@@ -863,7 +864,7 @@ def save_new_dataset(data, project, experiment, runname, user_id):
         if shares_q.filter(pk=sshare_id).exists():
             share = shares_q.get(pk=sshare_id)
             storloc = share.set_dset_storage_location(qpid, project, experiment, dset,
-                    dtype, prefrac, hrrange_id)
+                    dtype, prefrac, hrrange)
             err_fpath, err_fname = os.path.split(storloc)
             other_dss = models.DatasetServer.objects.filter(
                     Q(storage_loc_ui=storloc) | Q(storage_loc=storloc), storageshare=share)
@@ -992,11 +993,11 @@ def merge_projects(request):
                 dset = runname.dataset
                 pfds = dset.prefractionationdataset if hasattr(dset, 'prefractionationdataset') else False
                 prefrac = pfds.prefractionation if pfds else False
-                hrrange_id = pfds.hiriefdataset.hirief_id if hasattr(pfds, 'hiriefdataset') else False
+                hrrange = pfds.hiriefdataset.hirief if hasattr(pfds, 'hiriefdataset') else False
                 for dss in models.DatasetServer.objects.filter(active=True, dataset=dset):
                     # Get new storage location if moving stuff, and path/file names for error check on storedfile
                     new_storage_loc = dss.storageshare.set_dset_storage_location(qpid,
-                            projs[0], exp, dset, dset.datatype, prefrac, hrrange_id)
+                            projs[0], exp, dset, dset.datatype, prefrac, hrrange)
 
                     err_fpath, err_fname = os.path.split(new_storage_loc)
                     # is_new_storloc is True if project is part of path, which is currently always

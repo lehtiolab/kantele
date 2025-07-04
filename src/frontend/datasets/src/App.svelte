@@ -33,6 +33,8 @@ let errors = {
 let saveerrors = Object.assign({}, errors);
 let comperrors = [];
 
+let dsdate = initdata.date;
+
 // Project info
 let project_id = initdata.proj_id;
 let project_name = initdata.name;
@@ -331,6 +333,10 @@ function showFiles() {
             <span class="has-text-danger">Locked datasets cannot be changed or receive files!</span>
             <button class="button is-small" on:click={lockDataset}>Lock dataset</button>
             {/if}
+            <div>
+              <span class="has-text-weight-bold">Creation date:</span>
+              <span>{dsdate}</span>
+            </div>
             <div>
               <span class="has-text-weight-bold">Project:</span>
               <span>{project_name}</span>
