@@ -155,6 +155,8 @@ class BaseTest(TestCase):
         self.f3dsr = dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=self.f3raw)
         self.f3sf = rm.StoredFile.objects.create(rawfile=self.f3raw, filename=fn3,
                 md5=self.f3raw.source_md5, filetype=self.ft, checked=True)
+        self.f3sssinbox = rm.StoredFileLoc.objects.create(sfile=self.f3sf, servershare=self.ssinbox,
+                path=settings.TMPPATH, active=False, purged=False)
         self.f3sss = rm.StoredFileLoc.objects.create(sfile=self.f3sf, servershare=self.ssnewstore,
                 path=self.storloc, active=True, purged=False)
         self.qcs = dm.QuantChannelSample.objects.create(dataset=self.ds, channel=self.qtch,

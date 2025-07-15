@@ -1225,8 +1225,7 @@ class TestArchiveDataset(BaseTest):
         dsfiles = rm.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=self.ds)
         dsfiles.filter(sfile__mzmlfile__isnull=False).delete()
         dsfiles.update(active=False)
-        rm.PDCBackedupFile.objects.bulk_create([rm.PDCBackedupFile(storedfile=sf.sfile, pdcpath=sf.sfile.md5,
-            success=True) for sf in dsfiles])
+        rm.PDCBackedupFile.objects.create(storedfile=self.f3sf, pdcpath=self.f3sf.md5, success=True)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.ds.pk})
         self.assertEqual(resp.status_code, 500)
@@ -1266,31 +1265,69 @@ class TestReactivateDataset(BaseTest):
 
         # Already active
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'item_id': self.ds.pk})
+                data={'item_id': self.ds.pk, 'storage_shares': []})
         self.assertEqual(resp.status_code, 500)
         self.assertEqual(resp.json()['error'], 'Dataset already in active storage')
 
     def test_ok(self):
         dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=self.tmpraw)
+        self.ds.deleted = True
+        self.ds.save()
+        self.dss.active = False
+        self.dss.save()
+        self.tmpsss.active = False
+        self.tmpsss.save()
+        tmpsss = rm.StoredFileLoc.objects.create(sfile=self.tmpsf, servershare=self.ssnewstore,
+                path='', active=True, purged=False)
         dsfiles = rm.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=self.ds)
         dsfiles.filter(sfile__mzmlfile__isnull=False).delete()
         dsfiles.update(active=False)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'item_id': self.ds.pk})
+                data={'item_id': self.ds.pk, 'storage_shares': [self.ssnewstore.pk]})
         self.assertEqual(resp.status_code, 500)
         self.assertEqual(resp.json()['error'], 'Cannot reactivate purged dataset')
 
-        rm.PDCBackedupFile.objects.bulk_create([rm.PDCBackedupFile(storedfile=sf.sfile, pdcpath=sf.sfile.md5,
-            success=True) for sf in dsfiles])
+        rm.PDCBackedupFile.objects.create(storedfile=self.f3sf, pdcpath=self.f3sf.md5, success=True)
+        rm.PDCBackedupFile.objects.create(storedfile=self.tmpsf, pdcpath=self.tmpsf.md5, success=True)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'item_id': self.ds.pk})
+                data={'item_id': self.ds.pk, 'storage_shares': [self.ssnewstore.pk]})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.ProjectLog.objects.last().message,
                 f'User {self.user.pk} reactivated dataset {self.ds.pk}')
 
+        jobs = jm.Job.objects.all()
+        jobs = jm.Job.objects.all().iterator()
+        bupjob = next(jobs)
+        self.assertEqual(bupjob.funcname, 'reactivate_dataset')
+        bupdss = dm.DatasetServer.objects.get(dataset=self.ds, storageshare=self.ssinbox)
+        self.assertEqual(bupjob.kwargs['dss_id'], bupdss.pk)
+        bupsfl = [self.f3sssinbox.pk, self.tmpsss.pk]
+        self.assertEqual(bupjob.kwargs['sfloc_ids'], bupsfl)
+
+        rsjob = next(jobs)
+        self.assertEqual(rsjob.funcname, 'rsync_dset_files_to_servershare')
+        self.assertEqual(rsjob.kwargs['dss_id'], self.dss.pk)
+        self.assertEqual(rsjob.kwargs['sfloc_ids'], bupsfl)
+        dstsfls = [x['pk'] for x in dsfiles.filter(servershare=self.ssnewstore).values('pk')]
+        self.assertEqual(sorted(rsjob.kwargs['dstsfloc_ids']), sorted(dstsfls))
+
+        rmjob = next(jobs)
+        self.assertEqual(rmjob.funcname, 'remove_dset_files_servershare')
+        dssinbox = dm.DatasetServer.objects.get(dataset=self.ds, storageshare=self.ssinbox)
+        self.assertEqual(rmjob.kwargs['dss_id'], dssinbox.pk)
+        self.assertEqual(rmjob.kwargs['sfloc_ids'], bupsfl)
+
+        self.ds.deleted = True
+        self.ds.save()
+        self.dss.active = False
+        self.dss.save()
+        self.tmpsss.active = False
+        self.tmpsss.save()
+        tmpsss.active = False
+        tmpsss.save()
         rm.PDCBackedupFile.objects.filter(storedfile=self.f3sf).delete()
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'item_id': self.ds.pk})
+                data={'item_id': self.ds.pk, 'storage_shares': [self.ssnewstore.pk]})
         self.assertEqual(resp.status_code, 500)
         self.assertEqual(resp.json()['error'], 'Cannot reactivate dataset, files missing in backup storage')
 
