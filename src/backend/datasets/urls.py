@@ -25,6 +25,7 @@ urlpatterns = [
     path('save/dataset/', views.save_dataset, name="savedset"),
     path('save/dataset/lock/', views.lock_dataset), 
     path('save/dataset/unlock/', views.unlock_dataset), 
+    path('save/storage/', views.save_storage_shares), 
     path('save/files/', views.save_files, name="savefiles"),
     path('save/files/pending/', views.accept_or_reject_dset_preassoc_files),
     path('save/mssampleprep/', views.save_ms_sampleprep),

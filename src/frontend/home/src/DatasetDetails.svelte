@@ -10,6 +10,7 @@ export let closeWindow;
 export let dsetIds;
 
 let refine_dbid;
+let new_storage_shares = {};
 
 let notif = {errors: {}, messages: {}};
 let dsets = {};
@@ -75,6 +76,7 @@ async function changeOwner(dsid, owner, op) {
 
 async function fetchDetails(dsetids) {
   let fetchedDsets = {}
+  let fetchedStorages = {}
   const tasks = dsetids.map(async dsetId => {
     const resp = await getJSON(`/show/dataset/${dsetId}`);
     if (!resp.ok) {
@@ -82,10 +84,12 @@ async function fetchDetails(dsetids) {
       showError(msg);
     } else {
       fetchedDsets[dsetId] = resp;
+      fetchedStorages[dsetId] = resp.storage_shares;
     }
   });
   const result = await Promise.all(tasks);
   dsets = Object.assign(dsets, fetchedDsets);
+  new_storage_shares = Object.assign({}, fetchedStorages);
 }
 
 function cleanFetchDetails(dsetids) {
@@ -98,6 +102,35 @@ function showError(error) {
   setTimeout(function(error) { notif.errors[error] = 0 } , flashtime, error);
 }
 
+async function reactivateDset(dsid, share_ids) {
+  const resp = await postJSON('datasets/undelete/dataset/', {
+    'dataset_id': dsid, 
+    'storage_shares': share_ids,
+    });
+  if (!resp.ok) {
+    const msg = `Something went wrong trying to change reactivate dataset: ${resp.error}`;
+    showError(msg);
+  } else {
+    fetchDetails([dsid]);
+  }
+}
+
+async function updateDsetStorage(dsid, share_ids) {
+  const resp = await postJSON('datasets/save/storage/', {
+    'dataset_id': dsid, 
+    'storage_shares': share_ids,
+    });
+  if (!resp.ok) {
+    const msg = `Something went wrong trying to change dataset storage: ${resp.error}`;
+    showError(msg);
+    fetchDetails([dsid]);
+  } else {
+    notif.messages[resp.msg] = 1;
+    setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg);
+    fetchDetails([dsid]);
+  }
+}
+
 
 onMount(async() => {
   cleanFetchDetails(dsetIds);
@@ -107,7 +140,20 @@ onMount(async() => {
 
 <DetailBox notif={notif} closeWindow={closeWindow}>
   {#each Object.entries(dsets) as [dsid, dset]}
-  <p><span class="has-text-weight-bold">Storage location:</span> {dset.storage_loc}</p>
+   <div class="has-text-weight-bold">Stored at:</div>
+    {#if dset.storage_shares.length}
+      <button class="button is-small" on:click={e => updateDsetStorage(dsid, new_storage_shares[dsid])}>Update storage</button>
+    {:else}
+      <button class="button is-small" on:click={e => reactivateDset(dsid, new_storage_shares[dsid])}>Reactivate</button>
+    {/if}
+    {#each Object.values(dset.all_storlocs) as loc}
+      <div class={`tag is-medium ${dset.storage_shares.indexOf(loc.id) > -1 ? 'is-success' : ''}`}>
+          <label class="checkbox">
+            <input value={loc.id} bind:group={new_storage_shares[dsid]} type="checkbox" />
+            {loc.name}
+        </label>
+      </div>
+    {/each}
   <hr>
   <div class="columns">
     <div class="column is-one-third">

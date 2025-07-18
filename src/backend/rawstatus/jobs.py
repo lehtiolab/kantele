@@ -353,12 +353,8 @@ class DeleteEmptyDirectory(MultiFileJob):
     task = tasks.delete_empty_dir
     queue = False
 
-    def check_error_on_creation(self, **kwargs):
-        if rm.StoredFileLoc.objects.filter(servershare_id=kwargs['share_id'], path=kwargs['path'],
-                active=True):
-            ssname = rm.ServerShare.objects.filter(pk=kwargs['share_id']).values('name').get()['name']
-            return f'Cannot create job to delete dir {kwargs["path"]} on {ssname}, there are files in it'
-
+    # Cannot check_error_on_creation because it is often called in a check_error dry run where
+    # files are not set to active=False
     def check_error_on_running(self, **kwargs):
         if rm.StoredFileLoc.objects.filter(servershare_id=kwargs['share_id'], path=kwargs['path'],
                 purged=False):

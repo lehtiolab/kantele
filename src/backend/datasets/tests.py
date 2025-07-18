@@ -23,7 +23,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
             'experiment_id': self.exp1.pk, 'runname': 'newrunname', 'secclass': 1,
             'datatype_id': self.dtype.pk, 'prefrac_id': False,
             'externalcontact': self.contact.email,
-            'storage_servers': [self.ssnewstore.pk]})
+            'storage_shares': [self.ssnewstore.pk]})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.RunName.objects.filter(name='newrunname').count(), 1)
         ds = dm.Dataset.objects.get(runname__name='newrunname', runname__experiment=self.exp1)
@@ -49,7 +49,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         resp = self.post_json(data={'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'newexperimentname': newexpname, 'runname': self.run1.name,
             'datatype_id': self.dtype.pk, 'prefrac_id': False,
-            'storage_servers': [self.ssnewstore.pk],
+            'storage_shares': [self.ssnewstore.pk],
             'secclass': 1, 'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.Experiment.objects.filter(name=newexpname).count(), 1)
@@ -77,7 +77,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         mvdsresp = self.post_json({'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'newexperimentname': newexpname, 'runname': self.run1.name, 
             'datatype_id': self.dtype.pk, 'prefrac_id': False,
-            'storage_servers': [self.ssnewstore.pk],
+            'storage_shares': [self.ssnewstore.pk],
             'secclass': 1, 'externalcontact': self.contact.email})
         self.assertEqual(mvdsresp.status_code, 200)
         rename_job = jm.Job.objects.filter(funcname='rename_dset_storage_loc').last()
@@ -128,7 +128,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         mvdsresp = self.post_json({'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'newexperimentname': newexpname, 'runname': self.run1.name,
             'datatype_id': self.dtype.pk, 'prefrac_id': False,
-            'storage_servers': [self.ssnewstore.pk],
+            'storage_shares': [self.ssnewstore.pk],
             'secclass': 1, 'externalcontact': self.contact.email})
         self.assertEqual(mvdsresp.status_code, 200)
         rename_job = jm.Job.objects.filter(funcname='rename_dset_storage_loc').last()
@@ -179,7 +179,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         resp = self.post_json(data={'dataset_id': False, 'project_id': self.p1.pk,
             'experiment_id': self.exp1.pk, 'runname': fname, 'datatype_id': self.dtype.pk,
             'secclass': 1, 'prefrac_id': False, 'externalcontact': self.contact.email,
-            'storage_servers': [self.ssnewstore.pk],
+            'storage_shares': [self.ssnewstore.pk],
             })
         self.assertEqual(resp.status_code, 403)
         self.assertIn('There is already a file with that exact path', resp.json()['error'])
@@ -190,7 +190,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         resp = self.post_json(data={'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'experiment_id': self.exp1.pk, 'runname': fname, 'datatype_id': self.dtype.pk,
             'prefrac_id': False, 'ptype_id': self.ptype.pk,
-            'storage_servers': [self.ssnewstore.pk],
+            'storage_shares': [self.ssnewstore.pk],
             'secclass': 1, 'externalcontact': self.contact.email})
         self.assertEqual(resp.status_code, 403)
         self.assertIn('There is already a file with that exact path', resp.json()['error'])
@@ -1247,7 +1247,7 @@ class TestReactivateDataset(BaseTest):
     url = '/datasets/undelete/dataset/'
 
     def test_fail(self):
-        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': False})
+        resp = self.cl.post(self.url, content_type='application/json', data={'dataset_id': False})
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(resp.json()['error'], 'Dataset does not exist')
 
@@ -1259,13 +1259,13 @@ class TestReactivateDataset(BaseTest):
                 storage_loc_ui='test', storageshare=self.ssnewstore, startdate=timezone.now())
         otheruser = User.objects.create(username='test', password='test')
         dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
-        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': ds.pk})
+        resp = self.cl.post(self.url, content_type='application/json', data={'dataset_id': ds.pk})
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(resp.json()['error'], 'Cannot reactivate dataset, no permission for user')
 
         # Already active
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'item_id': self.ds.pk, 'storage_shares': []})
+                data={'dataset_id': self.ds.pk, 'storage_shares': [self.ssnewstore.pk]})
         self.assertEqual(resp.status_code, 500)
         self.assertEqual(resp.json()['error'], 'Dataset already in active storage')
 
@@ -1283,14 +1283,14 @@ class TestReactivateDataset(BaseTest):
         dsfiles.filter(sfile__mzmlfile__isnull=False).delete()
         dsfiles.update(active=False)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'item_id': self.ds.pk, 'storage_shares': [self.ssnewstore.pk]})
+                data={'dataset_id': self.ds.pk, 'storage_shares': [self.ssnewstore.pk]})
         self.assertEqual(resp.status_code, 500)
         self.assertEqual(resp.json()['error'], 'Cannot reactivate purged dataset')
 
         rm.PDCBackedupFile.objects.create(storedfile=self.f3sf, pdcpath=self.f3sf.md5, success=True)
         rm.PDCBackedupFile.objects.create(storedfile=self.tmpsf, pdcpath=self.tmpsf.md5, success=True)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'item_id': self.ds.pk, 'storage_shares': [self.ssnewstore.pk]})
+                data={'dataset_id': self.ds.pk, 'storage_shares': [self.ssnewstore.pk]})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.ProjectLog.objects.last().message,
                 f'User {self.user.pk} reactivated dataset {self.ds.pk}')
@@ -1327,7 +1327,7 @@ class TestReactivateDataset(BaseTest):
         tmpsss.save()
         rm.PDCBackedupFile.objects.filter(storedfile=self.f3sf).delete()
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'item_id': self.ds.pk, 'storage_shares': [self.ssnewstore.pk]})
+                data={'dataset_id': self.ds.pk, 'storage_shares': [self.ssnewstore.pk]})
         self.assertEqual(resp.status_code, 500)
         self.assertEqual(resp.json()['error'], 'Cannot reactivate dataset, files missing in backup storage')
 

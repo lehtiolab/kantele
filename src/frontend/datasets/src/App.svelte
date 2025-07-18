@@ -213,7 +213,7 @@ async function save() {
       prefrac_amount: dsinfo.prefrac_amount,
       hiriefrange: dsinfo.hiriefrange,
       project_id: project_id,
-      storage_servers: dsinfo.storage_servers,
+      storage_shares: dsinfo.storage_shares,
     };
     if (isNewExperiment) {
       postdata.newexperimentname = dsinfo.newexperimentname;
@@ -352,7 +352,7 @@ function showFiles() {
             {#each Object.values(allstorlocs) as loc}
               <div class={`tag is-medium ${loc.id in dsinfo.storage_locations ? 'is-success' : ''}`}>
                   <label class="checkbox">
-                    <input value={loc.id} bind:group={dsinfo.storage_servers} on:change={editMade} type="checkbox" />
+                    <input value={loc.id} bind:group={dsinfo.storage_shares} on:change={editMade} type="checkbox" />
                     {loc.name}
                 </label>
               </div>
