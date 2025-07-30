@@ -57,7 +57,8 @@ class DataSecurityClass(models.IntegerChoices):
     # Go from lowest to highest classification
     NOSECURITY = 1, 'Not classified'
     # FIXME when ready, also have personal data dsets
-    # PERSONAL = 2, 'Personal data'
+    PERSONAL = 2, 'Personal data'
+    SENSITIVE = 3, 'Sensitive data'
 
 
 class FileServer(models.Model):

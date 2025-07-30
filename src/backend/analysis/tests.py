@@ -108,7 +108,7 @@ class AnalysisPageTest(BaseIntegrationTest):
         # Create analysis for isoquant:
         self.ana = am.Analysis.objects.create(user=self.user, name='testana_iso', storage_dir='testdir_iso')
         self.dsa = am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.ds)
-        self.anajob = jm.Job.objects.create(funcname='testjob', kwargs={}, state=jj.Jobstates.WAITING,
+        self.anajob = jm.Job.objects.create(funcname='testjob', kwargs={'fserver_id': self.anaserver.pk}, state=jj.Jobstates.WAITING,
                 timestamp=timezone.now())
         self.nfs = am.NextflowSearch.objects.create(analysis=self.ana, nfwfversionparamset=self.nfwf,
                 workflow=self.wf, token='tok123', job=self.anajob)
@@ -345,6 +345,7 @@ class TestGetAnalysis(AnalysisPageTest):
         html_dsids = f'''<script>
         let existing_analysis = JSON.parse(document.getElementById('analysis_data').textContent);
         const dbwfs = JSON.parse(document.getElementById('allwfs').textContent);
+        const allsecclasses = JSON.parse(document.getElementById('allsecclass').textContent);
         const initial_dsets = JSON.parse(document.getElementById('dsets').textContent);
         const allwfs = dbwfs.wfs;
         const wforder = dbwfs.order;
@@ -357,7 +358,7 @@ class TestGetAnalysis(AnalysisPageTest):
         self.assertInHTML(html_dsids, resphtml)
         self.isoqvals = {'denoms': {self.qch.pk: True}, 'sweep': False, 'report_intensity': False, 'remove': {}}
         html_ana = f'''<script id="analysis_data" type="application/json">
-        {{"analysis_id": {self.ana.pk}, "analysisname": "{self.ana.name}", "flags": [{self.param1.pk}], "multicheck": ["{self.param2.pk}___{self.anamcparam.value[0]}"], "inputparams": {{"{self.param3.pk}": {self.ananormparam.value}, "{self.param4.pk}": "{self.anaselectparam.value}"}}, "multifileparams": {{"{self.pfn1.pk}": {{"0": {self.tmpsf.pk}}}}}, "fileparams": {{"{self.pfn2.pk}": {self.txtsf.pk}}}, "isoquants": {{"{self.anaset.setname}": {{"chemistry": "{self.ds.quantdataset.quanttype.shortname}", "channels": {{"{self.qch.name}": ["{self.projsam1.sample}", {self.qch.pk}]}}, "samplegroups": {{"{self.samples.samples[0][0]}": "{self.samples.samples[0][3]}"}}, "denoms": {{"{self.qch.pk}": true}}, "remove": {{}}, "report_intensity": false, "sweep": false}}}}, "added_results": {{}}, "editable": true, "jobstate": "{self.anajob.state}", "external_desc": "", "wfversion_id": {self.nfwf.pk}, "wfid": {self.wf.pk}, "external_results": false, "base_analysis": {{}}}}
+        {{"analysis_id": {self.ana.pk}, "analysisname": "{self.ana.name}", "flags": [{self.param1.pk}], "multicheck": ["{self.param2.pk}___{self.anamcparam.value[0]}"], "inputparams": {{"{self.param3.pk}": {self.ananormparam.value}, "{self.param4.pk}": "{self.anaselectparam.value}"}}, "multifileparams": {{"{self.pfn1.pk}": {{"0": {self.tmpsf.pk}}}}}, "fileparams": {{"{self.pfn2.pk}": {self.txtsf.pk}}}, "isoquants": {{"{self.anaset.setname}": {{"chemistry": "{self.ds.quantdataset.quanttype.shortname}", "channels": {{"{self.qch.name}": ["{self.projsam1.sample}", {self.qch.pk}]}}, "samplegroups": {{"{self.samples.samples[0][0]}": "{self.samples.samples[0][3]}"}}, "denoms": {{"{self.qch.pk}": true}}, "remove": {{}}, "report_intensity": false, "sweep": false}}}}, "added_results": {{}}, "editable": true, "jobstate": "{self.anajob.state}", "external_desc": "", "wfversion_id": {self.nfwf.pk}, "wfid": {self.wf.pk}, "analysisserver_id": {self.anaserver.pk}, "external_results": false, "base_analysis": {{}}}}
         </script>
         '''
         self.assertInHTML(html_ana, resphtml)
@@ -435,13 +436,13 @@ class TestGetDatasetsIso(AnalysisPageTest):
                     'exp': self.ds.runname.experiment.name,
                     'run': self.ds.runname.name,
                     'dtype': self.ds.datatype.name,
+                    'secclass':  self.ds.securityclass.value,
                     'prefrac': False,
                     'hr': False,
                     'setname': '',
                     'locked': self.ds.locked,
                     'storage': f'{self.p1.name} - {self.exp1.name} - {self.dtype.name} - {self.run1.name}',
-                    'fields': {'fake': '', '__regex': am.PsetComponent.objects.get(pset=self.pset,
-                        component=am.PsetComponent.ComponentChoices.PREFRAC).value},
+                    'fields': {'fake': '', '__regex': ''},
                     'instruments': [self.prod.name],
                     'instrument_types': [self.prod.shortname],
                     'qtype': {'name': self.ds.quantdataset.quanttype.name,
@@ -459,6 +460,9 @@ class TestGetDatasetsIso(AnalysisPageTest):
                 'field_order': self.inputdef.value[-1:],
                 'error': False,
                 'errmsg': [],
+                'servers': [{'id': self.anaserver.pk, 'name': self.anaserver.name},
+                    {'id': self.remoteanaserver.pk, 'name': self.remoteanaserver.name}
+                    ]
                 }
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
 
@@ -473,6 +477,7 @@ class TestGetDatasetsIso(AnalysisPageTest):
                     'exp': self.ds.runname.experiment.name,
                     'run': self.ds.runname.name,
                     'dtype': self.ds.datatype.name,
+                    'secclass': self.ds.securityclass.value,
                     'prefrac': False,
                     'hr': False,
                     'setname': self.ads1.setname.setname,
@@ -496,6 +501,9 @@ class TestGetDatasetsIso(AnalysisPageTest):
                 'field_order': self.inputdef.value[-1:],
                 'error': False,
                 'errmsg': [],
+                'servers': [{'id': self.anaserver.pk, 'name': self.anaserver.name},
+                    {'id': self.remoteanaserver.pk, 'name': self.remoteanaserver.name}
+                    ],
                 }
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
 
@@ -504,6 +512,7 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
     url = '/analysis/dsets/'
 
     def test_new_ok(self):
+        # self.oldds has max security so not all servers
         resp = self.cl.get(f'{self.url}{self.nfwf.pk}/', data={'dsids': f'{self.oldds.pk}', 'anid': 0})
         self.assertEqual(resp.status_code, 200)
         mztype = f'mzML (pwiz {self.pwiz.version_description})'
@@ -514,13 +523,13 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
                     'exp': self.oldds.runname.experiment.name,
                     'run': self.oldds.runname.name,
                     'dtype': self.oldds.datatype.name,
+                    'secclass': self.oldds.securityclass.value,
                     'prefrac': False,
                     'hr': False,
                     'setname': '',
                     'locked': self.oldds.locked,
                     'storage': f'{self.oldp.name} - {self.oldexp.name} - {self.dtype.name} - {self.oldrun.name}',
-                    'fields': {'fake': '', '__regex': am.PsetComponent.objects.get(pset=self.pset,
-                        component=am.PsetComponent.ComponentChoices.PREFRAC).value},
+                    'fields': {'fake': '', '__regex': ''},
                     'instruments': [self.prod.name],
                     'instrument_types': [self.prod.shortname],
                     'qtype': {'name': self.oldds.quantdataset.quanttype.name,
@@ -537,11 +546,13 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
                 'field_order': self.inputdef.value[-1:],
                 'error': False,
                 'errmsg': [],
+                'servers': [{'id': self.remoteanaserver.pk, 'name': self.remoteanaserver.name}],
                 }
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
 
 
     def test_with_saved_analysis(self):
+        # self.oldds has max security so not all servers
         resp = self.cl.get(f'{self.url}{self.nfwf.pk}/', data={'dsids': f'{self.oldds.pk}', 'anid': self.analf.pk})
         self.assertEqual(resp.status_code, 200)
         mztype = f'mzML (pwiz {self.pwiz.version_description})'
@@ -552,13 +563,13 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
                     'exp': self.oldds.runname.experiment.name,
                     'run': self.oldds.runname.name,
                     'dtype': self.oldds.datatype.name,
+                    'secclass': self.oldds.securityclass.value,
                     'prefrac': False,
                     'hr': False,
                     'setname': '',
                     'locked': self.oldds.locked,
                     'storage': f'{self.oldp.name} - {self.oldexp.name} - {self.dtype.name} - {self.oldrun.name}',
-                    'fields': {'fake': '', '__regex': am.PsetComponent.objects.get(pset=self.pset,
-                        component=am.PsetComponent.ComponentChoices.PREFRAC).value},
+                    'fields': {'fake': '', '__regex': ''},
                     'instruments': [self.prod.name],
                     'instrument_types': [self.prod.shortname],
                     'qtype': {'name': self.oldds.quantdataset.quanttype.name,
@@ -575,6 +586,7 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
                 'field_order': self.inputdef.value[-1:],
                 'error': False,
                 'errmsg': [],
+                'servers': [{'id': self.remoteanaserver.pk, 'name': self.remoteanaserver.name}],
                 }
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
 
@@ -701,10 +713,9 @@ class TestStoreAnalysis(AnalysisPageTest):
                 'resultfiles': [],
                 },
             'wfid': self.wf.pk,
-            'fileserver_id': self.anaserver.pk,
+            'analysisserver_id': self.anaserver.pk,
             }
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
-        print(resp.json())
         timestamp = datetime.strftime(datetime.now(), '%Y%m%d_')
         self.assertEqual(resp.status_code, 200)
         ana = am.Analysis.objects.last()
@@ -726,7 +737,7 @@ class TestStoreAnalysis(AnalysisPageTest):
             self.assertEqual(ap.value, params[pt][ap.param_id])
         self.assertEqual(ana.name, postdata['analysisname'])
         self.assertEqual(ana.storage_dir, ana.get_public_output_dir())
-        checkjson = {'error': False, 'analysis_id': ana.pk, 'token': False}
+        checkjson = {'errmsg': False, 'multierror': [], 'analysis_id': ana.pk, 'token': False}
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
         self.cl.post('/analysis/start/', content_type='application/json',
                 data={'analysis_id': resp.json()['analysis_id']})
@@ -815,7 +826,7 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
                 'resultfiles': [],
                 },
             'wfid': self.wf.pk,
-            'fileserver_id': self.anaserver.pk,
+            'analysisserver_id': self.anaserver.pk,
             }
         prenow = datetime.now()
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
@@ -875,7 +886,7 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
               'platenames': {}, 'wfv_id': self.nfwf.pk}
 
         self.assertJSONEqual(json.dumps(self.anajob.kwargs), json.dumps(job_check_kwargs))
-        checkjson = {'error': False, 'analysis_id': self.ana.pk, 'token': False}
+        checkjson = {'errmsg': False, 'multierror': [], 'analysis_id': self.ana.pk, 'token': False}
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
         self.assertFalse(hasattr(self.ana, 'analysisbaseanalysis'))
 
@@ -924,13 +935,13 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
                 'resultfiles': [],
                 },
             'wfid': self.wf.pk,
-            'fileserver_id': self.anaserver.pk,
+            'analysisserver_id': self.anaserver.pk,
             }
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         timestamp = datetime.strftime(datetime.now(), '%Y%m%d_')
         self.assertEqual(resp.status_code, 400)
         self.assertIn(f'Dataset {self.oldds.pk} does not have its files available to the '
-                'selected analysis server', resp.json()['error'])
+                'selected analysis server', resp.json()['multierror'])
 
     def test_existing_analysis(self):
         c_ch = am.PsetComponent.ComponentChoices
@@ -970,7 +981,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
                 'resultfiles': [],
                 },
             'wfid': self.wf.pk,
-            'fileserver_id': self.anaserver.pk,
+            'analysisserver_id': self.anaserver.pk,
             }
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         timestamp = datetime.strftime(datetime.now(), '%Y%m%d_')
@@ -993,7 +1004,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         fullname = f'{self.analf.pk}_{self.wftype.name}_{self.analf.name}_{timestamp}'
         # This test flakes if executed right at midnight due to timestamp in assert string
         self.assertEqual(self.analf.storage_dir[:-5], f'{self.analf.user.username}/{fullname}'.replace(' ', '_'))
-        checkjson = {'error': False, 'analysis_id': self.analf.pk, 'token': False}
+        checkjson = {'errmsg': False, 'multierror': [], 'analysis_id': self.analf.pk, 'token': False}
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
         ba = am.AnalysisBaseanalysis.objects.get(analysis=self.analf)
         self.assertEqual(ba.base_analysis_id, self.ana.pk)
@@ -1052,12 +1063,12 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
                 'resultfiles': [],
                 },
             'wfid': self.wf.pk,
-            'fileserver_id': self.anaserver.pk,
+            'analysisserver_id': self.anaserver.pk,
             }
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 400)
         dsname = f'{self.ds.runname.experiment.project.name} / {self.ds.runname.experiment.name} / {newrun.name}'
-        err = resp.json()['error']
+        err = resp.json()['multierror']
         self.assertIn(f'File(s) or channels in dataset {dsname} do not have sample annotations, '
                 'please edit the dataset first', err)
         self.assertIn(f'No stored files exist for dataset {dsname}', err)
@@ -1087,7 +1098,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 400)
         dsname = f'{self.ds.runname.experiment.project.name} / {self.ds.runname.experiment.name} / {newrun.name}'
-        err = resp.json()['error']
+        err = resp.json()['multierror']
         self.assertIn(f'Files of type {picked_ft} are fewer than '
                 f'raw files, please fix - for dataset {dsname}', err)
 
@@ -1100,7 +1111,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 400)
         dsname = f'{self.ds.runname.experiment.project.name} / {self.ds.runname.experiment.name} / {newrun.name}'
-        err = resp.json()['error']
+        err = resp.json()['multierror']
         self.assertIn(f'Files of multiple datatypes exist in dataset {dsname}', err)
 
         # already running
@@ -1108,8 +1119,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         self.anajoblf.state = jj.Jobstates.PROCESSING
         self.anajoblf.save()
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
-        err = resp.json()['error']
-        self.assertEqual(resp.json(), {'error': 'This analysis has a running or queued job, '
+        self.assertEqual(resp.json(), {'multierror': [], 'errmsg': 'This analysis has a running or queued job, '
             'it cannot be edited, please stop the job first'})
         self.assertEqual(resp.status_code, 403)
 
@@ -1118,8 +1128,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         self.anajoblf.save()
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 403)
-        err = resp.json()['error']
-        self.assertEqual(resp.json(), {'error': 'This analysis has already finished running, '
+        self.assertEqual(resp.json(), {'multierror': [], 'errmsg': 'This analysis has already finished running, '
             'it cannot be edited'})
 
         # No permission
@@ -1129,15 +1138,14 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         postdata['analysis_id'] = self.ana.pk
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 403)
-        err = resp.json()['error']
-        self.assertEqual(resp.json(), {'error': 'You do not have permission to edit this analysis'})
+        self.assertEqual(resp.json(), {'multierror': [], 'errmsg': 'You do not have permission to edit this analysis'})
         
         # Locked dataset
         newds.locked = False
         newds.save()
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json(), {'error': 'Only locked datasets can be analyzed'})
+        self.assertEqual(resp.json(), {'multierror': [], 'errmsg': 'Only locked datasets can be analyzed'})
 
 
 class TestDeleteAnalysis(BaseTest):

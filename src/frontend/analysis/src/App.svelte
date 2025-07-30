@@ -27,8 +27,10 @@ let resfn_arr = [];
 let resultfiles = {}
 let resultfnorder = [];
 let field_order = [];
+let avail_servers = [];
 let dsnames = initial_dsets.names;
 let dslocked = initial_dsets.locks;
+let dssec = initial_dsets.secclasses;
 
 let base_analysis = {
   isComplement: false,
@@ -87,6 +89,7 @@ function updateResultfiles() {
 let config = {
   wfid: false,
   wfversion: false,
+  analysisserver_id: false,
   analysisname: '',
   editable: true,
   external_results: false,
@@ -202,6 +205,7 @@ async function storeAnalysis() {
     wfid: config.wfid,
     nfwfvid: config.wfversion.id || false,
     analysisname: config.analysisname,
+    analysisserver_id: config.analysisserver_id,
     // Most params are {param.id: value, param2.id: value}, but multicheck
     // is checkboxes and is thus {param.id: [value1.id, value2.id]}
     params: {
@@ -234,16 +238,12 @@ async function storeAnalysis() {
    
   // Post the payload
   if (!Object.entries(notif.errors).filter(([k,v]) => v).length) {
-    msg = `Storing analysis for ${config.analysisname}`;
-    notif.messages[msg] = 1;
-    setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg);
     const resp = await postJSON('/analysis/store/', post);
-    if (resp.error.length) {
-      let msg = 'Errors found, please fix and try again';
-      notif.errors[msg] = 1;
-      resp.error.forEach(msg => {
-        notif.errors[msg] = 1;
-      });
+    if (!resp.ok) {
+      // Errors found:
+      for (let errmsg of [resp.errmsg, ...resp.multierror]) {
+        notif.errors[errmsg] = 1;
+      }
       if ('files_nods' in resp) {
         // Dsets have been changed while editing analysis
         const files_nodset = new Set(resp.files_nods);
@@ -382,12 +382,14 @@ async function fetchDatasetDetails(fetchdsids) {
       dsets[x].changed = false;
       dsnames[x] = dsets[x].storage;
       dslocked[x] = dsets[x].locked;
+      dssec[x] = dsets[x].secclass;
       });
     Object.keys(dsets).forEach(x => {
       dsets[x].changed = false;
     })
     Object.entries(dsets).filter(x=>x[1].prefrac).forEach(x=>matchFractions(dsets[x[0]]));
     field_order = result.field_order;
+    avail_servers = result.servers;
   }
 }
 
@@ -642,6 +644,7 @@ async function populate_analysis_and_fetch_wf() {
   // Only runs in onMount
   if (existing_analysis.wfid) {
     config.wfid = existing_analysis.wfid;
+    config.analysisserver_id = existing_analysis.analysisserver_id;
     if (existing_analysis.wfid in allwfs) {
       config.wfversion = allwfs[existing_analysis.wfid].versions.filter(
         x => x.id === existing_analysis.wfversion_id)[0];
@@ -803,19 +806,28 @@ onMount(async() => {
   <div class="box">
     <h5 class="title is-5">Datasets selected</h5>
     <DynamicSelect placeholder='Find dataset to add' bind:selectval={dsetToAdd} on:selectedvalue={addDataset} niceName={x => x.name} fetchUrl="/analysis/find/datasets/" />
-    <div class="tags">
+    <div class="field is-grouped is-grouped-multiline">
     {#each Object.entries(dsnames) as [dsid, name]}
-      {#if dslocked[dsid]}
+      <span class="tags has-addons">
+      {#if !(dsid in dslocked)}
+      <span class="tag is-medium">
+        {name}
+        <button class="delete is-small" on:click={e => removeDataset(dsid)}></button>
+      </span>
+      {:else if dslocked[dsid]}
+      <span class="tag is-medium">Security: {allsecclasses[dssec[dsid]]}</span>
       <span class="tag is-medium is-info">
         {name}
         <button class="delete is-small" on:click={e => removeDataset(dsid)}></button>
       </span>
       {:else}
+      <span class="tag is-medium">Security: {allsecclasses[dssec[dsid]]}</span>
       <span class="tag is-medium is-warning">
         {name} (not locked)
         <button class="delete is-small" on:click={e => removeDataset(dsid)}></button>
       </span>
       {/if}
+      </span>
     {/each}
     {#if !Object.entries(dsnames).length}
     No datasets selected
@@ -854,6 +866,21 @@ onMount(async() => {
               <option value={wfv}>{wfv.date} -- {wfv.name}</option>
               {/each}
               {/if}
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="field-label is-normal">
+        <label class="label">Analysis server:</label>
+      </div>
+      <div class="field-body">
+        <div class="field">
+          <div class="select">
+            <select bind:value={config.analysisserver_id}>
+              <option disabled value={false}>Select analysis server</option>
+              {#each avail_servers as {id, name}}
+              <option value={id}>{name}</option>
+              {/each}
             </select>
           </div>
         </div>

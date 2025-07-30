@@ -88,7 +88,7 @@ class BaseTest(TestCase):
                 fqdn='analysis_ssh_2', can_rsync_remote=False, is_analysis=True, rsyncusername='kantele',
                 rsynckeyfile='/kantelessh/rsync_key')
         self.analocalstor = rm.ServerShare.objects.create(name='analocalstor',
-                max_security=1, function=rm.ShareFunction.RAWDATA)
+                max_security=max(rm.DataSecurityClass), function=rm.ShareFunction.RAWDATA)
         self.ssanaruns2 = rm.ServerShare.objects.create(name='analysisruns2', max_security=1,
                 function=rm.ShareFunction.NFRUNS)
         self.nfrunshare2 = rm.FileserverShare.objects.create(server=self.remoteanaserver,
@@ -134,7 +134,7 @@ class BaseTest(TestCase):
         self.run1, _ = dm.RunName.objects.get_or_create(name='run1', experiment=self.exp1)
         self.storloc = os.path.join(self.p1.name, self.exp1.name, self.dtype.name, self.run1.name)
         self.ds = dm.Dataset.objects.create(date=self.p1.registered, runname=self.run1,
-                datatype=self.dtype, securityclass=max(rm.DataSecurityClass))
+                datatype=self.dtype, securityclass=min(rm.DataSecurityClass))
         self.dss = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.ssnewstore,
                 storage_loc_ui=self.storloc, storage_loc=self.storloc, startdate=timezone.now())
         dm.DatasetComponentState.objects.create(dataset=self.ds, state=dm.DCStates.OK, dtcomp=self.dtcompfiles)
