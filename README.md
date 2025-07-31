@@ -85,6 +85,29 @@ docker compose exec db createdb -U postgres kantele
 docker compose exec db psql -U postgres -d kantele -f /pgbackups/file_with_dump.sql
 ```
 
+Upgrading postgres major version, first set the old and new version in `src/docker/postgres-update-compose.yml`,
+adjust the paths to the data dir in those (likely different in production),
+then do the following (first shutdown application to prevent writes):
+```
+# Backup data:
+mv path/to/data/db path/to/data/olddb
+# Start postgres container with old version:
+docker compose -f src/docker/postgres-update-compose.yml --env-file .env up olddb
+# Create a dump:
+docker compose -f src/docker/postgres-update-compose.yml --env-file .env exec olddb pg_dumpall -U postgres > dumpold.sql
+# Stop old container, inspect dump file, then start new:
+docker compose -f src/docker/postgres-update-compose.yml --env-file .env up newdb
+# Load old dump in new container (`-T` is to disable tty so we can pipe the local dump file:
+docker compose -f src/docker/postgres-update-compose.yml --env-file .env exec -T newdb psql -U postgres < dumpold.sql    
+
+When going from postgres 14 to 15 or higher you will also need to add:
+docker compose -f src/docker/postgres-update-compose.yml --env-file .env exec -T db psql -U postgres -d kantele
+GRANT ALL ON SCHEMA public TO kanteleuser; 
+# Somehow in testing my migrations after this crash with "no permission" until I do it again
+# in the same compose environment as the migrations, which is weird since the web UI runs fine
+```
+
+
 ## Testing
 
 To run the Django tests (python unittests):
