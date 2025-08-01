@@ -127,9 +127,10 @@ class DatasetServer(models.Model):
     # updated by the UI immediately
     storage_loc = models.TextField()
     storage_loc_ui = models.TextField()
-    # Keep track of when dataset was on storage (start set when instantiated, and when 
-    # files added/removed), for expiry reasons, and log
+    # Keep track of when dataset was on storage (startdate when instantiated, last_date_used
+    # and when files added/removed, used in analysis), for log or expiry reasons
     startdate = models.DateTimeField()
+    last_date_used = models.DateTimeField(auto_now=True)
     # Active is an intention field, so when set to False, dataset will be deleted soon
     # So views can use it in order to know if their next job will work there.
     active = models.BooleanField(default=True)

@@ -95,10 +95,10 @@ class ServerShare(models.Model):
     description = models.TextField()
     active = models.BooleanField(default=True)
     function = models.IntegerField(choices=ShareFunction.choices)
+    maxdays_data = models.IntegerField(default=0, help_text='How many days after inactive files are'
+            'deleted from the share, 0 means inifinite')
     # This may become obsolete in the future but is needed now
     has_rawdata = models.BooleanField(default=True)
-    # 0 is no expiry date
-    maxdays_data = models.IntegerField(default=0)
 
     def __str__(self):
         return self.name
@@ -226,6 +226,10 @@ class StoredFileLoc(models.Model):
     sfile = models.ForeignKey(StoredFile, on_delete=models.CASCADE)
     servershare = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
     active = models.BooleanField(default=True)
+    # Auto_now, so whenever model changes this is set
+    # this is for auto-deletion, to see ho long a file has been on a server
+    # Path renames also affect this, so we wont change path in all servers
+    last_date_used = models.DateTimeField(auto_now=True)
 
     # Fields below are current status, i.e. they are updated after a job
     path = models.TextField()

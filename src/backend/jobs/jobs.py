@@ -1,6 +1,7 @@
 import requests
 
 from celery import states
+from django.utils import timezone
 
 from kantele import settings
 from jobs.models import Task, Job, JobError
@@ -95,6 +96,17 @@ class BaseJob:
     def getfiles_query(self, **kwargs):
         return self.oncreate_getfiles_query(**kwargs).filter(purged=False)
 
+    def update_sourcefns_lastused(self, **kwargs):
+        '''Updating last_date_used timestamps on SFLoc and DSS.
+        This gets called when creating a job (to make sure files arent deleted between
+        creation and running), and when running the job (to make a later timestamp in case of
+        long waiting times'''
+        self.oncreate_getfiles_query(**kwargs).update(last_date_used=timezone.now())
+        rm.StoredFileLoc.objects.filter(pk__in=self._get_extrafiles_to_rsync(**kwargs)).update(
+                last_date_used=timezone.now())
+        dm.DatasetServer.objects.filter(pk__in=self.get_dss_ids(**kwargs)).update(
+                last_date_used=timezone.now())
+
     def on_create_addkwargs(self, **kwargs):
         return {}
 
@@ -159,8 +171,12 @@ class BaseJob:
     def get_dsids_jobrunner(self, **kwargs):
         return []
 
+    def get_dss_ids(self, **kwargs):
+        return []
+
     def run(self, **kwargs):
         self.process(**kwargs)
+        self.update_sourcefns_lastused(**kwargs)
         self.queue_tasks()
 
     def post(self):
@@ -257,6 +273,9 @@ class DatasetJob(BaseJob):
     def get_dsids_jobrunner(self, **kwargs):
         return [x.pk for x in dm.Dataset.objects.filter(datasetserver__pk=kwargs['dss_id'])]
 
+    def get_dss_ids(self, **kwargs):
+        return [kwargs['dss_id']]
+
     def get_rf_ids_for_filejobs(self, **kwargs):
         '''Let runner wait for entire dataset'''
         dss = dm.DatasetServer.objects.get(pk=kwargs['dss_id'])
@@ -280,6 +299,9 @@ class DatasetJob(BaseJob):
 
 class MultiDatasetJob(BaseJob):
     '''For jobs on multiple datasets'''
+
+    def get_dss_ids(self, **kwargs):
+        return kwargs['dss_ids']
 
     def get_rf_ids_for_filejobs(self, **kwargs):
         '''Let runner wait for entire datasets'''
