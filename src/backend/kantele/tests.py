@@ -53,7 +53,7 @@ class BaseTest(TestCase):
         self.anaserver = rm.FileServer.objects.create(name='analysis1', uri='ana.test',
                 fqdn='analysis_ssh_1', is_analysis=True, rsyncusername='kantele', rsynckeyfile='/kantelessh/rsync_key')
         self.ssinbox = rm.ServerShare.objects.create(name='inbox', max_security=2,
-                function=rm.ShareFunction.INBOX)
+                function=rm.ShareFunction.INBOX, maxdays_data=1)
         self.sslib = rm.ServerShare.objects.create(name='libshare', max_security=1,
                 function=rm.ShareFunction.LIBRARY)
         self.inboxctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
@@ -77,20 +77,20 @@ class BaseTest(TestCase):
                 path=os.path.join(self.rootdir, 'analysis'))
         # web share without a controller
         self.ssweb = rm.ServerShare.objects.create(name='reportswebshare', max_security=1,
-                function=rm.ShareFunction.REPORTS)
+                function=rm.ShareFunction.REPORTS, maxdays_data=1)
 
         self.ssanaruns = rm.ServerShare.objects.create(name='analysisruns', max_security=1,
-                function=rm.ShareFunction.NFRUNS)
+                function=rm.ShareFunction.ANALYSISRESULTS, maxdays_data=1)
         self.nfrunshare = rm.FileserverShare.objects.create(server=self.anaserver,
                 share=self.ssanaruns, path=os.path.join(self.rootdir, 'nf_runs'))
 
         self.remoteanaserver = rm.FileServer.objects.create(name='analysis2', uri='s0.test',
                 fqdn='analysis_ssh_2', can_rsync_remote=False, is_analysis=True, rsyncusername='kantele',
                 rsynckeyfile='/kantelessh/rsync_key')
-        self.analocalstor = rm.ServerShare.objects.create(name='analocalstor',
-                max_security=max(rm.DataSecurityClass), function=rm.ShareFunction.RAWDATA)
+        self.analocalstor = rm.ServerShare.objects.create(name='analocalstor', active=True,
+                max_security=max(rm.DataSecurityClass), function=rm.ShareFunction.RAWDATA, maxdays_data=1)
         self.ssanaruns2 = rm.ServerShare.objects.create(name='analysisruns2', max_security=1,
-                function=rm.ShareFunction.NFRUNS)
+                function=rm.ShareFunction.ANALYSISRESULTS, maxdays_data=1)
         self.nfrunshare2 = rm.FileserverShare.objects.create(server=self.remoteanaserver,
                 share=self.ssanaruns2, path=os.path.join(self.rootdir, 'nf_runs2'))
         self.oldstorctrl = rm.FileserverShare.objects.create(server=self.remoteanaserver,

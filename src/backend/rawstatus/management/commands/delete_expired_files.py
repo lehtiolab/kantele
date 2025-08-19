@@ -36,9 +36,9 @@ class Command(BaseCommand):
                     # Dss does not need to "have all dset files" (maybe previously it has been
                     # half-deleted), but files-to-remove must all have backed up file
                     dssrmsfl_ids = [x['pk'] for x in dssrmsfl.values('pk')]
-                    nr_dsssfl = dssrmsfl.update(active=False)
                     create_job('remove_dset_files_servershare', dss_id=dss_exp['pk'],
                             sfloc_ids=dssrmsfl_ids)
+                    nr_dsssfl = dssrmsfl.update(active=False)
                     dss_nr = dss_exps.filter(pk=dss_exp['pk']).update(active=False)
                     print(f'Queued expired dss {dss_exp["pk"]} from dset {dss_exp["dataset_id"]} '
                         f'with {nr_dsssfl} files on share {share.name} for deletion')
@@ -78,16 +78,17 @@ class Command(BaseCommand):
             # get analysis_id, max_date of last_used in analysis share files
             exp_ana = share_ana_fns.values('sfile__analysisresultfile__analysis_id').filter(
                     last_date_used__lt=timezone.now() - timedelta(days=share.maxdays_data))
-            rm_ana_ids = [x['sfile__analysisresultfile__analysis_id'] for x in exp_ana]
+            rm_ana_ids = {x['sfile__analysisresultfile__analysis_id'] for x in exp_ana}
             all_rm_anas.update(rm_ana_ids)
             # if file is shared between two analyses, of which only one has expired, 
             # make sure the file doesnt get deleted!
             pre_multiana_fns = share_ana_fns.filter(
                     sfile__analysisresultfile__analysis_id__in=rm_ana_ids)
-            notrm_ids = [x['sfile__analysisresultfile__analysis_id'] for x in 
-                    pre_multiana_fns.values('sfile__analysisresultfile__analysis_id').filter(
-                    last_date_used__gt=timezone.now() - timedelta(days=1) * F('servershare__maxdays_data'))]
-            if rm_ana_sfl := pre_multiana_fns.exclude(sfile__analysisresultfile__analysis_id__in=notrm_ids):
+            notrm_ana = am.Analysis.objects.filter(
+                    analysisresultfile__sfile__storedfileloc__id__in=pre_multiana_fns.filter(
+                        last_date_used__gt=timezone.now() - timedelta(days=share.maxdays_data))
+                    ).exclude(pk__in=rm_ana_ids)
+            if rm_ana_sfl := pre_multiana_fns.exclude(sfile__analysisresultfile__analysis__in=notrm_ana):
                 for chunk in chunk_iter(rm_ana_sfl.values('pk'), 100):
                     rm_ana_pks = [x['pk'] for x in chunk]
                     create_job('purge_files', sfloc_ids=rm_ana_pks)

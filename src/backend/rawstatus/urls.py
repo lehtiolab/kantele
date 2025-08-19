@@ -12,7 +12,6 @@ urlpatterns = [
    path('transfer/', views.transfer_file, name='transfer'),
    path('transferstate/', views.get_files_transferstate, name='reg_trfstate'),
    path('rename/', views.rename_file),
-   path('cleanup/', views.cleanup_old_files),
    path('external/scan/', views.scan_raws_tmp),
    path('external/import/', views.import_external_data),
    path('archive/', views.archive_file),
