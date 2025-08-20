@@ -218,7 +218,8 @@ def register_external_file(request):
 
 @require_POST
 def downloaded_file(request):
-    '''When files are downloaded in a job this can clean up afterwards
+    '''When files are downloaded from web upload
+    in a job this can clean up afterwards
     '''
     data = json.loads(request.body.decode('utf-8'))
     if 'client_id' not in data or not taskclient_authorized(
@@ -302,55 +303,6 @@ def store_longitudinal_qc(request):
             return JsonResponse(storeresult, status=400)
     if 'task' in data:
         set_task_done(data['task'])
-    return HttpResponse()
-
-
-@require_POST
-def confirm_internal_file(request):
-    """Stores the reporting of a transferred analysis result file,
-    and of downloaded uniprot files, checks its md5"""
-    data =  json.loads(request.POST['json'])
-    upload = UploadToken.validate_token(data['token'], [])
-    if not upload:
-        return HttpResponseForbidden()
-    dstshare = ServerShare.objects.get(name=data['dstsharename'])
-
-    # Reruns lead to trying to store files multiple times, avoid that here:
-    sfile, created = StoredFile.objects.get_or_create(rawfile_id=data['fn_id'], md5=data['md5'],
-            defaults={'filetype_id': upload.filetype_id, 'checked': True, 'filename': data['filename']})
-    sfloc, _ = StoredFileLoc.objects.get_or_create(sfile=sfile, servershare=dstshare, path=data['outdir'])
-    if data['analysis_id'] and created:
-        am.AnalysisResultFile.objects.create(analysis_id=data['analysis_id'], sfile=sfile)
-    elif data['is_fasta'] and created:
-        fa = data['is_fasta']
-        # set fasta download files
-        libfile = am.LibraryFile.objects.create(sfile=sfile, description=fa['desc'])
-        dbmodel = {'uniprot': am.UniProtFasta, 'ensembl': am.EnsemblFasta}[fa['dbname']]
-        kwargs = {'version': fa['version'], 'libfile_id': libfile.id, 'organism': fa['organism']}
-        subtype = False
-        if fa['dbname'] == 'uniprot':
-            subtype = am.UniProtFasta.UniprotClass[fa['dbtype']]
-            kwargs['dbtype'] = subtype
-        dbmodel.objects.create(**kwargs)
-
-    # Also store any potential servable file on share on web server
-    if data['filename'] in settings.SERVABLE_FILENAMES and request.FILES:
-        # FIXME web files are not currently tracked by an sfloc (or previously by an sf)
-        #webshare = ServerShare.objects.get(name=settings.WEBSHARENAME)
-        #srvfile, _cr = StoredFileLoc.objects.get_or_create(sfile=sfile, servershare=webshare, path=data['outdir'])
-        srvpath = os.path.join(settings.WEBSHARE, sfloc.path)
-        srvdst = os.path.join(srvpath, sfile.filename)
-        try:
-            os.makedirs(srvpath, exist_ok=True)
-        except FileExistsError:
-            pass
-        with NamedTemporaryFile(mode='wb+') as fp:
-            for chunk in request.FILES['ana_file']:
-                fp.write(chunk)
-            fp.flush()
-            os.fsync(fp.fileno())
-            shutil.copy(fp.name, srvdst)
-            os.chmod(srvdst, 0o644)
     return HttpResponse()
 
 

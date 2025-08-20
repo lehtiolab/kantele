@@ -93,24 +93,3 @@ def rename_dset_storage_location(self, sharepath, srcpath, dstpath, sfloc_ids, d
     except RuntimeError:
         # FIXME cannot move back shutil.move(dst, src)
         raise
-
-
-@shared_task(bind=True)
-def move_stored_file_tmp(self, sharename, fn, path, sfloc_id):
-    src = os.path.join(settings.SHAREMAP[sharename], path, fn)
-    dst = os.path.join(settings.TMPSHARE, fn)
-    print(f'Moving stored file {sfloc_id} to tmp')
-    try:
-        shutil.move(src, dst)
-    except Exception:
-        taskfail_update_db(self.request.id)
-        raise
-    postdata = {'sfloc_id': sfloc_id, 'servershare': settings.TMPSHARENAME,
-                'dst_path': '', 'client_id': settings.APIKEY,
-                'task': self.request.id}
-    url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
-    try:
-        update_db(url, json=postdata)
-    except RuntimeError:
-        shutil.move(dst, src)
-        raise

@@ -108,6 +108,8 @@ class BaseJob:
                 last_date_used=timezone.now())
 
     def on_create_addkwargs(self, **kwargs):
+        # FIXME we could have a create(, **kw) function that calls addkwargs,
+        # maybe sets sfloc to active, etc, and creates the actual job in Dfor ana_id in B
         return {}
 
     def _get_extrafiles_to_rsync(self, **kwargs):
@@ -203,7 +205,7 @@ class BaseJob:
                 queue = self.queue
             else:
                 args, queue = runtask
-            print(f'Queuing task for job {self.job_id} to queue {queue}')
+            print(f'Queueing task for job {self.job_id} to queue {queue}')
             tid = self.task.apply_async(args=args, queue=queue)
             self.create_db_task(tid, *args)
 
@@ -213,11 +215,6 @@ class BaseJob:
 
 class SingleFileJob(BaseJob):
     '''Job class for any job which specifies a single file on a share (so an StoredFileLoc).
-
-    QC, PDC, Rename, Classify, rsyncFileTtransfer (for http uploads)
-    
-    deprecate?:
-    move_single
     '''
 
     def oncreate_getfiles_query(self, **kwargs):
@@ -232,12 +229,6 @@ class SingleFileJob(BaseJob):
 
 class MultiFileJob(BaseJob):
     '''Job class to specify any job on a number of files on a specific share.
-    Jobs:
-    - Run NF analysis
-    - Purge analysis
-    - Purge files
-    - Delete empty dir
-    - Register external file
     '''
     def oncreate_getfiles_query(self, **kwargs):
         return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'])
@@ -253,21 +244,6 @@ class DatasetJob(BaseJob):
     We include add/remove etc since the jobrunner will wait for the entire dataset file operations
     then, not only for the files-to-be-added, which is good since otherwise you could start
     an analysis on the dataset without those files, for example.
-
-    Jobs:
-    With servershare:
-    - refine mzml
-    - rename storloc
-    - move dset servershare (rsync)
-    - mzml convert
-    - backup
-    - retrieve
-
-    Without servershare (all ss)
-    - add/rm files 
-    - delete mzml
-    - delete dset
-    - delete backup
     '''
 
     def get_dsids_jobrunner(self, **kwargs):
@@ -278,9 +254,8 @@ class DatasetJob(BaseJob):
 
     def get_rf_ids_for_filejobs(self, **kwargs):
         '''Let runner wait for entire dataset'''
-        dss = dm.DatasetServer.objects.get(pk=kwargs['dss_id'])
         return [x['pk'] for x in RawFile.objects.filter(
-            datasetrawfile__dataset__datasetserver=dss).values('pk')]
+            datasetrawfile__dataset__datasetserver__id=kwargs['dss_id']).values('pk')]
 
     def oncreate_getfiles_query(self, **kwargs):
         '''Get all files which had a datasetrawfile association when this job was created/retried,
@@ -298,7 +273,7 @@ class DatasetJob(BaseJob):
 
 
 class MultiDatasetJob(BaseJob):
-    '''For jobs on multiple datasets'''
+    '''For jobs on multiple datasets, currently NF search job'''
 
     def get_dss_ids(self, **kwargs):
         return kwargs['dss_ids']
@@ -312,17 +287,3 @@ class MultiDatasetJob(BaseJob):
     def oncreate_getfiles_query(self, **kwargs):
         '''As for dataset job'''
         return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'])
-
-
-class ProjectJob(BaseJob):
-    '''There is only one ProjectJob and it is RenameProject - maybe change to MultiFile?
-    '''
-    def get_dsids_jobrunner(self, **kwargs):
-        return [x.pk for x in dm.Dataset.objects.filter(deleted=False, purged=False,
-            runname__experiment__project_id=kwargs['proj_id'])]
-
-    def oncreate_getfiles_query(self, **kwargs):
-        '''Get all files with same path as project_dsets.storage_locs, used to update
-        path of those files post-job'''
-        return StoredFileLoc.objects.filter(sfile__deleted=False,
-                sfile__rawfile__datasetrawfile__dataset__runname__experiment__project_id=kwargs['proj_id'])

@@ -34,11 +34,6 @@ class RsyncOtherFileServershare(SingleFileJob):
     def get_dsids_jobrunner(self, **kwargs):
         return []
 
-    def get_rf_ids_for_filejobs(self, **kwargs):
-        """This is run before running job, to define files used by
-        the job (so it cant run if if files are in use by other job)"""
-        return [x['sfile__rawfile_id'] for x in self.oncreate_getfiles_query(**kwargs).values('sfile__rawfile_id')]
-
     def on_create_addkwargs(self, **kwargs):
         '''Create destination sfloc db rows'''
         if kwargs.get('dstsfloc_id', False):
@@ -104,10 +99,10 @@ class RsyncOtherFileServershare(SingleFileJob):
         if singleserver := rm.FileServer.objects.filter(fileservershare__share=kwargs['dstshare_id']
                 ).filter(fileservershare__share=srcsfl['servershare_id'], can_rsync_remote=True):
             # Try to get both shares from same server, rsync can skip SSH then
-            srcserver = rm.FileserverShare.objects.filter(server_id__in=singleserver,
+            srcserver = rm.FileserverShare.objects.filter(server__in=singleserver,
                     share=srcsfl['servershare_id']
                     ).values('server__fqdn', 'server__name', 'path').first()
-            dstserver = rm.FileserverShare.objects.filter(server_id__in=singleserver,
+            dstserver = rm.FileserverShare.objects.filter(server__in=singleserver,
                     share=kwargs['dstshare_id']
                     ).values('server__fqdn', 'server__name', 'path').first()
             src_user = dst_user = rskey = False
@@ -168,6 +163,8 @@ class RemoveFilesFromServershare(RemoveDatasetFilesFromServershare):
 
 
 class RsyncFileTransferFromWeb(SingleFileJob):
+    '''Here the sfloc_id is the destination file'''
+
     refname = 'rsync_transfer_fromweb'
     task = tasks.rsync_transfer_file_web
     queue = settings.QUEUE_WEB_RSYNC
@@ -210,7 +207,8 @@ class CreatePDCArchive(SingleFileJob):
 
 
 class RestoreFromPDC(SingleFileJob):
-    '''For restoring files which are not in a dataset'''
+    '''For restoring files which are not in a dataset, sfloc_id is the destination
+    '''
     refname = 'restore_from_pdc_archive'
     task = tasks.pdc_restore
     queue = settings.QUEUE_BACKUP
@@ -309,45 +307,9 @@ class ClassifyMSRawFile(SingleFileJob):
             fss['path'], sfloc['path'], sfloc['sfile__filename']))
 
 
-class MoveSingleFile(SingleFileJob):
-    '''Move file from one share/path to another. Technically the same as rename, as you can
-    also specify a new filename, but this job is not exposed to the user, and only used
-    internally for moving files to a predestined path (i.e. incoming mzML, QC raw files, library etc'''
-    refname = 'move_single_file'
-    task = dstasks.move_file_storage
-    queue = settings.QUEUE_STORAGE
-
-    def check_error(self, **kwargs):
-        '''Check for file name collisions'''
-        src_sfloc = self.getfiles_query(**kwargs)
-        if dstsharename := kwargs.get('dstsharename'):
-            sshare = rm.ServerShare.objects.filter(name=dstsharename).get()
-        else:
-            sshare = src_sfloc.servershare
-        newfn = kwargs.get('newname', src_sfloc.sfile.filename)
-        fullnewpath = os.path.join(kwargs['dst_path'], newfn)
-        if rm.StoredFileLoc.objects.filter(sfile__filename=newfn, path=kwargs['dst_path'],
-                servershare=sshare, sfile__deleted=False, purged=False).exists():
-            return (f'A file in path {kwargs["dst_path"]} with name {src_sfloc.sfile.filename} '
-                    'already exists. Please choose another name.')
-        elif dm.Dataset.objects.filter(storage_loc=fullnewpath, storageshare=sshare,
-                deleted=False, purged=False).exists():
-            return f'A dataset with the same directory name as your new file location {fullnewpath} already exists'
-        else:
-            return False
-
-    def process(self, **kwargs):
-        sfloc = self.getfiles_query(**kwargs)
-        taskkwargs = {x: kwargs[x] for x in ['newname'] if x in kwargs}
-        dstsharename = kwargs.get('dstsharename') or sfloc.servershare.name
-        self.run_tasks.append(((
-            sfloc.sfile.filename, sfloc.servershare.name,
-            sfloc.path, kwargs['dst_path'], sfloc.pk, dstsharename), taskkwargs))
-
-
 class DeleteEmptyDirectory(MultiFileJob):
     """Check first if all the sfids are set to purged, indicating the dir is actually empty.
-    Then queue a task. The sfids also make this job dependent on other jobs on those, as in
+    Then queue a task. The sflids also make this job dependent on other jobs on those, as in
     the file-purging tasks before this directory deletion"""
     refname = 'delete_empty_directory'
     task = tasks.delete_empty_dir

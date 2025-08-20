@@ -271,9 +271,13 @@ class Analysis(models.Model):
     name = models.TextField()
     log = models.JSONField(default=list)
     deleted = models.BooleanField(default=False)
+    # FIXME purged lost its meaning now? w sfl in multi location
     purged = models.BooleanField(default=False)
     storage_dir = models.TextField()
     editable = models.BooleanField(default=True)
+    #  to make sure that we dont accidentally put sens output on a public server
+    # using rsync
+    #securityclass = models.IntegerField(choices=dsmodels.DataSecurityClass.choices)
 
     def get_fullname(self, wftype=False):
         if wftype:

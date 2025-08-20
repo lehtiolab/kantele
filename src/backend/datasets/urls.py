@@ -39,7 +39,7 @@ urlpatterns = [
     path('archive/dataset/', views.move_dataset_cold),
     path('archive/project/', views.move_project_cold),
     path('undelete/dataset/', views.move_dataset_active),
-    path('undelete/project/', views.move_project_active),
+    #path('undelete/project/', views.move_project_active),
     path('purge/project/', views.purge_project),
     path('purge/dataset/', views.purge_dataset),
 ]

@@ -102,16 +102,15 @@ class BaseTest(TestCase):
         self.samtype1, _ = dm.SampleMaterialType.objects.get_or_create(name='sampletype1')
         self.samtype2, _ = dm.SampleMaterialType.objects.get_or_create(name='sampletype2')
 
-
         # Datasets/projects prep
         self.species = dm.Species.objects.create(linnean='Homo sapiens', popname='Human')
-        self.dtype, _ = dm.Datatype.objects.get_or_create(name='dtype1')
+        self.dtype = dm.Datatype.objects.create(name='dtype1')
         self.dtcompdef = dm.DatatypeComponent.objects.create(datatype=self.dtype, component=dm.DatasetUIComponent.DEFINITION)
         self.dtcompfiles = dm.DatatypeComponent.objects.create(datatype=self.dtype, component=dm.DatasetUIComponent.FILES)
         self.dtcompsamples = dm.DatatypeComponent.objects.create(datatype=self.dtype, component=dm.DatasetUIComponent.SAMPLES)
         qdt, _ = dm.Datatype.objects.get_or_create(name='Quantitative proteomics')
-        self.ptype, _ = dm.ProjectTypeName.objects.get_or_create(name='testpt')
-        self.pi, _ = dm.PrincipalInvestigator.objects.get_or_create(name='testpi')
+        self.ptype = dm.ProjectTypeName.objects.create(name='testpt')
+        self.pi = dm.PrincipalInvestigator.objects.create(name='testpi')
 
         # File prep, producers etc
         self.ft = rm.StoredFileType.objects.create(name='testft_bruker', filetype='tst',
@@ -127,11 +126,11 @@ class BaseTest(TestCase):
 
         # Project/dset on new storage
         self.p1 = dm.Project.objects.create(name='p1', pi=self.pi, ptype=self.ptype)
-        self.projsam1, _ = dm.ProjectSample.objects.get_or_create(sample='sample1', project=self.p1)
+        self.projsam1 = dm.ProjectSample.objects.create(sample='sample1', project=self.p1)
         dm.SampleMaterial.objects.create(sample=self.projsam1, sampletype=self.samtype1)
         dm.SampleSpecies.objects.create(sample=self.projsam1, species=self.spec1)
-        self.exp1, _ = dm.Experiment.objects.get_or_create(name='e1', project=self.p1)
-        self.run1, _ = dm.RunName.objects.get_or_create(name='run1', experiment=self.exp1)
+        self.exp1 = dm.Experiment.objects.create(name='e1', project=self.p1)
+        self.run1 = dm.RunName.objects.create(name='run1', experiment=self.exp1)
         self.storloc = os.path.join(self.p1.name, self.exp1.name, self.dtype.name, self.run1.name)
         self.ds = dm.Dataset.objects.create(date=self.p1.registered, runname=self.run1,
                 datatype=self.dtype, securityclass=min(rm.DataSecurityClass))
@@ -182,11 +181,11 @@ class BaseTest(TestCase):
         # Project/dataset/files on old storage
         oldfn = 'raw1'
         self.oldp = dm.Project.objects.create(name='oldp', pi=self.pi, ptype=self.ptype)
-        self.projsam2, _ = dm.ProjectSample.objects.get_or_create(sample='sample2', project=self.oldp)
+        self.projsam2 = dm.ProjectSample.objects.create(sample='sample2', project=self.oldp)
         dm.SampleMaterial.objects.create(sample=self.projsam2, sampletype=self.samtype2)
         dm.SampleSpecies.objects.create(sample=self.projsam2, species=self.spec2)
-        self.oldexp, _ = dm.Experiment.objects.get_or_create(name='olde', project=self.oldp)
-        self.oldrun, _ = dm.RunName.objects.get_or_create(name='run1', experiment=self.oldexp)
+        self.oldexp = dm.Experiment.objects.create(name='olde', project=self.oldp)
+        self.oldrun = dm.RunName.objects.create(name='run1', experiment=self.oldexp)
         self.oldstorloc = os.path.join(self.oldp.name, self.oldexp.name, self.oldrun.name)
         self.oldds = dm.Dataset.objects.create(date=self.oldp.registered, runname=self.oldrun,
                 datatype=self.dtype, securityclass=max(rm.DataSecurityClass)) 
@@ -209,7 +208,7 @@ class BaseTest(TestCase):
                 path=self.oldstorloc, active=True, purged=False)
         self.oldqsf = dm.QuantSampleFile.objects.create(rawfile=self.olddsr, projsample=self.projsam2)
 
-        # Tmp rawfile
+        # Tmp rawfile inbox
         tmpfn = 'raw2'
         tmpfpathfn = os.path.join(self.inboxctrl.path, tmpfn)
         tmpsize = os.path.getsize(tmpfpathfn)
@@ -285,37 +284,3 @@ class BaseIntegrationTest(LiveServerTestCase):
         '''Call run jobs, then sleep to make tasks do their work'''
         call_command('runjobs')
         sleep(self.jobrun_timeout)
-
-
-#class TestMultiStorageServers(BaseIntegrationTest):
-#    # TODO revive this test and edit it maybe when we start with multiple servers
-#
-#    def test_add_newtmp_files_to_old_dset(self):
-#        # Fresh start in case multiple tests
-#        url = '/datasets/save/files/'
-#        postdata = {'dataset_id': self.oldds.pk, 'added_files': {'fn2': {'id': self.tmpraw.pk}}, 'removed_files': {}}
-#        resp = self.cl.post(url, content_type='application/json', data=postdata)
-#        self.assertEqual(resp.status_code, 200)
-#        self.assertTrue(os.path.exists(self.oldfpath))
-#        newdsr = dm.DatasetRawFile.objects.filter(dataset=self.oldds, rawfile=self.tmpraw)
-#        self.assertEqual(newdsr.count(), 1)
-#        self.tmpraw.refresh_from_db()
-#        self.assertTrue(self.tmpraw.claimed)
-#        # call job runner to run rsync
-#        self.run_job()
-#        newdspath = os.path.join(settings.SHAREMAP[self.ssnewstore.name], self.oldstorloc)
-#        self.assertTrue(os.path.exists(os.path.join(newdspath, self.oldsf.filename)))
-#        self.oldsss.refresh_from_db()
-#        self.assertEqual(self.oldsss.servershare_id, self.ssnewstore.pk)
-#        self.oldds.refresh_from_db()
-#        self.assertEqual(self.oldds.storageshare_id, self.ssnewstore.pk)
-#        # Check if move file tmp to newstorage has waited for the rsync job
-#        self.assertFalse(os.path.exists(os.path.join(newdspath, self.tmpsf.filename)))
-#        self.tmpsss.refresh_from_db()
-#        self.assertEqual(self.tmpsss.path, '')
-#        self.assertEqual(self.tmpsss.servershare_id, self.sstmp.pk)
-#        self.run_job()
-#        self.assertTrue(os.path.exists(os.path.join(newdspath, self.tmpsf.filename)))
-#        self.tmpsss.refresh_from_db()
-#        self.assertEqual(self.tmpsss.servershare_id, self.ssnewstore.pk)
-#        self.assertEqual(self.tmpsss.path, self.oldds.storage_loc)

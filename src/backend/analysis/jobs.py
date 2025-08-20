@@ -9,14 +9,11 @@ from django.db.models import Q
 from kantele import settings
 from analysis import tasks, models
 from rawstatus import models as rm
-from rawstatus import tasks as filetasks
 from datasets import models as dm
 from datasets.jobs import get_or_create_mzmlentry
-from jobs.jobs import DatasetJob, SingleFileJob, BaseJob, MultiDatasetJob, MultiFileJob
-from jobs import models as jm
+from jobs.jobs import DatasetJob, SingleFileJob, BaseJob, MultiDatasetJob
 
-# TODO
-# rerun qc data and displaying qcdata for a given qc file, how? 
+
 class DownloadFastaFromRepos(BaseJob):
     '''Checks ENSEMBL and uniprot if they have new versions of fasta proteome databases 
     that we havent downloaded  yet. If so, queue tasks'''
@@ -50,7 +47,7 @@ class RefineMzmls(DatasetJob):
         # Pick any server capable:
         anaserver = rm.FileServer.objects.filter(fileservershare__share_id=dss['storageshare_id'],
                 is_analysis=True).first()
-        analocalshare = rm.FileserverShare.objects.filter(share__function=rm.ShareFunction.NFRUNS,
+        analocalshare = rm.FileserverShare.objects.filter(share__function=rm.ShareFunction.ANALYSISRESULTS,
                 server=anaserver).values('share_id', 'path').first()
         anasrcshareonserver = rm.FileserverShare.objects.filter(server=anaserver,
                 share_id=dss['storageshare_id']).values('path').first()
@@ -76,6 +73,10 @@ class RefineMzmls(DatasetJob):
 
     def process(self, **kwargs):
         """Return all a dset mzMLs but not those that have a refined mzML associated, to not do extra work."""
+        # TODO can we pass share_id instead of server id to task? for result register
+        # or do we not know which share output will be put on?? NF RUNDIR should be in db
+        # otherwise we cannot register!
+
         dss = dm.DatasetServer.objects.values('storage_loc').get(pk=kwargs['dss_id'])
         anaserver = rm.FileServer.objects.get(pk=kwargs['server_id'])
         self.queue = self.get_server_based_queue(anaserver.name, settings.QUEUE_NXF)
@@ -267,8 +268,6 @@ class RunNextflowWorkflow(MultiDatasetJob):
                 fserver.fileservershare_set.values('share_id', 'path')}
         stagefiles = {}
         for flag, sfid in kwargs['inputs']['singlefiles'].items():
-            #stagefiles = {'--tdb': [(os.path.join(sharemap[dbfn['servershare_id']], dbfn['path']),
-            #    dbfn['sfile__filename'])]}
             sfl_q = rm.StoredFileLoc.objects.filter(sfile_id=sfid,
                     servershare__fileservershare__server_id=kwargs['fserver_id'], active=True).values(
                             'servershare_id', 'path', 'sfile__filename')
@@ -376,9 +375,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
                 # Dynamic fields
                 infile.update(kwargs['filefields'].get(str(fn['sfile_id']), {}))
                 infiles.append(infile)
-        # FIXME bigrun not hardcode, probably need to remove when new infra
         shortname = models.UserWorkflow.WFTypeChoices(analysis.nextflowsearch.workflow.wftype).name
-        bigrun = shortname == 'PISEP' or len(infiles) > 500
 
         # COMPLEMENT/RERUN component:
         # Add base analysis stuff if it is complement and fractionated (if not it has only been used
@@ -409,7 +406,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
         # RunID is probably only used in a couple of pipelines but it's nice to use "our" analysis ID here
         # and needs to be coupled here, cannot have user make it
         params.extend(['--name', 'RUNNAME__PLACEHOLDER', '--runid', f'run_{analysis.pk}'])
-        self.run_tasks.append((run, params, {}, stagefiles, ','.join(profiles), nfwf.nfversion, fserver.scratchdir))
+        self.run_tasks.append((run, params, stagefiles, ','.join(profiles), nfwf.nfversion, fserver.scratchdir))
 
         analysis.log.append('[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S')))
         analysis.save()

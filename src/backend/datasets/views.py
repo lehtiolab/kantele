@@ -389,7 +389,6 @@ def update_dataset(data, user_id):
     # one method per update (exp, proj, dset) - but that will create unneccessary move
     # operations. But since it's a rename, it will be short, and usually not all of them
     # change at the same time.
-    # Thus: its time to do "new dset", "new proj" in the excel table view!
     dset = models.Dataset.objects.filter(pk=data['dataset_id']).select_related(
         'runname__experiment__project', 'datatype').get()
     project = models.Project.objects.get(pk=data['project_id'])
@@ -533,8 +532,8 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
             # If a path was updated, and files are in it that are not marked as (future) deleted,
             # we do a rename job. If no dss_sflocs exist for that share, we need to rsync them there
             dsshare_upds.append((share, {'storage_loc_ui': new_storage_loc, 'active': True}))
-            # Can do .get() since dsshare is Unique per dset/share
             if is_new_storloc and dsshare_q.exists():
+                # Can do .get() since dsshare is Unique per dset/share
                 dss = dsshare_q.get()
                 renamesfl = [x['pk'] for x in 
                         existing_sfl.filter(servershare=dss.storageshare).values('pk')]
@@ -574,6 +573,7 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
 
     # Update/create remaining shares
     dss_shares = {}
+
     for share, upd_defaults in dsshare_upds:
         dss, _cr = models.DatasetServer.objects.update_or_create(dataset=dset, storageshare=share,
                 defaults=upd_defaults, create_defaults={**upd_defaults, 'startdate': timezone.now(),
@@ -591,7 +591,6 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
     # Create rsync jobs to new storage shares if needed
     if rsync_jobs:
         pre_alldss = alldss_q.filter(pk__in=pre_alldss_pks)
-        # FIXME went  home
         rsync_dss = pre_alldss.filter(storageshare__fileservershare__server__can_rsync_remote=True)
         if rsync_dss.exists():
             # we have a dss local on an rsync server
@@ -642,7 +641,7 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
                         'This should not happen, please inform admin (copy paste this message)!'})
 
 
-        # Filter on storage_servers to avoid those which have been deleted from
+        # Filter on storage_shares to avoid those which have been deleted from
         srcdss = get_source_dss_for_transfers(alldss_q.filter(storageshare_id__in=share_ids))
         for dstshare in rsync_jobs:
             src_sfloc_ids = [x['pk'] for x in filemodels.StoredFileLoc.objects.filter(
@@ -773,40 +772,6 @@ def get_quantprot_id():
     return models.Datatype.objects.get(name__icontains='quantitative').id
 
 
-def rename_storage_loc_toplvl(newprojname, oldpath):
-    """Put this method here, used in post-job view renamed_project.
-    This is a good place since its functionality is tied to
-    the set_storage_location method
-    """
-    # Using .split(pathsep) because os.path.split only removes leaf,
-    # we need the first/root dir of the path
-    return os.path.join(newprojname, *oldpath.split(os.path.sep)[1:])
-
-
-def set_storage_location(project, exp, runname, dtype, prefrac, hiriefrange_id):
-    """
-    Governs rules for storage path naming of datasets.
-    Project name is always top level, this is also used in 
-    rename_storage_loc_toplvl
-    """
-    quantprot_id = get_quantprot_id()
-    subdir = ''
-    if dtype.pk != quantprot_id:
-        subdir = dtype.name
-    if prefrac and hiriefrange_id:
-        subdir = os.path.join(subdir, models.HiriefRange.objects.get(
-            pk=hiriefrange_id).get_path())
-    elif prefrac:
-        subdir = os.path.join(prefrac.name)
-    subdir = re.sub('[^a-zA-Z0-9_\-\/\.]', '_', subdir)
-    if len(subdir):
-        subdir = '/{}'.format(subdir)
-    if dtype.id in settings.LC_DTYPE_IDS:
-        return os.path.join(project.name, exp.name, str(runname.id))
-    else:
-        return '{}/{}{}/{}'.format(project.name, exp.name, subdir, runname.name)
-
-
 @login_required
 def change_owners(request):
     data = json.loads(request.body.decode('utf-8'))
@@ -904,7 +869,7 @@ def get_or_create_px_dset(exp, px_acc, user_id):
 
 
 def save_new_dataset(data, project, experiment, runname, user_id):
-    if not len(data['storage_shares']):
+    if not len(data.get('storage_shares', [])):
         raise IntegrityError('A dataset must at least have one active storage share, otherwise '
                 'you may retire the dataset instead')
     dtype = models.Datatype.objects.get(pk=data['datatype_id'])
@@ -1119,6 +1084,13 @@ def rename_project(request):
 
 @login_required
 def move_project_active(request):
+    # This endpoint is disabled in URLs
+    # FIXME This method should only be for admin, need to decouple 
+    # - I have to send these raw files somewhere / reanalyze
+    # - I'm going to edit the datasets
+    # Data should always be avail to reanalyze (e.g. on sens server) until purge from backup
+    # This should be fixed when doing the new raw file setup (avail on analysis server, etc)
+
     data = json.loads(request.body.decode('utf-8'))
     if 'item_id' not in data or not data['item_id']:
         return JsonResponse({'state': 'error', 'error': 'No project specified for reactivating'}, status=400)
@@ -1150,7 +1122,7 @@ def move_project_active(request):
 
 @login_required
 def purge_project(request):
-    """Deletes project datasets (not analyses) from disk, only leaving backup copies."""
+    """Deletes project datasets (not analyses) from disk, AND BACKUP!"""
     data = json.loads(request.body.decode('utf-8'))
     if 'item_id' not in data or not data['item_id']:
         return JsonResponse({'state': 'error', 'error': 'No project specified for reactivating'}, status=400)
@@ -1779,6 +1751,8 @@ def save_or_update_files(data, user_id):
         for dss in alldss:
             dssrmsfl = [x['pk'] for x in rmsfl.filter(servershare_id=dss['storageshare_id']).values('pk')]
             if len(dssrmsfl):
+                # TODO maybe first rsync them back to tmpshare, in case
+                # they are "released"
                 create_job('remove_dset_files_servershare', dss_id=dss['pk'], sfloc_ids=dssrmsfl)
         rmsfl.update(active=False)
         models.DatasetRawFile.objects.filter(
@@ -1807,6 +1781,7 @@ def save_or_update_files(data, user_id):
 
 @login_required
 def accept_or_reject_dset_preassoc_files(request):
+    # FIXME handle errors in classified function!
     data = json.loads(request.body.decode('utf-8'))
     user_denied, status = check_save_permission(data['dataset_id'], request.user)
     if user_denied:

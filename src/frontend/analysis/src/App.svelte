@@ -897,14 +897,14 @@ onMount(async() => {
     {#if wf && 'COMPLEMENT_ANALYSIS' in wf.components && base_analysis.selected}
     <div class="checkbox">
       {#if base_analysis.dsets_identical}
-      <input type="checkbox" bind:checked={base_analysis.runFromPSM}>
       <label class="checkbox">
+      <input type="checkbox" bind:checked={base_analysis.runFromPSM}>
         Re-analyze previous analysis from PSM table, skipping identification steps
       </label>
       <a title="For output changes post-PSM table, e.g. for changes in quantification only. Any changes to fractions, input datasets, modifications etc will be ignored. For this to work you may not change set names."><i class="fa fa-question-circle"></i></a>
       {:else}
-      <input type="checkbox" bind:checked={base_analysis.isComplement}>
       <label class="checkbox">
+      <input type="checkbox" bind:checked={base_analysis.isComplement}>
         Complement previous analysis with new or re-run sets (with replaced or extra raw data)
       </label>
       <a title="Skips parts of analysis already run, faster output"><i class="fa fa-question-circle"></i></a>
@@ -942,8 +942,9 @@ onMount(async() => {
 		<div class="columns">
 		  <div class="column">
         {#if !ds.prefrac && !ds.qtype.is_isobaric}
-        <input type="checkbox" bind:checked={ds.allfilessamesample}>
-        <label class="checkbox">Same sample in each file in the dataset</label>
+        <label class="checkbox">Same sample in each file in the dataset
+          <input type="checkbox" bind:checked={ds.allfilessamesample}>
+        </label>
         {/if}
         {#if ds.allfilessamesample}
 			  <div class="field">
@@ -1041,8 +1042,9 @@ onMount(async() => {
       {#if 'ISOQUANT_SAMPLETABLE' in wf.components}
         {#if !Object.values(isoq[1].denoms).some(x=>x)}
         <div class="field">
+          <label class="checkbox">
           <input type="checkbox" bind:checked={isoq[1].sweep}>
-          <label class="checkbox">Use median sweeping (no predefined denominators)
+            Use median sweeping (no predefined denominators)
             <span class="icon is-small">
               <a title="Pick median denominator per PSM, only for single-set analyses"><i class="fa fa-question-circle"></i></a>
             </span>
@@ -1052,8 +1054,9 @@ onMount(async() => {
 
         {#if !isoq[1].sweep && !Object.values(isoq[1].denoms).some(x=>x)}
         <div class="field">
-          <input type="checkbox" bind:checked={isoq[1].report_intensity}>
-          <label class="checkbox">Report isobaric ion intensities instead of ratios
+          <label class="checkbox">
+            <input type="checkbox" bind:checked={isoq[1].report_intensity}>
+            Report isobaric ion intensities instead of ratios
             <span class="icon is-small">
               <a title="Reports median intensity rather than fold changes, not for use with DEqMS"><i class="fa fa-question-circle"></i></a>
             </span>
@@ -1137,8 +1140,10 @@ onMount(async() => {
         <code>{nf}</code></label> 
       {#each Object.entries(opts) as opt}
       <div>
-        <input value={`${id}___${opt[0]}`} bind:group={config.multicheck} type="checkbox">
-        <label class="checkbox">{opt[1]}</label>
+        <label class="checkbox">
+          <input value={`${id}___${opt[0]}`} bind:group={config.multicheck} type="checkbox">
+          {opt[1]}
+        </label>
       </div>
       {/each}
     </div>
@@ -1189,11 +1194,13 @@ onMount(async() => {
     <label class="label">Config flags</label>
     {#each wf.flags as {nf, id, name, help}}
     <div>
-      <input value={id} bind:group={config.flags} type="checkbox">
-      <label class="checkbox">{name}</label>: <code>{nf}</code> 
-        {#if help}
-          <a title={help}><i class="fa fa-question-circle"></i></a>
-        {/if}
+      <label class="checkbox">
+        <input value={id} bind:group={config.flags} type="checkbox">
+        {name}
+      </label>: <code>{nf}</code> 
+      {#if help}
+        <a title={help}><i class="fa fa-question-circle"></i></a>
+      {/if}
     </div>
     {/each}
 	</div>

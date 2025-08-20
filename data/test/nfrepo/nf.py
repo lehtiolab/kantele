@@ -1,7 +1,5 @@
 import os
 import sys
-from glob import glob
-import shutil
 from argparse import ArgumentParser
 
 p = ArgumentParser()
@@ -27,7 +25,6 @@ args = p.parse_args(sys.argv[1:])
 os.makedirs(args.outdir)
 
 
-# raws is a 'fn;fn2;fn3;...' or '*', but we use 1 file (or *) for testing so can use glob
 lines = []
 with open(args.input) as fp:
     header = next(fp).strip().split('\t')

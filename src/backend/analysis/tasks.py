@@ -3,8 +3,6 @@ import json
 import shutil
 import requests
 import subprocess
-from time import sleep
-from datetime import datetime
 from urllib.parse import urljoin, urlsplit
 from ftplib import FTP
 from hashlib import md5
@@ -13,7 +11,6 @@ from tempfile import NamedTemporaryFile
 from gzip import GzipFile
 
 from django.urls import reverse
-from django.utils import timezone
 from celery import shared_task, exceptions
 from celery import states as taskstates
 
@@ -28,8 +25,6 @@ def check_ensembl_uniprot_fasta_download(self, dbname, version, organism, dbtype
         sflpath, ftype_id):
     """Checks if there is a new version of ENSEMBL data,
     downloads it to system over FTP"""
-    doneurl = urljoin(settings.KANTELEHOST, reverse('jobs:internalfiledone'))
-
     fa_data = {'dbname': dbname, 'organism': organism, 'version': version, 'dbtype': dbtype}
     dstpath = os.path.join(sharepath, sflpath)
     try:
@@ -142,7 +137,7 @@ def log_analysis(analysis_id, message):
 
 
 @shared_task(bind=True)
-def run_nextflow_workflow(self, run, params, paramfiles, stagefiles, profiles, nf_version, scratchbasedir):
+def run_nextflow_workflow(self, run, params, stagefiles, profiles, nf_version, scratchbasedir):
     print('Got message to run nextflow workflow, preparing')
     # Init
     rundir = create_runname_dirname(run)
@@ -179,7 +174,6 @@ def run_nextflow_workflow(self, run, params, paramfiles, stagefiles, profiles, n
     outfiles = execute_normal_nf(run, params, rundir, gitwfdir, self.request.id, nf_version, profiles, scratchdir)
 
     # Register output files to web host
-    token = False
     for ofile in outfiles:
         # FIXME sharepath == NF_RUNDIR? Can we pass from job/db?
         full_path, fn = os.path.split(ofile)
@@ -497,47 +491,3 @@ def register_mzmlfile(sflpk, fname, path, server_id):
         rj = False
     resp.raise_for_status()
     return rj
- 
-
-def transfer_resultfile(dstsharepath, dstpath, fn, url, token, task_id,
-        sfl_id, reg_md5, newname, analysis_id=False, checksrvurl=False, is_fasta=False):
-    '''Copies files from analyses to outdir on result storage.
-    outfullpath is absolute destination dir for file
-    dstpath is the path stored in Kantele DB (for users on the share of outfullpath)
-    fn is absolute path to src file
-    '''
-    dst = os.path.join(dstsharepath, dstpath, newname)
-    try:
-        shutil.copy(fn, dst)
-    except:
-        taskfail_update_db(task_id, 'Errored when trying to copy files to analysis result destination')
-        raise
-    os.chmod(dst, 0o640)
-
-    postdata = {'client_id': settings.APIKEY, 'sfloc_id': sfl_id, 'dst_path': dstpath,
-            'filename': newname, 'token': token, 
-            'analysis_id': analysis_id, 'is_fasta': is_fasta}
-    if calc_md5(dst) != reg_md5:
-        msg = 'Copying error, MD5 of src and dst are different'
-        taskfail_update_db(task_id, msg)
-        raise RuntimeError(msg)
-    else:
-        postdata['md5'] = reg_md5
-    if analysis_id:
-        # Not for refine mzMLs
-        postdata.update({'ftype': settings.ANALYSIS_FT_NAME, 'analysis_id': analysis_id})
-        # first check if upload file is OK:
-        resp = requests.post(checksrvurl, json={'fname': newname, 'client_id': settings.APIKEY})
-        if resp.status_code == 200:
-            # Servable file found, upload also to web server
-            # Somewhat complex POST to get JSON and files in same request
-            response = requests.post(url, files={
-                'ana_file': (newname, open(fn, 'rb'), 'application/octet-stream'),
-                'json': (None, json.dumps(postdata), 'application/json')})
-        else:
-            response = update_db(url, files={
-                'json': (None, json.dumps(postdata), 'application/json')})
-    # Also here, somewhat complex POST to get JSON and files in same request
-    else:
-        response = update_db(url, json=postdata)
-    response.raise_for_status()

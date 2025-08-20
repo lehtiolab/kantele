@@ -2,26 +2,25 @@
 import os
 from urllib.parse import urlsplit
 
+
 TESTING = int(os.environ.get('TESTING', 0))
 # local box setup
 APIKEY = os.environ.get('APIKEY')
 
-# File storage of raw files/analysis results
-STORAGESHARES = os.environ.get('STORAGESHARES', '').split(',')
-ANALYSISSHARE = os.environ.get('ANALYSISSHARE')
-MZML_INSHARE = os.environ.get('MZMLINSHARE')
-TMPSHARE = os.environ.get('TMPSHARE', False)
-ARCHIVESHARE = os.environ.get('ARCHIVESHARE', False)
-BACKUPSHARE = os.path.join(TMPSHARE, 'pdc_archive_links') if TMPSHARE else False
-
 # File storage only used in web and nginx containers
 # which is where uploaded result files live for web access (HTML reports)
+# FIXME keep around until no longer having this in config
 WEBSHARE = os.environ.get('SERVABLE_FILE_PATH')
 
-# Tmp file storage for uploaded files to be transported to storage
+# Tmp file storage for uploaded files to web to be transported to storage
 TMP_UPLOADPATH = os.environ.get('TMP_UPLOADPATH')
 HOST_UPLOADDIR = os.environ.get('HOST_UPLOADDIR')
-BACKUPPATH = os.environ.get('BACKUPPATH', 'backup_retrieved_dsets')
+
+# path to stash backups on its way in or out
+BACKUP_LINKPATH = '__archive_links_and_retrieves'
+
+# FIXME will be removed after upload script fixes: tmp dir
+TMPPATH = ''
 
 # DSM backups to tape
 DSM_DIR = os.environ.get('DSM_DIR')
@@ -52,24 +51,7 @@ SECONDARY_STORAGE_RSYNC_USER = os.environ.get('SECONDARY_STORAGE_RSYNC_USER')
 SECONDARY_STORAGE_RSYNC_KEY = os.environ.get('SECONDARY_STORAGE_RSYNC_KEY')
 
 UPLOAD_URL = 'uploads'
-TMPSHARENAME = 'tmp'
-ARCHIVESHARENAME = 'archive'
-ANALYSISSHARENAME = 'analysis'
-MZMLINSHARENAME = 'mzml_in'
-WEBSHARENAME = 'web'
-# TODO maybe have datatype/storage DB setup
-STORAGESHARENAMES = os.environ.get('STORAGESHARENAMES', '').split(',')
-PRIMARY_STORAGESHARENAME = os.environ.get('PRIMARY_STORAGE')
 
-SHAREMAP = {TMPSHARENAME: TMPSHARE,
-            ARCHIVESHARENAME: ARCHIVESHARE,
-            ANALYSISSHARENAME: ANALYSISSHARE,
-            MZMLINSHARENAME: MZML_INSHARE,
-            WEBSHARENAME: WEBSHARE,
-            **{name: share for name, share in zip(STORAGESHARENAMES, STORAGESHARES)}
-            }
-TMPPATH = ''
-ARCHIVEPATH = ''
 
 NGINX_ANALYSIS_REDIRECT = os.environ.get('NGINX_ANALYSIS_REDIRECT')
 SERVABLE_FILENAMES = ['qc.html', 'qc_full.html', 'qc_light.html', 'pipeline_report.html', 'report.html']
@@ -79,7 +61,7 @@ RABBIT_HOST = os.environ.get('RABBITHOST')
 RABBIT_VHOST = os.environ.get('RABBIT_VHOST')
 RABBIT_USER = os.environ.get('RABBITUSER')
 RABBIT_PASSWORD = os.environ.get('RABBITPASS')
-CELERY_BROKER_URL = 'amqp://{}:{}@{}:5672/{}'.format(RABBIT_USER, RABBIT_PASSWORD, RABBIT_HOST, RABBIT_VHOST)
+CELERY_BROKER_URL = f'amqp://{RABBIT_USER}:{RABBIT_PASSWORD}@{RABBIT_HOST}:5672/{RABBIT_VHOST}'
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_BACKEND = 'rpc'
 
@@ -88,10 +70,8 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = os.environ.get('CELERY_PREFETCH', 4)
 
 JOBRUNNER_INTERVAL = 5
 
-# Lifespan for mzMLs and Instrument-QC RAW files, in days
+# Lifespan for mzML files, in days
 MAX_MZML_STORAGE_TIME_POST_ANALYSIS = int(os.environ.get('MAX_MZML_STORAGE_TIME_POST_ANALYSIS', -1))
-MAX_MZML_LC_STORAGE_TIME = int(os.environ.get('MAX_MZML_LC_STORAGE_TIME', -1))
-MAX_MZML_QC_STORAGE_TIME = int(os.environ.get('MAX_MZML_QC_STORAGE_TIME', -1))
 
 # Upload token lifespan
 MAX_TIME_UPLOADTOKEN = 24 * 3600 # for user uploads
@@ -121,7 +101,6 @@ ENSEMBL_DL_URL = os.environ.get('ENSEMBL_DL_URL', 'ftp://ftp.ensembl.org/pub/rel
 PX_PROJECT_ID = os.environ.get('PX_PROJECT_ID')
 # multiple
 EXTERNAL_PRODUCER_IDS = [int(x) for x in os.environ.get('EXTERNAL_PRODUCER_IDS', '-1').split(',')]
-USERFILEDIR = 'uploadfiles'
 
 # nextflow
 NXF_COMMAND = os.environ.get('NXF_COMMAND', 'nextflow run').split(' ')
@@ -129,6 +108,7 @@ NXF_COMMAND = os.environ.get('NXF_COMMAND', 'nextflow run').split(' ')
 LIBRARY_FILE_PATH = ''
 LIBRARY_FILE_PATH_INBOX = 'library'
 
+# Should correspond to server's sharepath for output files also
 NF_RUNDIR = os.environ.get('NEXTFLOW_RUNDIR', 'nf_runs')
 
 # hardcoded name for filetypes fasta DBs, analysis output

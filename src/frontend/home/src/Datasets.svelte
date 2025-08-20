@@ -45,7 +45,7 @@ function showDetails(event) {
 
 
 async function getDsetDetails(dsetId) {
-	const resp = await getJSON(`/show/dataset/${dsetId}`);
+  const resp = await getJSON(`/show/dataset/${dsetId}`);
   return `
     <p><span class="has-text-weight-bold">Storage location:</span> ${resp.storage_loc}</p>
     <p><span class="has-text-weight-bold">Owners:</span> ${Object.values(resp.owners).join(', ')}</p>
@@ -83,17 +83,17 @@ function setConfirm() {
 <a class="button is-small" title="Search MS data" on:click={analyzeDatasets}>Analyze datasets</a>
 <a class="button is-small" title="Move datasets to cold storage (delete)" on:click={archiveDataset}>Retire datasets</a>
   {#if purgeConfirm}
-  <a class="button is-small is-danger is-light" title="PERMANENTLY delete datasets from active and cold storage" on:click={purgeDatasets}>Are you sure? Purge datasets</a>
+    <a class="button is-small is-danger is-light" title="PERMANENTLY delete datasets from active and cold storage" on:click={purgeDatasets}>Are you sure? Purge datasets</a>
   {:else}
-  <a class="button is-small" title="PERMANENTLY delete datasets from active and cold storage" on:click={setConfirm}>Purge datasets</a>
+    <a class="button is-small" title="PERMANENTLY delete datasets from active and cold storage" on:click={setConfirm}>Purge datasets</a>
   {/if}
 {:else}
-<a class="button is-small" title="Search MS data" disabled>Analyze datasets</a>
-<a class="button is-small" title="Move datasets to cold storage (delete)" disabled>Retire datasets</a>
-<a class="button is-small" title="PERMANENTLY delete datasets from active and cold storage" disabled>Purge datasets</a>
+  <a class="button is-small" title="Search MS data" disabled>Analyze datasets</a>
+  <a class="button is-small" title="Move datasets to cold storage (delete)" disabled>Retire datasets</a>
+  <a class="button is-small" title="PERMANENTLY delete datasets from active and cold storage" disabled>Purge datasets</a>
 {/if}
 {#if is_staff}
-<a class="button is-small" title="Already downloaded files on tmp inbox" on:click={e => importVisible = importVisible === false}>Import external data</a>
+  <a class="button is-small" title="Already downloaded files on tmp inbox" on:click={e => importVisible = importVisible === false}>Import external data</a>
 {/if}
 
 

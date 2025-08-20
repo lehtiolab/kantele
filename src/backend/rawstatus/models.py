@@ -62,31 +62,38 @@ class DataSecurityClass(models.IntegerChoices):
 
 
 class FileServer(models.Model):
+    '''Controller of possibly multiple shares, can be an analysis controller'''
+    # FIXME this is prob where queue locations will be from, but 
+    # how to decide where to rsync when we have a share on 2 controllers? E.g. analysis controller
+    # and storage controller on open share?
     name = models.TextField(unique=True)
     uri = models.TextField(help_text='How users can find server')
     fqdn = models.TextField(help_text='controller URL for rsync SSH')
     active = models.BooleanField(default=True, help_text='Are we using this server?')
     # Is this an analysis server? In that case we specify 
     is_analysis = models.BooleanField(default=False)
-    scratchdir = models.TextField()
+    # Scratchdir is for nxf TMPDIR, and stageing (and can be blank for analysis servers too)
+    scratchdir = models.TextField(help_text='For nextflow TMPDIR and stage if needed. Can be blank even for analysis servers')
     # Does the server have rsync private keys for other servers (aka is some kind of controller)
     can_rsync_remote = models.BooleanField(default=False)
     can_backup = models.BooleanField(default=False)
     # username/keyfilename are for access to this server 
-    rsyncusername = models.TextField()
-    rsynckeyfile = models.TextField()
+    rsyncusername = models.TextField(blank=True)
+    rsynckeyfile = models.TextField(blank=True)
 
     def __str__(self):
         return self.name
 
 
 class ShareFunction(models.IntegerChoices):
+    '''Server share functions are not unique, multiple shares can be an inbox,
+    raw storage (e.g. on remote analysis server)
+    Only reports is likely to only be a single share since it is on web server'''
     RAWDATA = 1, 'Raw data'
     ANALYSISRESULTS = 2, 'Analysis results'
-    REPORTS = 3, 'Reports'
-    NFRUNS = 4, 'Analysis workdir'
-    INBOX = 5, 'File inflow and tmp storage'
-    LIBRARY = 6, 'Library and user reference files'
+    REPORTS = 3, 'Reports on web server'
+    INBOX = 4, 'File inflow and tmp storage'
+    LIBRARY = 5, 'Library and user reference files'
 
 
 class ServerShare(models.Model):
@@ -144,6 +151,7 @@ class ServerShare(models.Model):
         elif analysis_id:
             return os.path.join('analyses', str(analysis_id))
         else:
+            # FIXME this should be some kind of regulated thing (instrument, usetype, etc)
             return ''
 
     @staticmethod
@@ -162,14 +170,14 @@ class ServerShare(models.Model):
         remote_shares = [x['share_id'] for x in FileserverShare.objects.exclude(
             share_id__in=[*localshares, *rsync_srcshares]).filter(share_id__in=dstshare_ids).values('share_id')]
         return {'local': localshares, 'rsync_sourcable': rsync_srcshares, 'remote': remote_shares}
-        
-
 
 
 class FileserverShare(models.Model):
     server = models.ForeignKey(FileServer, on_delete=models.CASCADE)
     share = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
     path = models.TextField()
+    # it is currently assumed that all shares are writable
+    #writable = models.BooleanField(default=False)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['server', 'share'], name='uni_fsshare')]
@@ -186,6 +194,8 @@ class UploadFileType(models.IntegerChoices):
 
 class RawFile(models.Model):
     """Data (raw) files as reported by instrument"""
+    # name can be updated to the user prior to update on filesystem, e.g waiting
+    # for other job to finish
     name = models.TextField()
     producer = models.ForeignKey(Producer, on_delete=models.CASCADE)
     source_md5 = models.CharField(max_length=32, unique=True)
@@ -203,6 +213,7 @@ class StoredFile(models.Model):
     rawfile = models.ForeignKey(RawFile, on_delete=models.CASCADE)
     # FIXME filetype to raw file, but some 2-3000 rawfiles have no storedfile!
     filetype = models.ForeignKey(StoredFileType, on_delete=models.CASCADE)
+    # Filename is the actual current file name on disk
     filename = models.TextField()
     regdate = models.DateTimeField(auto_now_add=True)
     md5 = models.CharField(max_length=32, unique=True)
@@ -210,6 +221,8 @@ class StoredFile(models.Model):
     # marked for deletion by user, only UI, but it will be indicative
     # of file being deleted on ALL storages, so if True - file needs restoreing
     # from archive for any operations
+    # So e.g. queuing new rename dataset jobs can e.g. be skipped if files are deleted=True
+    # as it indicates their status before the job is launched
     deleted = models.BooleanField(default=False)
 
     def __str__(self):
@@ -317,10 +330,12 @@ class SwestoreBackedupFile(models.Model):
 class FileJob(models.Model):
     '''This registers which files are in a job for the jobrunner, so it knows
     if it should wait before executing a job. Creation of a filejob is done when
-    the job is created. It will overreport the number of actually-used files in
+    the job is created.
+    It SHOULD NOT BE USED for reporting to UI etc like file-filejob-job-analysis
+    or the like, and it will anyway overreport the number of actually-used files in
     case of datasets, since some jobs operate only on half of a dataset, e.g.
     deletion, refine mzML, etc
     '''
-    # FIXME move to job module
     rawfile = models.ForeignKey(RawFile, on_delete=models.CASCADE)
     job = models.ForeignKey(Job, on_delete=models.CASCADE)
+    #storedfile = models.ForeignKey(StoredFile, on_delete=models.CASCADE)

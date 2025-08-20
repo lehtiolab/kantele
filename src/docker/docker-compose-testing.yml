@@ -49,9 +49,7 @@ services:
             PROTOCOL: http
             DB_HOST: db
             RABBITHOST: mq
-            TMPSHARE: /storage/tmp
             SERVABLE_FILE_PATH: /storage/web
-            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
             TMP_UPLOADPATH: /storage/uploads
             HOST_UPLOADDIR: /storage/uploads
     
@@ -89,9 +87,6 @@ services:
               target: /storage
         environment:
             KANTELEHOST: web
-            TMPSHARE: '/storage/tmp'
-            ANALYSISSHARE: '/storage/analysis'
-            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
 
     storage_fastqueue_1:
         extends:
@@ -107,9 +102,6 @@ services:
               target: /storage
         environment:
             KANTELEHOST: web
-            TMPSHARE: '/storage/tmp'
-            ANALYSISSHARE: '/storage/analysis'
-            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
 
 
     storage_ssh_1:
@@ -153,8 +145,6 @@ services:
             RABBIT_VHOST: "${RABBIT_VHOST}"
             RABBITUSER: "${RABBITUSER:-guest}"
             RABBITPASS: "${RABBITPASS:-guest}"
-            ANALYSISSHARE: '/storage/analysis'
-            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
             NXF_COMMAND: 'python3'
             NEXTFLOW_RUNDIR: '/storage/nf_runs2'
             APIKEY: "${APIKEY_ANALYSIS}"
@@ -173,7 +163,6 @@ services:
               target: /storage
         environment:
             KANTELEHOST: web
-            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
 
     analysis_fastqueue_2:
         extends:
@@ -189,7 +178,6 @@ services:
               target: /storage
         environment:
             KANTELEHOST: web
-            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
 
 
     analysis_ssh_2:
@@ -221,9 +209,6 @@ services:
       command: celery -A kantele worker -Q scaninbox -n storage_downloads.%h --concurrency=1
       environment:
           KANTELEHOST: web
-          TMPSHARE: '/storage/tmp'
-          ANALYSISSHARE: '/storage/analysis'
-          STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
 
     storage_web_rsync:
         extends:
@@ -239,9 +224,6 @@ services:
               target: /storage
         environment:
             KANTELEHOST: web
-            TMPSHARE: '/storage/tmp'
-            ANALYSISSHARE: '/storage/analysis'
-            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
             RSYNC_SSHPORT: "${RSYNC_SSHPORT}"
             HOST_UPLOADDIR: /storage/uploads
 
@@ -259,9 +241,6 @@ services:
               target: /storage
         environment:
             KANTELEHOST: web
-            TMPSHARE: '/storage/tmp'
-            ANALYSISSHARE: '/storage/analysis'
-            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
             RSYNC_SSHPORT: "${RSYNC_SSHPORT}"
             HOST_UPLOADDIR: /storage/uploads
 
@@ -291,8 +270,6 @@ services:
             RABBIT_VHOST: "${RABBIT_VHOST}"
             RABBITUSER: "${RABBITUSER:-guest}"
             RABBITPASS: "${RABBITPASS:-guest}"
-            ANALYSISSHARE: '/storage/analysis'
-            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
             NXF_COMMAND: 'python3'
             NEXTFLOW_RUNDIR: '/storage/nf_runs'
             APIKEY: "${APIKEY_ANALYSIS}"
@@ -326,7 +303,6 @@ services:
               target: /storage
         environment:
             KANTELEHOST: web
-            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
 
     analysis_fastqueue_1:
         extends:
@@ -342,8 +318,6 @@ services:
               target: /storage
         environment:
             KANTELEHOST: web
-            STORAGESHARES: '/storage/oldstorage,/storage/newstorage'
-
 
 
     upload_bay_rsync:

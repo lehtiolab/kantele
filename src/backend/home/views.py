@@ -21,7 +21,6 @@ from analysis import jobs as aj
 from datasets import jobs as dsjobs
 from datasets.views import check_ownership, get_dset_storestate, fill_sampleprepparam, populate_proj
 from rawstatus import models as filemodels
-from rawstatus import views as rv
 from jobs import jobs as jj
 from jobs import views as jv
 from jobs.jobutil import create_job
@@ -220,13 +219,21 @@ def show_files(request):
     return populate_files(dbfns)
 
 
+def getxbytes(bytes, op=50):
+    if bytes is None:
+        return '0B'
+    if bytes >> op:
+        return '{}{}B'.format(bytes >> op, {0: '', 10: 'K', 20: 'M', 30: 'G', 40: 'T', 50: 'P'}[op])
+    else:
+        return getxbytes(bytes, op-10)
+
+
 def populate_files(dbfns):
     popfiles = {}
     for fn in dbfns.select_related(
             'rawfile__datasetrawfile__dataset', 
             'rawfile__producer__msinstrument',
             'mzmlfile',
-            'analysisresultfile__analysis', 
             'swestorebackedupfile', 
             'pdcbackedupfile', 
             'filetype').filter(checked=True):
@@ -238,7 +245,7 @@ def populate_files(dbfns):
         it = {'id': fn.id,
               'name': fn.filename,
               'date': datetime.strftime(fn.rawfile.date, '%Y-%m-%d %H:%M'),
-              'size': rv.getxbytes(fn.rawfile.size) if not is_mzml else '-',
+              'size': getxbytes(fn.rawfile.size) if not is_mzml else '-',
               'ftype': fn.filetype.name,
               'analyses': [],
               'dataset': [],
@@ -430,7 +437,7 @@ def get_proj_info(request, proj_id):
     dsets = dsmodels.Dataset.objects.filter(runname__experiment__project=proj)
     #dsowners = dsmodels.DatasetOwner.objects.filter(dataset__runname__experiment__project_id=proj_id).distinct()
     info = {'owners': [x['datasetowner__user__username'] for x in dsets.values('datasetowner__user__username').distinct()],
-            'stored_total_xbytes': rv.getxbytes(files.aggregate(Sum('rawfile__size'))['rawfile__size__sum']),
+            'stored_total_xbytes': getxbytes(files.aggregate(Sum('rawfile__size'))['rawfile__size__sum']),
             'nrstoredfiles': {ft: len([fn for fn in fns]) for ft, fns in sfiles.items()},
             'name': proj.name,
             'pi': proj.pi.name,
@@ -719,9 +726,8 @@ def get_dset_info(request, dataset_id):
 @login_required
 def get_file_info(request, file_id):
     sfile = filemodels.StoredFile.objects.filter(pk=file_id).select_related(
-        'rawfile__datasetrawfile', 'mzmlfile', 
-        'rawfile__producer__msinstrument', 'analysisresultfile__analysis', 
-        'libraryfile', 'userfile').get()
+        'rawfile__datasetrawfile', 'mzmlfile', 'rawfile__producer__msinstrument', 'libraryfile',
+        'userfile').get()
     is_mzml = hasattr(sfile, 'mzmlfile')
     info = {'analyses': [], 'servers': [],
             'producer': sfile.rawfile.producer.name,
@@ -745,7 +751,7 @@ def get_file_info(request, file_id):
                     job__nextflowsearch__isnull=False)
         elif hasattr(sfile.rawfile.producer, 'msinstrument') and not is_mzml:
             mzmls = sfile.rawfile.storedfile_set.filter(mzmlfile__isnull=False)
-            anjobs = filemodels.FileJob.objects.filter(storedfile__in=mzmls, job__nextflowsearch__isnull=False)
+            anjobs = filemodels.FileJob.objects.filter(rawfile__storedfile__in=mzmls, job__nextflowsearch__isnull=False)
         info['analyses'].extend([x.job.nextflowsearch.analysis_id for x in anjobs])
     if hasattr(sfile, 'analysisresultfile') and hasattr(sfile.analysisresultfile.analysis, 'nextflowsearch'):
         info['analyses'].append(sfile.analysisresultfile.analysis.nextflowsearch.id)

@@ -46,6 +46,8 @@ class ProjectLog(models.Model):
 
 
 class UserPtype(models.Model):
+    # FIXME deprecate, we dont use this? is_staff now  is used for CF users
+    # probably not a good idea anyway
     ptype = models.ForeignKey(ProjectTypeName, on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
 
@@ -140,9 +142,9 @@ class DatasetServer(models.Model):
         '''We will only have one server/storage loc combination (so no path crash),
         and each dataset can only be in a given server once'''
         constraints = [
-                models.UniqueConstraint(fields=['storageshare', 'storage_loc'], name='uni_dsshare'),
-                models.UniqueConstraint(fields=['storageshare', 'storage_loc_ui'], name='uni_dsshare_ui'),
-                models.UniqueConstraint(fields=['dataset', 'storageshare'], name='uni_dsloc'),
+                models.UniqueConstraint(fields=['storageshare', 'storage_loc'], name='uni_dsloc'),
+                models.UniqueConstraint(fields=['storageshare', 'storage_loc_ui'], name='uni_dsloc_ui'),
+                models.UniqueConstraint(fields=['dataset', 'storageshare'], name='uni_dsshare'),
                 ]
 
 

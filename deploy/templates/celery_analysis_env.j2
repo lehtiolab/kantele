@@ -15,16 +15,11 @@ RABBITHOST={{ rabbithost }}
 RABBIT_VHOST={{ mq_vhost }}
 RABBITPASS={{ amqppass }}
 RABBITUSER={{ rabbituser }}
+
 # For NF
 TMPDIR={{ scratch_dir }}
-# For kantele task
-TMP_SCRATCHDIR={{ scratch_dir }}
 
 CELERY_PREFETCH=1
 SECRET_KEY={{ secret_key }}
 APIKEY={{ analysis_apikey }}
 NEXTFLOW_RUNDIR="{{ baserun_dir }}"
-STORAGESHARENAMES="{{ storagesharenames }}"
-STORAGESHARES={{ storage_shares }}
-ANALYSISSHARE={{ analysis_share }}
-MZMLINSHARE={{ mzml_in_share }}

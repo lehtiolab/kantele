@@ -39,6 +39,8 @@ from jobs.jobutil import create_job, create_job_without_check, check_job_error, 
 
 
 UPLOAD_DESTINATIONS = {
+        # FIXME when new upload script finished, remove rawfile from here (only for manual via web)
+        # also remove raw uploads fom rawstatus/tests then
         UploadFileType.RAWFILE: (ShareFunction.INBOX, settings.TMPPATH),
         UploadFileType.ANALYSIS: (ShareFunction.ANALYSISRESULTS, False),
         UploadFileType.LIBRARY: (ShareFunction.LIBRARY, settings.LIBRARY_FILE_PATH),
@@ -116,8 +118,6 @@ def scan_raws_tmp(request):
 
 @login_required
 def browser_userupload(request):
-    # needs test
-    # FIXME make sure this job is similar to transfer_file then?
     data = request.POST
     try:
         ftype = StoredFileType.objects.get(user_uploadable=True, pk=int(data['ftype_id']))
@@ -196,7 +196,6 @@ def browser_userupload(request):
         return JsonResponse({'success': False, 'msg': 'Can only upload files of raw, library, '
             'or user type'}, status=403)
 
-    # FIXME this will crash:
     dstshare = ServerShare.objects.get(function=ShareFunction.INBOX)
     if upload.uploadtype == UploadFileType.RAWFILE and StoredFileLoc.objects.filter(
             sfile__filename=fname, path=dstpath, servershare=dstshare, sfile__deleted=False).exclude(
@@ -219,11 +218,10 @@ def browser_userupload(request):
     
 # TODO store heartbeat of instrument, deploy config, message from backend, etc
 
-# FIXME DEPRECATE
 @require_POST
 def instrument_check_in(request):
     '''Returns 200 at correct token or expiring token, in which case a new token
-    will be issued'''
+    will be issued. Used when uploading by user'''
     # FIXME need unit test
     # auto update producer would be nice, when it calls server at intervals, then downloads_automaticlly
     # a new version of itself?
@@ -458,7 +456,8 @@ def get_files_transferstate(request):
 
 
 def classified_rawfile_treatment(request):
-    '''Task calls this after reading a raw file for classification'''
+    '''Task calls this after reading a raw file for classification, rawfile being
+    on inflow share'''
     data = json.loads(request.body.decode('utf-8'))
     tasks = jm.Task.objects.filter(asyncid=data['task_id'], state=taskstates.PENDING)
     # If task is force-retried, and there was another task running, that other task will
@@ -503,7 +502,7 @@ def classified_rawfile_treatment(request):
         dsq = dsmodels.Dataset.objects.filter(pk=dsid)
         if not dsq.exists():
             # TODO this needs error logging? For now this is fine
-            # File will not be classified
+            # File will not be classified and kept on upload
             print(f'Classify task error for task {data["task_id"]} - dsid {dsid} doesnt exist')
             already_classified_or_error = True
         elif dsq.filter(datasetcomponentstate__dtcomp__component=dsmodels.DatasetUIComponent.FILES,
@@ -523,7 +522,7 @@ def classified_rawfile_treatment(request):
                         
                 if error := check_job_error('rsync_dset_files_to_servershare', **mvjob_kw):
                     # TODO this needs logging
-                    print(f'Classify task error for task {data["task_id"]} trying to queue move_files_storage - {error}')
+                    print(f'Classify task error for task {data["task_id"]} trying to queue rsync_dset_files_to_servershare - {error}')
                     already_classified_or_error = True
                 else:
                     dss_mvjobs.append(mvjob_kw)
@@ -592,7 +591,7 @@ def file_uploaded(request):
         is_active_ms = producer['internal'] and producer['msinstrument__active']
         uploadtype = UploadFileType.RAWFILE
     elif instrument_id == settings.ANALYSISCLIENT_APIKEY:
-        analysis  = Analysis.objects.get(pk=analysis_id)
+        analysis = Analysis.objects.get(pk=analysis_id)
         is_active_ms = False
         filetype = StoredFileType.objects.get(name=settings.ANALYSIS_FT_NAME)
         uploadtype = UploadFileType.ANALYSIS
@@ -665,7 +664,6 @@ def file_uploaded(request):
             if rsjoberr := check_job_error(**kwargs):
                 return JsonResponse({'error': rsjoberr}, status=401)
             rs_kwargs.append(kwargs)
-            print(rs_kwargs)
         [create_job(**kwargs) for args in rs_kwargs]
         create_job('create_pdc_archive', sfloc_id=sfl.pk, isdir=sf.filetype.is_folder)
     return JsonResponse({'rfid': rfn.pk, 'sfid': sf.pk, 'sflid': sfl.pk, 'path': sfl.path})
@@ -705,13 +703,6 @@ def process_file_confirmed_ready(rfn, sfn, sfloc, upload, desc):
             AnalysisResultFile.objects.create(sfile=sfn, analysis=upload.externalanalysis.analysis)
             # FIXME PDC is already done in transfer_file, so dont do twice
         create_job('create_pdc_archive', sfloc_id=sfloc.pk, isdir=sfn.filetype.is_folder)
-    #if upload.archive_only:
-    #    # This archive_only is for sens data but we should probably have a completely
-    #    # different track for that TODO
-    #    # This purge job only runs when the PDC job is confirmed, w need_archive
-    #    sfn.deleted = True
-    #    sfn.save()
-    #    create_job('purge_files', sf_ids=[sfn.pk], need_archive=True)
     return newname
 
 
@@ -742,7 +733,6 @@ def mzml_uploaded(request):
 
 @require_POST
 def transfer_file(request):
-    # FIXME HTTP need long view time 
     # FIXME add share name to upload to and path
     '''HTTP based file upload'''
     data = request.POST
@@ -833,10 +823,6 @@ def transfer_file(request):
         return JsonResponse({'error': f'Upload has an invalid uploadtype ID ({upload.uploadtype}). '
             'This should not happen, contact admin'}, status=403)
 
-    #####
-    # FIXME this will crash
-    #dstsfl = StoredFileLoc.objects.filter(sfile__filename=nonzip_fname, active=True,
-    #        path=dstpath, servershare__function=dstsharefun)
     if check_dup and StoredFileLoc.objects.filter(sfile__filename=nonzip_fname, purged=False,
             path=dstpath, servershare__function=dstsharefun).exclude(
                     sfile__rawfile__source_md5=rawfn.source_md5).exists():
@@ -883,7 +869,7 @@ def transfer_file(request):
         print('File already registered as transferred')
         dstsss = StoredFileLoc.objects.get(sfile=file_trf, servershare__function=dstsharefun, path=dstpath)
     else:
-        # Now map to share
+        # Now transfer to dst share (library share on controller)
         dstshare = ServerShare.objects.filter(function=dstsharefun).first()
         dstsss = StoredFileLoc.objects.create(sfile=file_trf, servershare=dstshare, path=dstpath)
     create_job('rsync_transfer_fromweb', sfloc_id=dstsss.pk, src_path=upload_dst)
@@ -921,15 +907,14 @@ def get_file_owners(sfile):
 def rename_file(request):
     """Renames a single file. This checks if characters are correct, launches job
     with bare filename (no extension), since job determines if mutliple files including
-    mzML have to be renamed."""
+    mzML have to be renamed. The file needs renaming in ALL shares"""
     if not request.method == 'POST':
         return JsonResponse({'error': 'Must use POST'}, status=405)
     data =  json.loads(request.body.decode('utf-8'))
     try:
         sfile = StoredFile.objects.filter(pk=data['sf_id'], deleted=False).select_related(
-            'rawfile', 'mzmlfile').get()
+            'mzmlfile', 'rawfile').get()
         newfilename = os.path.splitext(data['newname'])[0]
-        #mv_mzml = data['mvmzml']  # TODO optional mzml renaming too? Now it is default
     except (StoredFile.DoesNotExist, KeyError):
         print('Stored file to rename does not exist')
         return JsonResponse({'error': 'File does not exist'}, status=403)
@@ -1043,71 +1028,6 @@ def show_old_new_projects(request):
     pass
 
 
-def getxbytes(bytes, op=50):
-    if bytes is None:
-        return '0B'
-    if bytes >> op:
-        return '{}{}B'.format(bytes >> op, {0: '', 10: 'K', 20: 'M', 30: 'G', 40: 'T', 50: 'P'}[op])
-    else:
-        return getxbytes(bytes, op-10)
-
-
-@login_required
-@require_POST
-def cleanup_old_files(request):
-    if not request.user.is_staff:
-        return JsonResponse({'state': 'error', 'error': 'User has no permission to retire this project, does not own all datasets in project'}, status=403)
-    data = json.loads(request.body.decode('utf-8'))
-    try:
-        queue_job = data['queue_job']
-    except KeyError as error:
-        return HttpResponseForbidden()
-    mzmls = StoredFileLoc.objects.filter(sfile__mzmlfile__isnull=False, purged=False)
-    maxtime_nonint = timezone.now() - timedelta(settings.MAX_MZML_STORAGE_TIME_POST_ANALYSIS)
-    # Filtering gotchas here:
-    # filter multiple excludes so they get done in serie, and exclude date__gt rather than
-    # filter date__lt because then you get all rows where date is lt, but it does not check
-    # if there are ALSO joins where date is gt...
-    # old normal mzmls from searches
-    old_searched_mzmls = mzmls.exclude(
-            sfile__rawfile__datasetrawfile__dataset__datatype_id__in=settings.LC_DTYPE_IDS).exclude(
-            sfile__rawfile__datasetrawfile__dataset__datasetanalysis__isnull=True).exclude(
-            sfile__rawfile__datasetrawfile__dataset__datasetanalysis__analysis__date__gt=maxtime_nonint)
-    # old LC mzmls
-    lcmzmls = mzmls.filter(
-            sfile__rawfile__datasetrawfile__dataset__datatype_id__in=settings.LC_DTYPE_IDS,
-            sfile__rawfile__datasetrawfile__dataset__datasetanalysis__isnull=False).exclude(
-            sfile__rawfile__datasetrawfile__dataset__datasetanalysis__analysis__date__gt=timezone.now() - timedelta(settings.MAX_MZML_LC_STORAGE_TIME))
-    # old mzmls without searches
-    old_nonsearched_mzml = mzmls.filter(
-            sfile__rawfile__datasetrawfile__dataset__datasetanalysis__isnull=True,
-            sfile__regdate__lt=maxtime_nonint)
-    all_old_mzmls = old_searched_mzmls.union(lcmzmls, old_nonsearched_mzml)
-    # TODO auto remove QC raw files of certain age? make sure you can get them back when needed though.
-
-    def chunk_iter(qset, chunk_size):
-        chunk = []
-        # Django iterator has chunk_size but that only affects the database caching level
-        # and not the chunked output. Here we use this to output chunks to create jobs from
-        # otherwise the job params become very large
-        for item in qset.iterator():
-            chunk.append(item)
-            if len(chunk) == chunk_size:
-                yield chunk
-                chunk = []
-        yield chunk
-
-    if queue_job:
-        for chunk in chunk_iter(all_old_mzmls, 500):
-            StoredFile.objects.filter(pk__in={x.sfile_id for x in chunk}).update(deleted=True)
-            create_job('purge_files', sfloc_ids=[x.id for x in chunk])
-        return JsonResponse({'ok': True})
-    else:
-        # cannot aggregate Sum on UNION
-        totalsize_raw = getxbytes(sum((x['sfile__rawfile__size'] for x in all_old_mzmls.values('sfile__rawfile__size'))))
-        return JsonResponse({'ok': True, 'mzml_cleanupsize_raws': totalsize_raw})
-
-
 @login_required
 def download_px_project(request):
     # FIXME check if pxacc exists on pride and here, before creating dset
@@ -1157,14 +1077,18 @@ def download_px_project(request):
 @login_required
 @require_POST
 def restore_file_from_cold(request):
-    # FIXME new multi-server system
     '''Single file function for restoring archived files, for cases where files are not in dataset,
-    e.g. on tmp storage only'''
+    e.g. on tmp storage only
+    Restores to 'share_ids': [1,2,3]
+    '''
     data = json.loads(request.body.decode('utf-8'))
     try:
         sfile = StoredFile.objects.select_related('rawfile__datasetrawfile', 'mzmlfile', 'pdcbackedupfile').get(pk=data['item_id'])
+        share_ids = data['share_ids']
     except StoredFile.DoesNotExist:
         return JsonResponse({'error': 'File does not exist'}, status=403)
+    except KeyError:
+        return JsonResponse({'error': 'Parameters not passed'}, status=400)
     if not sfile.deleted:
         return JsonResponse({'error': 'File is not currently marked as deleted, will not undelete'}, status=403)
     elif hasattr(sfile.rawfile, 'datasetrawfile'):

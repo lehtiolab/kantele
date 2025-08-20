@@ -15,7 +15,6 @@ services:
             DB_HOST: db
             #DB_HOST: "${HOST_FQDN}"
             RABBITHOST: mq
-            ANALYSISSHARE: '/analysisfiles' # test only, remove
         volumes:
             - ./src/backend:/kantele
             - ./static:/kantele/static
@@ -148,12 +147,9 @@ services:
             #            APIKEY: "${APIKEY_ANALYSIS}"
             #            KANTELEHOST: web
             #            PROTOCOL: http
-            #            STORAGESHARE: '/storage/storage'
-            #            ANALYSISSHARE: '/storage/analysis'
             #            RABBITHOST: mq
             #            RABBIT_VHOST: "${RABBIT_VHOST}"
             #            RABBITUSER: "${RABBITUSER:-guest}"
             #            RABBITPASS: "${RABBITPASS:-guest}"
-            #            STAGESHARE: /nxf/stage
             #            NEXTFLOW_RUNDIR: /nxf/runs
             #            NXF_COMMAND: "/nxf/nextflow"

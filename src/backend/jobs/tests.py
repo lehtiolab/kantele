@@ -21,49 +21,6 @@ class BaseJobTest(BaseTest):
         self.task = jm.Task.objects.create(job=self.job, asyncid=self.taskid, state='PROCESSING', args=[])
 
 
-class TestRenamedProject(BaseJobTest):
-    url = '/jobs/set/projectname/'
-    jobname = 'rename_top_lvl_projectdir'
-    p_newname = 'test_newp1'
-
-    def setUp(self):
-        super().setUp()
-        kwargs={'proj_id': self.p1.pk, 'srcname': self.p1.name, 'newname': self.p_newname}
-        self.job.kwargs = kwargs
-        self.job.save()
-
-    def test_wrong_client(self):
-        resp = self.cl.post(self.url, content_type='application/json',
-                data={'client_id': settings.STORAGECLIENT_APIKEY + 'abc123'})
-        self.assertEqual(resp.status_code, 403)
-        resp = self.cl.post(self.url, content_type='application/json',
-            data={'no_client_id': 1})
-        self.assertEqual(resp.status_code, 403)
-
-    def test_normal(self):
-        producer = rm.Producer.objects.create(name='testprod', client_id='prod_abc123', shortname='tp')
-        sftype = rm.StoredFileType.objects.create(name='test', filetype='tst')
-        rf = rm.RawFile.objects.create(name='testrf', producer=producer,
-            source_md5='abcdefgh', size=10, date=datetime.now(),
-            claimed=True)
-        dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=rf)
-        sf = rm.StoredFile.objects.create(rawfile=rf, filename=rf.name,
-                md5=rf.source_md5, checked=True, filetype=sftype)
-        sfloc = rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.ssnewstore, path=self.ds.storage_loc,
-                purged=False, active=True)
-        resp = self.cl.post(self.url, content_type='application/json', data={
-            'client_id': settings.STORAGECLIENT_APIKEY, 'task': self.taskid,
-            'proj_id': self.p1.pk, 'newname': self.p_newname, 'sfloc_ids': [sfloc.pk]})
-        self.assertEqual(resp.status_code, 200)
-        newpath = os.path.join(self.p_newname, *self.ds.storage_loc.split(os.path.sep)[1:])
-        sfloc.refresh_from_db()
-        self.ds.refresh_from_db()
-        self.assertEqual(self.ds.storage_loc, newpath)
-        self.assertEqual(sfloc.path, newpath)
-        self.task.refresh_from_db()
-        self.assertEqual(self.task.state, cstates.SUCCESS)
-
-
 class TestUpdateStorageLocDset(BaseJobTest):
     url = '/jobs/set/storagepathds/'
     jobname = 'rename_dset_storage_loc'

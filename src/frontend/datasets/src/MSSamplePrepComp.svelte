@@ -134,11 +134,15 @@ onMount(async() => {
 {:else if !useTrackingPipeline}
 <div class="field">
   <label class="label">Enzymes</label>
-  <input type="checkbox" on:change={editMade} bind:checked={dsinfo.no_enzyme}>No enzyme
+  <label class="checkbox">
+    <input type="checkbox" on:change={editMade} bind:checked={dsinfo.no_enzyme}>No enzyme
+  </label>
   {#if !dsinfo.no_enzyme}
   {#each dsinfo.enzymes as enzyme}
-  <div class="control">
-    <input on:change={editMade} bind:checked={enzyme.checked} type="checkbox">{enzyme.name}
+  <div>
+    <label class="checkbox">
+      <input on:change={editMade} bind:checked={enzyme.checked} type="checkbox">{enzyme.name}
+    </label>
   </div>
   {/each}
   {/if}

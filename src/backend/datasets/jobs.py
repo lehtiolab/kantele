@@ -1,58 +1,15 @@
 import os
 
-from django.db.models import F, Q
-from django.urls import reverse
+from django.db.models import Q
 
 from kantele import settings
-from rawstatus.models import StoredFile, ServerShare, StoredFileType, StoredFileLoc, FileServer, FileserverShare
-from datasets.models import Dataset, DatasetRawFile, Project, DatasetServer
+from rawstatus.models import StoredFile, ServerShare, StoredFileLoc, FileServer, FileserverShare
+from datasets.models import Dataset, DatasetServer
 from analysis.models import Proteowizard, MzmlFile, NextflowWfVersionParamset
 from datasets import tasks
 from rawstatus import tasks as filetasks
-from jobs.jobs import DatasetJob, ProjectJob, MultiFileJob
+from jobs.jobs import DatasetJob
 from rawstatus import models as rm
-
-
-class RenameProject(ProjectJob):
-    '''Uses task that does os.rename on project lvl dir. Needs also to update
-    dsets / storedfiles to new path post job'''
-    refname = 'rename_top_lvl_projectdir'
-    task = tasks.rename_top_level_project_storage_dir
-    queue = settings.QUEUE_STORAGE
-    retryable = False
-
-    def getfiles_query(self, **kwargs):
-        '''Get all files with same path as project_dsets.storage_locs, used to update
-        path of those files post-job. NB this is not ALL sfids in this project, but only
-        those confirmed to be in correct location'''
-        dsets = Dataset.objects.filter(runname__experiment__project_id=kwargs['proj_id'],
-                deleted=False, purged=False)
-        return StoredFileLoc.objects.filter(sfile__deleted=False, purged=False,
-                servershare__in=[x.storageshare for x in dsets.distinct('storageshare')],
-                path__in=[x.storage_loc for x in dsets.distinct('storage_loc')])
-
-    def check_error(self, **kwargs):
-        # Since proj name is unique, this wont do much, but its ok to check here instead of in view 
-        # just in case of weird race between view/job
-        '''Duplicate check'''
-        if Project.objects.filter(name=kwargs['newname']).exclude(pk=kwargs['proj_id']).exists():
-            return f'There is already a project by that name {kwargs["newname"]}'
-        else:
-            return False
-
-    def process(self, **kwargs):
-        """Fetch fresh project name here, then queue for move from there"""
-        new_is_oldname = True
-        for ds in Dataset.objects.select_related('storageshare').filter(
-                runname__experiment__project_id=kwargs['proj_id']):
-            ds_toploc = ds.storage_loc.split(os.path.sep)[0]
-            ssharename = ds.storageshare.name
-            if ds_toploc != kwargs['newname']:
-                new_is_oldname = False
-                break
-        if not new_is_oldname:
-            self.run_tasks = [((ssharename, ds_toploc, kwargs['newname'], kwargs['proj_id'],
-                [x.id for x in self.getfiles_query(**kwargs)]), {})]
 
 
 class RenameDatasetStorageLoc(DatasetJob):
@@ -254,7 +211,7 @@ class ConvertDatasetMzml(DatasetJob):
                 pk=kwargs['dss_id'])
         anaserver = FileServer.objects.filter(fileservershare__share_id=dss['storageshare_id'],
                 is_analysis=True).first()
-        analocalshare = FileserverShare.objects.filter(share__function=rm.ShareFunction.NFRUNS,
+        analocalshare = FileserverShare.objects.filter(share__function=rm.ShareFunction.ANALYSISRESULTS,
                 server=anaserver).values('share_id', 'path').first()
         anasrcshareonserver = FileserverShare.objects.filter(server=anaserver,
                 share_id=dss['storageshare_id']).values('path').first()

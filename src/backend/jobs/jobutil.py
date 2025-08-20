@@ -1,5 +1,3 @@
-
-
 from django.utils import timezone
 
 from datasets import jobs as dsjobs
@@ -17,7 +15,6 @@ alljobs = [
         dsjobs.RemoveDatasetFilesFromServershare,
         dsjobs.ConvertDatasetMzml,
         #dsjobs.DeleteDatasetPDCBackup,
-        #dsjobs.RenameProject,
         rsjobs.RsyncOtherFileServershare,
         rsjobs.RsyncFileTransferFromWeb,
         rsjobs.RemoveFilesFromServershare,
@@ -26,10 +23,9 @@ alljobs = [
         rsjobs.BackupPDCDataset,
         rsjobs.ReactivateDeletedDataset,
         rsjobs.RenameFile,
-        rsjobs.MoveSingleFile,
         rsjobs.DeleteEmptyDirectory,
-        rsjobs.DownloadPXProject,
-        rsjobs.RegisterExternalFile,
+        rsjobs.DownloadPXProject, # FIXME later
+        rsjobs.RegisterExternalFile,  # FIXME later
         rsjobs.ClassifyMSRawFile,
         anjobs.RunLongitudinalQCWorkflow,
         anjobs.RunNextflowWorkflow,

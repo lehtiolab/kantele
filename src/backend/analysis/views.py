@@ -5,12 +5,10 @@ import shutil
 from datetime import datetime, timedelta
 from collections import defaultdict
 from tempfile import NamedTemporaryFile
-from uuid import uuid4
 
 from django.utils import timezone
 from django.http import (HttpResponseForbidden, HttpResponse, JsonResponse,
         HttpResponseNotFound)
-from django.db import IntegrityError
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_GET, require_POST
 from django.shortcuts import render
@@ -18,7 +16,6 @@ from django.db.models import Q, Count
 
 from kantele import settings
 from analysis import models as am
-from analysis import jobs as aj
 from datasets import models as dm
 from datasets.views import get_quantprot_id
 from rawstatus import models as rm
@@ -673,9 +670,8 @@ def get_workflow_versioned(request):
     params = wf.paramset.psetparam_set.select_related('param')
     files = wf.paramset.psetfileparam_set.select_related('param')
     multifiles = wf.paramset.psetmultifileparam_set.select_related('param')
-    ftypes = [x['param__filetype_id'] for x in files.values('param__filetype_id').distinct()]
-    ftypes.extend([x['param__filetype_id'] for x in multifiles.values('param__filetype_id').distinct()])
-    ftypes = set(ftypes)
+    ftypes = {x['param__filetype_id'] for x in files.values('param__filetype_id').distinct()}
+    ftypes.update({x['param__filetype_id'] for x in multifiles.values('param__filetype_id').distinct()})
     selectable_files = [x for x in am.LibraryFile.objects.select_related('sfile__filetype').filter(
         sfile__filetype__in=ftypes).order_by('-sfile__regdate')]
     userfiles = [x for x in rm.UserFile.objects.select_related('sfile__filetype').filter(
@@ -1464,13 +1460,10 @@ def upload_servable_file(request):
         return JsonResponse({'msg': 'File is not servable'}, status=406)
     elif request.FILES:
         # store any potential servable file on share on web server
-        # FIXME web files are not currently tracked by an sfloc (or previously by an sf)
-        # need to setup a controller on the webshare :( for deleting
         webshare = rm.ServerShare.objects.filter(function=rm.ShareFunction.REPORTS).first()
-        #srvfile, _cr = StoredFileLoc.objects.get_or_create(sfile=sfile, servershare=webshare, path=data['outdir'])
         sfloc, _ = rm.StoredFileLoc.objects.get_or_create(sfile_id=data['sfid'], servershare=webshare,
                 path=data['path'])
-        # FIXME servershare path can be gotten from db
+        # FIXME servershare path webshare does not have fileservershare interface
         srvpath = os.path.join(settings.WEBSHARE, sfloc.path)
         srvdst = os.path.join(srvpath, sfloc.sfile.filename)
         try:

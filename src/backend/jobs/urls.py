@@ -19,5 +19,4 @@ urlpatterns = [
     path('pdcrestore/set/', views.restored_archive_file, name='restoredpdcarchive'),
     path('set/longqc/', views.store_longitudinal_qc, name='storelongqc'),
     path('set/analysis/', views.analysis_run_done, name='analysisdone'),
-    path('set/internalfile/', views.confirm_internal_file, name='internalfiledone'),
 ]

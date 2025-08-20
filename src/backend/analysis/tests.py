@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import os
 import json
 from glob import glob
+from time import sleep
 
 from django.core.management import call_command
 from django.utils import timezone
@@ -97,8 +98,7 @@ class AnalysisPageTest(BaseIntegrationTest):
         self.wf = am.UserWorkflow.objects.create(name='testwf', wftype=self.wftype, public=True)
         self.wf.nfwfversionparamsets.add(self.nfwf)
 
-        self.ssweb = rm.ServerShare.objects.create(name='web', max_security=1,
-                function=rm.ShareFunction.REPORTS)
+        # Web server for reports
         webserver = rm.FileServer.objects.create(name='web', uri='kantele.test',
                 fqdn='web', can_rsync_remote=False, is_analysis=False, rsyncusername='',
                 rsynckeyfile='')
@@ -674,7 +674,7 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.wf = am.UserWorkflow.objects.create(name='testwf', wftype=self.wftype, public=True)
         self.wf.nfwfversionparamsets.add(self.nfwf)
 
-    def test_new_analysis_and_run(self):
+    def test_new_analysis_and_run_and_purge(self):
         quant = self.ds.quantdataset.quanttype
         params = {'flags': {self.param1.pk: True}, 'inputparams': {self.param3.pk: 42}, 
                 'multicheck': {self.param2.pk: [self.popt1.pk]}}
