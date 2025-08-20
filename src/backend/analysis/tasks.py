@@ -34,6 +34,7 @@ def check_ensembl_uniprot_fasta_download(self, dbname, version, organism, dbtype
         taskfail_update_db(self.request.id, msg)
         raise
 
+    desc = 'Unknown database!'
     if dbname == 'uniprot':
         uptype = UniProtFasta.UniprotClass[dbtype]
         url = settings.UNIPROT_API.format(settings.UP_ORGS[organism],

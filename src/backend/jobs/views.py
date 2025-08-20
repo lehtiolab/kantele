@@ -270,8 +270,7 @@ def restored_archive_file(request):
     if 'client_id' not in data or not taskclient_authorized(
             data['client_id'], [settings.STORAGECLIENT_APIKEY]):
         return HttpResponseForbidden()
-    StoredFileLoc.objects.filter(pk=data['sflocid']).update(purged=False,
-            servershare_id=ServerShare.objects.get(name=data['serversharename']))
+    StoredFileLoc.objects.filter(pk=data['sflocid']).update(purged=False)
     if 'task' in request.POST:
         set_task_done(request.POST['task'])
     return HttpResponse()

@@ -88,7 +88,7 @@ class RsyncDatasetServershare(DatasetJob):
                 path=dst_dss['storage_loc'], servershare_id=kwargs['dstshare_id'],
                 active=True).exists():
             return ('There is already a file existing with the same name as a the target file'
-                    f' in path {dstpath}')
+                    f' in path {dst_dss["storage_loc"]}')
         return self._check_error_either(srcsfl, dst_dss['storage_loc'], **kwargs)
 
     def process(self, **kwargs):

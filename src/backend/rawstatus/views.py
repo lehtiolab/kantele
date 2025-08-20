@@ -587,17 +587,16 @@ def file_uploaded(request):
         return JsonResponse({'error': 'Bad request'}, status=400)
     producer = Producer.objects.values('pk', 'internal', 'msinstrument__filetype',
             'msinstrument__active').get(client_id=instrument_id)
+    is_active_ms, analysis = False, False
     if producer['msinstrument__filetype'] is not None:
         filetype = producer['msinstrument__filetype']
         is_active_ms = producer['internal'] and producer['msinstrument__active']
         uploadtype = UploadFileType.RAWFILE
     elif instrument_id == settings.ANALYSISCLIENT_APIKEY:
         analysis = Analysis.objects.get(pk=analysis_id)
-        is_active_ms = False
         filetype = StoredFileType.objects.get(name=settings.ANALYSIS_FT_NAME)
         uploadtype = UploadFileType.ANALYSIS
     elif data['is_library']:
-        is_active_ms = False
         filetype = StoredFileType.objects.get(pk=data['filetype_id'])
         uploadtype = UploadFileType.LIBRARY
     else:
@@ -624,11 +623,11 @@ def file_uploaded(request):
 
     if is_active_ms:
         # FIXME do more things here!
-        create_job('classify_msrawfile', sfloc_id=sfloc.pk, token=upload.token)
+        create_job('classify_msrawfile', sfloc_id=sfl.pk)#, token=upload.token)
         # backup is done after the classify job (remove failing files)
     elif instrument_id == settings.ANALYSISCLIENT_APIKEY:
         AnalysisResultFile.objects.get_or_create(sfile=sf, analysis=analysis)
-        sensitive_data = False
+        rsjob, sensitive_data = False, False
         if not raw_created:
             # update timestamp on sfl: file can be from this or an older analysis 
             # result (in which case they share it)
@@ -1114,7 +1113,7 @@ def restore_file_from_cold(request):
     if sfl_bup_q := sfloc_q.filter(servershare_id__in=data['share_ids']):
         # determine where to back up to, preferably a place the user wants to
         sfl_bup = sfl_bup_q.first()
-    elif sfl_inbox_q := sfloq_q.filter(servershare__function=ShareFunction.INBOX):
+    elif sfl_inbox_q := sfloc_q.filter(servershare__function=ShareFunction.INBOX):
         # if that is not avail, pick inbox
         sfl_bup = sfl_inbox_q.first()
     else:

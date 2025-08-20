@@ -522,8 +522,9 @@ def populate_dset(dsids, dbdsets, user):
 
         # Pending files #inbox_sfl.exists() 
         dss = dsmodels.DatasetServer.objects.filter(dataset_id=dset['pk']).values('pk')
-        if jm.Job.objects.filter(state=jj.Jobstates.HOLD, funcname='rsync_dset_files_to_servershare',
-                kwargs__dss_id__in=[x['pk'] for x in dss]).exists():
+        if nrpenjobs := jm.Job.objects.filter(state=jj.Jobstates.HOLD,
+                funcname='rsync_dset_files_to_servershare',
+                kwargs__dss_id__in=[x['pk'] for x in dss]).count():
                 # Unknowns: sfloc_ids, dstshare_id, dstsfloc_ids, cant query kwargs for those
             dsets[dset['pk']]['smallstatus'].append({'text': f'{nrpenjobs} pending raw files',
                 'state': 'pending'})
@@ -832,7 +833,7 @@ def fetch_dset_details(dset):
             except KeyError:
                 pass
             else:
-                info[mzj['job__funcname']].append(job_pwid)
+                info[job['funcname']].append(job.kwargs['pwiz_id'])
         pw_sets = parse_mzml_pwiz({}, anmodels.Proteowizard.objects.filter(
             mzmlfile__sfile__rawfile__datasetrawfile__dataset=dset, mzmlfile__sfile__deleted=True),
             'deleted')

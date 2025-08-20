@@ -51,7 +51,7 @@ class AnalysisPageTest(BaseIntegrationTest):
                 usetype=rm.UploadFileType.USERFILE)
         self.sfusr = rm.StoredFile.objects.create(rawfile=self.usrfraw, md5=self.usrfraw.source_md5,
                 filetype=self.uft, filename=self.usrfraw.name, checked=True)
-        rm.StoredFileLoc.objects.create(sfile=self.sfusr, servershare=self.ssnewstore, path='',
+        rm.StoredFileLoc.objects.create(sfile=self.sfusr, servershare=self.sslib, path='',
                 purged=False, active=True)
         self.usedtoken = rm.UploadToken.objects.create(user=self.user, token='usrffailtoken',
                 expired=False, producer=self.prod, filetype=self.uft,
@@ -741,6 +741,7 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
         self.cl.post('/analysis/start/', content_type='application/json',
                 data={'analysis_id': resp.json()['analysis_id']})
+        self.run_job() # rsync extra files
         self.run_job() # run the analysis
         self.run_job() # rsync the results
         reports = rm.StoredFileLoc.objects.filter(sfile__filename='report.html', purged=False)

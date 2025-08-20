@@ -116,7 +116,8 @@ class BaseJob:
         return []
 
     def on_create_prep_rsync_jobs(self, **kwargs):
-        '''If needed, rsync the DB and other singlefiles which is not on the analysis share'''
+        '''If needed, rsync the DB and other singlefiles which is not on the analysis share,
+        this function provides a dict with the job name and kwargs for that'''
         newjobs = []
         if all_exfiles_sfpk := self._get_extrafiles_to_rsync(**kwargs):
             extra_sfl_q = StoredFileLoc.objects.filter(sfile_id__in=all_exfiles_sfpk, active=True)

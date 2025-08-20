@@ -88,15 +88,9 @@ class RefineMzmls(DatasetJob):
         analysis.nextflowsearch.save()
         nfwf = models.NextflowWfVersionParamset.objects.get(pk=kwargs['wfv_id'])
 
-        dbfn_q = rm.StoredFileLoc.objects.filter(sfile_id=kwargs['dbfn_id'],
-                servershare__fileservershare__server=anaserver)
-        if dbfn_q.exists():
-            dbfn = dbfn_q.values('servershare_id', 'path', 'sfile__filename').first()
-        else:
-            # FIXME should rsync 
-            # - cannot error here, since we dont know beforehand 
-            # which analysis server is being used, making that a non-actionable problem
-            pass
+        dbfn = rm.StoredFileLoc.objects.filter(sfile_id=kwargs['dbfn_id'],
+                servershare__fileservershare__server=anaserver).values('servershare_id', 'path',
+                        'sfile__filename').first()
         
         stagefiles = {'--tdb': [(os.path.join(sharemap[dbfn['servershare_id']], dbfn['path']),
             dbfn['sfile__filename'])]}
@@ -280,7 +274,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
                 raise RuntimeError(f'No file on analysis disk for {flag}')
         for flag, sfids in kwargs['inputs']['multifiles'].items():
             stagefiles[flag] = []
-            for sfids in sfids:
+            for sfid in sfids:
                 if sfl_q := rm.StoredFileLoc.objects.filter(sfile_id=sfid,
                         servershare__fileservershare__server_id=kwargs['fserver_id'],
                         active=True).values('servershare_id', 'path', 'sfile__filename'):

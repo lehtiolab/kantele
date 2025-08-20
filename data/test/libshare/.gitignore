@@ -1,0 +1,5 @@
+# teststorage/uploads shared tmpdir between containers for testing uploads 
+# can be wiped, contents should not be in repo
+# ignore everything except this file in the folder
+*
+!.gitignore

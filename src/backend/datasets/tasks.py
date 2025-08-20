@@ -28,7 +28,7 @@ def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profile
         try:
             os.makedirs(rawdir, exist_ok=True)
         except (OSError, PermissionError):
-            taskfail_update_db(taskid, 'Could not create workdir on analysis server')
+            taskfail_update_db(self.request.id, 'Could not create workdir on analysis server')
             raise
         copy_stage_files(rawdir, raws)
         params.extend(['--raws', os.path.join(rawdir, '*')])
@@ -41,7 +41,7 @@ def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profile
         errmsg = process_error_from_nf_log(os.path.join(gitwfdir, '.nextflow.log'))
         taskfail_update_db(self.request.id, errmsg)
         raise RuntimeError('Error occurred converting mzML files: '
-                           '{}\n\nERROR MESSAGE:\n{}'.format(rundir, errmsg))
+                           f'{basedir}\n\nERROR MESSAGE:\n{errmsg}')
     # Technically we can dump straight to infile paths
     token = False
     transfer_url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))

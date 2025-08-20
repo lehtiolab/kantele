@@ -621,7 +621,7 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
             for dstshare_id in dstshare_classes['rsync_sourcable']:
                 rsjob = create_job('rsync_dset_files_to_servershare', dstshare_id=dstshare_id,
                         dss_id=share_ids_dss_map[dstshare_id], sfloc_ids=src_sfloc_ids)
-                src_sflids_for_remote = srcjob['kwargs']['dstsfloc_ids']
+                src_sflids_for_remote = rsjob['kwargs']['dstsfloc_ids']
             if dstshare_classes['remote'] and not dstshare_classes['rsync_sourcable']:
                 # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
                 # controller (and sensitive classed)
@@ -632,7 +632,7 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
                     inboxjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflpk,
                             dstshare_id=dstshare['pk'], dstpath=filemodels.ServerShare.get_inbox_path(
                                 dset_id=dset.pk))
-                    src_sflids_for_remote.append(srcjob['kwargs']['dstsfloc_id'])
+                    src_sflids_for_remote.append(inboxjob['kwargs']['dstsfloc_id'])
             for dstshare_id in dstshare_classes['remote']:
                 create_job('rsync_dset_files_to_servershare', dss_id=share_ids_dss_map[dstshare_id],
                         sfloc_ids=src_sflids_for_remote, dstshare_id=dstshare_id)
@@ -1083,8 +1083,8 @@ def rename_project(request):
     return JsonResponse({})
 
 
-@login_required
-def move_project_active(request):
+#@login_required
+#def move_project_active(request):
     # This endpoint is disabled in URLs
     # FIXME This method should only be for admin, need to decouple 
     # - I have to send these raw files somewhere / reanalyze
@@ -1092,33 +1092,33 @@ def move_project_active(request):
     # Data should always be avail to reanalyze (e.g. on sens server) until purge from backup
     # This should be fixed when doing the new raw file setup (avail on analysis server, etc)
 
-    data = json.loads(request.body.decode('utf-8'))
-    if 'item_id' not in data or not data['item_id']:
-        return JsonResponse({'state': 'error', 'error': 'No project specified for reactivating'}, status=400)
-    projquery = models.Project.objects.filter(pk=data['item_id'], active=False)
-    if not projquery:
-        return JsonResponse({'state': 'error', 'error': 'Project is already active, or does not exist'}, status=403)
-    # Reactivating a project is only allowed if user owns ALL datasets in project or is staff
-    dsetowners = models.DatasetOwner.objects.filter(dataset__runname__experiment__project_id=data['item_id'], dataset__purged=False).select_related('dataset')
-    if dsetowners.filter(user=request.user).count() != dsetowners.distinct('dataset').count() and not request.user.is_staff:
-        return JsonResponse({'state': 'error', 'error': 'User has no permission to reactivate this project, does not own all datasets in project'}, status=403)
-    # Reactivate all datasets
-    result = {'errormsgs': []}
-    for dso in dsetowners.distinct('dataset'):
-        reactivated = reactivate_dataset(dso.dataset)
-        if reactivated['state'] == 'error':
-            result.update({'state': 'error', 'error': 'Not all project datasets could be reactivated.'})
-            result['errormsgs'].append(f'Problem with dataset {dso.dataset.pk}: {reactivated["error"]}')
-        else:
-            # if ANY dataset gets reactivated, project is active
-            projquery.update(active=True)
-    if result['errormsgs']:
-        result['error'] = f'{result["error"]} {"; ".join(result.pop("errormsgs"))}'
-        return JsonResponse(result, status=500)
-    else:
-        models.ProjectLog.objects.create(project_id=data['item_id'], level=models.ProjLogLevels.INFO,
-                message=f'User {request.user.id} reopened project')
-        return JsonResponse({})
+    #data = json.loads(request.body.decode('utf-8'))
+    #if 'item_id' not in data or not data['item_id']:
+    #    return JsonResponse({'state': 'error', 'error': 'No project specified for reactivating'}, status=400)
+    #projquery = models.Project.objects.filter(pk=data['item_id'], active=False)
+    #if not projquery:
+    #    return JsonResponse({'state': 'error', 'error': 'Project is already active, or does not exist'}, status=403)
+    ## Reactivating a project is only allowed if user owns ALL datasets in project or is staff
+    #dsetowners = models.DatasetOwner.objects.filter(dataset__runname__experiment__project_id=data['item_id'], dataset__purged=False).select_related('dataset')
+    #if dsetowners.filter(user=request.user).count() != dsetowners.distinct('dataset').count() and not request.user.is_staff:
+    #    return JsonResponse({'state': 'error', 'error': 'User has no permission to reactivate this project, does not own all datasets in project'}, status=403)
+    ## Reactivate all datasets
+    #result = {'errormsgs': []}
+    #for dso in dsetowners.distinct('dataset'):
+    #    reactivated = reactivate_dataset(dso.dataset)
+    #    if reactivated['state'] == 'error':
+    #        result.update({'state': 'error', 'error': 'Not all project datasets could be reactivated.'})
+    #        result['errormsgs'].append(f'Problem with dataset {dso.dataset.pk}: {reactivated["error"]}')
+    #    else:
+    #        # if ANY dataset gets reactivated, project is active
+    #        projquery.update(active=True)
+    #if result['errormsgs']:
+    #    result['error'] = f'{result["error"]} {"; ".join(result.pop("errormsgs"))}'
+    #    return JsonResponse(result, status=500)
+    #else:
+    #    models.ProjectLog.objects.create(project_id=data['item_id'], level=models.ProjLogLevels.INFO,
+    #            message=f'User {request.user.id} reopened project')
+    #    return JsonResponse({})
 
 
 @login_required
