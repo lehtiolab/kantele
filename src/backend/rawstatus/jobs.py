@@ -361,6 +361,7 @@ class DownloadPXProject(DatasetJob):
     def oncreate_getfiles_query(self, **kwargs):
         # FIXME not used
         return rm.StoredFileLoc.objects.filter(sfile__rawfile_id__in=kwargs['shasums'], 
+
             checked=False).select_related('rawfile')
     
     def process(self, **kwargs):

@@ -451,6 +451,7 @@ def get_files_transferstate(request):
             # There is an unlikely rsync job which is canceled, requeue it
             create_job('rsync_transfer_fromweb', sfloc_id=sfnss.pk, src_path=up_dst)
             tstate = 'wait'
+
     response = {'transferstate': tstate, 'fn_id': rfn.pk}
     return JsonResponse(response)
 

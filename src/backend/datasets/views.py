@@ -1475,7 +1475,7 @@ def save_dataset(request):
         except models.Project.DoesNotExist:
             return JsonResponse({'error': f'Project {data["project_id"]} is not active'}, status=403)
         if data['datatype_id'] in settings.LC_DTYPE_IDS:
-            experiment = models.Experiment.objects.get_or_create(project=project, name=settings.LCEXPNAME)
+            experiment, _ = models.Experiment.objects.get_or_create(project=project, name=settings.LCEXPNAME)
             runname = models.RunName.objects.create(name=data['runname'], experiment=experiment)
         else:
             if 'newexperimentname' in data and data['newexperimentname']:
