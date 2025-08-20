@@ -515,7 +515,7 @@ def get_datasets(request, wfversion_id):
         # Get dataset files
         dssfiles = rm.StoredFile.objects.select_related('rawfile__producer', 'filetype').filter(
                 rawfile__datasetrawfile__dataset=dset, deleted=False,
-                storedfileloc__purged=False, checked=True)
+                storedfileloc__active=True, checked=True)
         dsrawfiles = dssfiles.filter(mzmlfile__isnull=True)
 
         # For reporting in interface and checking
@@ -1345,8 +1345,8 @@ def purge_analysis(request):
         shareid, path = share_path.split('__')
         purgejob = create_job('purge_files', sfloc_ids=sfloc_ids)
         if not purgejob['error']:
+            rm.StoredFileLoc.objects.filter(pk__in=sfloc_ids).update(active=False)
             rmdirjob = create_job('delete_empty_directory', sfloc_ids=sfloc_ids, path=path, share_id=shareid)
-            sfls.update(active=False)
     return JsonResponse({})
 
 

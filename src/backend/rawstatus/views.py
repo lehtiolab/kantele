@@ -42,7 +42,7 @@ UPLOAD_DESTINATIONS = {
         # FIXME when new upload script finished, remove rawfile from here (only for manual via web)
         # also remove raw uploads fom rawstatus/tests then
         UploadFileType.RAWFILE: (ShareFunction.INBOX, settings.TMPPATH),
-        UploadFileType.ANALYSIS: (ShareFunction.ANALYSISRESULTS, False),
+        UploadFileType.ANALYSIS: (ShareFunction.ANALYSIS_DELIVERY, False),
         UploadFileType.LIBRARY: (ShareFunction.LIBRARY, settings.LIBRARY_FILE_PATH),
         UploadFileType.USERFILE: (ShareFunction.LIBRARY, settings.LIBRARY_FILE_PATH),
         }
@@ -607,17 +607,19 @@ def file_uploaded(request):
     rfn, raw_created = RawFile.objects.get_or_create(source_md5=md5, defaults={
         'name': fn, 'producer_id': producer['pk'], 'size': size, 'date': file_date,
         'claimed': claimed, 'usetype': uploadtype})
-    if not raw_created:
-        # FIXME if it somehow crashed, maybe theres a rawfile but not
-        # a backup? - make sure to check also backups and sflocs available
-        return JsonResponse({'error': 'This file is already in the '
-            f'system: {rfn.name}, if you are re-uploading a previously '
-            'deleted file, consider reactivating from backup, or contact admin',
-            'problem': 'ALREADY_EXISTS'}, status=409)
     sf, _ = StoredFile.objects.get_or_create(rawfile=rfn, filetype=filetype, md5=rfn.source_md5,
             defaults={'filename': fn, 'checked': True})
     sfl, _ = StoredFileLoc.objects.get_or_create(sfile=sf, servershare_id=share_id,
             path=sfl_path, defaults={'purged': False})
+    if not raw_created:
+        # If there is a raw, there will also be an SF and SFL if it has been done in this
+        # method - so we can safely get_or_create those. The file exists on disk somehwere,
+        # or in backup. For analysis this is accepted, but error for raw inflow
+        if instrument_id != settings.ANALYSISCLIENT_APIKEY:
+            return JsonResponse({'error': 'This file is already in the '
+                f'system: {rfn.name}, if you are re-uploading a previously '
+                'deleted file, consider reactivating from backup, or contact admin',
+                'problem': 'ALREADY_EXISTS'}, status=409)
 
     if is_active_ms:
         # FIXME do more things here!
@@ -626,6 +628,10 @@ def file_uploaded(request):
     elif instrument_id == settings.ANALYSISCLIENT_APIKEY:
         AnalysisResultFile.objects.get_or_create(sfile=sf, analysis=analysis)
         sensitive_data = False
+        if not raw_created:
+            # update timestamp on sfl: file can be from this or an older analysis 
+            # result (in which case they share it)
+            sfl.save()
         if sensitive_data:
             # Only dump in sens OK data storage, if that is set up, to do backups from
             # and in the delivery storage if needed
@@ -637,11 +643,13 @@ def file_uploaded(request):
             pass
         else:
             # Rsync non-sensitive data to the public data storage
-            # FIXME do not use analysisharename, try instead public/sens w function=analysis
             dstshare = ServerShare.objects.values('pk').get(active=True,
-                    function=ShareFunction.ANALYSISRESULTS)
-            rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sfl.pk,
-                dstshare_id=dstshare['pk'], dstpath=analysis.get_public_output_dir())
+                    function=ShareFunction.ANALYSIS_DELIVERY)
+            # Only rsync new files (most cases) or multi-analyses-shared files which are
+            # not existing in dstshare yet
+            if raw_created:
+                rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sfl.pk,
+                    dstshare_id=dstshare['pk'], dstpath=analysis.get_public_output_dir())
             create_job('create_pdc_archive', sfloc_id=rsjob['kwargs']['dstsfloc_id'],
                     isdir=sf.filetype.is_folder)
     elif data.get('is_library', False):
@@ -666,7 +674,8 @@ def file_uploaded(request):
             rs_kwargs.append(kwargs)
         [create_job(**kwargs) for args in rs_kwargs]
         create_job('create_pdc_archive', sfloc_id=sfl.pk, isdir=sf.filetype.is_folder)
-    return JsonResponse({'rfid': rfn.pk, 'sfid': sf.pk, 'sflid': sfl.pk, 'path': sfl.path})
+    return JsonResponse({'error': False, 'rfid': rfn.pk, 'sfid': sf.pk, 'sflid': sfl.pk,
+        'path': sfl.path})
 
 
 def process_file_confirmed_ready(rfn, sfn, sfloc, upload, desc):
@@ -867,7 +876,7 @@ def transfer_file(request):
     if not created:
         # Is this possible? Above checking with sfns.count() for both checked and non-checekd
         print('File already registered as transferred')
-        dstsss = StoredFileLoc.objects.get(sfile=file_trf, servershare__function=dstsharefun, path=dstpath)
+        dstsss = StoredFileLoc.objects.get(sfile=file_trf, servershare__function=dstsharefun)
     else:
         # Now transfer to dst share (library share on controller)
         dstshare = ServerShare.objects.filter(function=dstsharefun).first()

@@ -123,8 +123,8 @@ class TestUploadScript(BaseIntegrationTest):
         # Have ledger with f3sf md5 so system thinks it's already done
         fpath = os.path.join(self.rootdir, self.newstorctrl.path, self.f3sss.path)
         fullp = os.path.join(fpath, self.f3sf.filename)
-        self.f3sss.servershare = self.ssinbox
-        self.f3sss.save()
+        self.f3sssinbox.active = True
+        self.f3sssinbox.save()
         self.f3raw.producer = self.adminprod
         self.f3raw.save()
         timestamp = os.path.getctime(fullp)
@@ -140,7 +140,7 @@ class TestUploadScript(BaseIntegrationTest):
                 }}, fp)
 
         cmsjobs = jm.Job.objects.filter(funcname='classify_msrawfile', kwargs={
-            'sfloc_id': self.f3sss.pk, 'token': self.token})
+            'sfloc_id': self.f3sssinbox.pk, 'token': self.token})
         self.assertEqual(cmsjobs.count(), 0)
         # Can use subproc run here since the process will finish - no need to sleep/run jobs
         cmd = ['python3', 'rawstatus/file_inputs/upload.py', '--files', fullp, '--token', self.user_token]
@@ -165,9 +165,9 @@ class TestUploadScript(BaseIntegrationTest):
         self.user_token = self.token['user_token']
 
     def test_new_file(self):
-        # Use same file as f3sf but actually take its md5 and therefore it is new
         # Testing all the way from register to upload
         # This file is of filetype self.ft which is is_folder
+        self.f3raw.delete()
         self.get_token()
         fpath = os.path.join(self.rootdir, self.newstorctrl.path, self.f3sss.path) 
         fullp = os.path.join(fpath, self.f3sf.filename)
@@ -237,11 +237,7 @@ class TestUploadScript(BaseIntegrationTest):
         self.f3sf.checked = False
         self.f3sf.save()
         self.f3sfmz.delete()
-        self.f3sss.servershare = self.ssinbox
-        self.f3sss.path = settings.TMPPATH
-        self.f3sss.purged = True
-        self.f3sss.save()
-        jm.Job.objects.create(funcname='rsync_transfer_fromweb', kwargs={'sfloc_id': self.f3sss.pk,
+        jm.Job.objects.create(funcname='rsync_transfer_fromweb', kwargs={'sfloc_id': self.f3sssinbox.pk,
             'src_path': os.path.join(settings.TMP_UPLOADPATH, f'{self.f3raw.pk}.{self.f3sf.filetype.filetype}')},
             timestamp=timezone.now(), state=jj.Jobstates.DONE)
         fullp = os.path.join(fpath, self.f3sf.filename)
@@ -288,9 +284,6 @@ class TestUploadScript(BaseIntegrationTest):
         # Test trying to upload file with same name/path but diff MD5
         fpath = os.path.join(self.rootdir, self.newstorctrl.path, self.f3sss.path)
         fullp = os.path.join(fpath, self.f3sf.filename)
-        self.f3sss.servershare = self.ssinbox
-        self.f3sss.path = settings.TMPPATH
-        self.f3sss.save()
         lastraw = rm.RawFile.objects.last()
         lastsf = rm.StoredFile.objects.last()
         tmpdir = mkdtemp()
@@ -324,7 +317,7 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to {self.live_server_url}',
                 f'Moving file {newraw.name} to skipbox',
                 f'Another file in the system has the same name and is stored in the same path '
-                f'({self.f3sss.path}/{self.f3sf.filename}). Please '
+                f'({self.f3sssinbox.path}/{self.f3sf.filename}). Please '
                 'investigate, possibly change the file name or location of this or the other file '
                 'to enable transfer without overwriting.']
         outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
@@ -346,6 +339,7 @@ class TestUploadScript(BaseIntegrationTest):
                 producer=self.adminprod, size=123, date=timezone.now(), claimed=False,
                 usetype=rm.UploadFileType.RAWFILE)
         lastsf = rm.StoredFile.objects.last()
+        self.f3raw.delete()
         sp = self.run_script(fullp)
         sleep(1)
         # Run the rsync
@@ -379,9 +373,6 @@ class TestUploadScript(BaseIntegrationTest):
         self.f3raw.save()
         self.f3sf.checked = False
         self.f3sfmz.delete()
-        self.f3sss.servershare = self.ssinbox
-        self.f3sss.path = settings.TMPPATH
-        self.f3sss.save()
         self.f3sf.save()
         timestamp = os.path.getctime(fullp)
         cts_id = f'{timestamp}__{self.f3raw.size}'
@@ -436,6 +427,7 @@ class TestUploadScript(BaseIntegrationTest):
         self.uploadtoken = rm.UploadToken.objects.create(user=self.user, token=self.token,
                 expires=timezone.now() + timedelta(settings.TOKEN_RENEWAL_WINDOW_DAYS + 1), expired=False,
                 producer=self.prod, filetype=self.ft, uploadtype=rm.UploadFileType.RAWFILE)
+        self.f3raw.delete()
         fpath = os.path.join(self.rootdir, self.newstorctrl.path, self.f3sss.path)
         fullp = os.path.join(fpath, self.f3sf.filename)
         with open(os.path.join(fullp, 'HyStarMetadata_template.xml')) as fp:
@@ -602,7 +594,7 @@ class TestUploadScript(BaseIntegrationTest):
                 producer=self.prod, filetype=self.ft, uploadtype=rm.UploadFileType.RAWFILE)
         fpath = os.path.join(self.rootdir, self.newstorctrl.path, self.f3sss.path)
         fullp = os.path.join(fpath, self.f3sf.filename)
-        old_raw = rm.RawFile.objects.last()
+        self.f3raw.delete()
         tmpdir = mkdtemp()
         outbox = os.path.join(tmpdir, 'testoutbox')
         os.makedirs(outbox, exist_ok=True)
@@ -675,7 +667,7 @@ class TestUploadScript(BaseIntegrationTest):
             self.assertEqual(out, exp)
 
     def do_transfer_dset_assoc(self, *, ds_exists, ds_hasfiles):
-        # Test trying to upload file with same name/path but diff MD5
+        self.f3raw.delete()
         self.token = 'prodtoken_noadminprod'
         self.uploadtoken = rm.UploadToken.objects.create(user=self.user, token=self.token,
                 expires=timezone.now() + timedelta(settings.TOKEN_RENEWAL_WINDOW_DAYS + 1), expired=False,
@@ -779,7 +771,6 @@ class TransferStateTest(BaseFilesTest):
 
     def setUp(self):
         super().setUp()
-        self.primshare = rm.ServerShare.objects.get(name=settings.PRIMARY_STORAGESHARENAME)
         self.trfraw = rm.RawFile.objects.create(name='filetrf', producer=self.prod, source_md5='defghi123',
                 size=100, date=timezone.now(), claimed=False, usetype=rm.UploadFileType.RAWFILE)
         self.doneraw = rm.RawFile.objects.create(name='filedone', producer=self.prod, source_md5='jklmnop123',
@@ -849,7 +840,7 @@ class TransferStateTest(BaseFilesTest):
                 kwargs__dstpath=settings.LIBRARY_FILE_PATH)
         self.assertEqual(jobs.count(), 1)
         pdcjobs = jm.Job.objects.filter(funcname='create_pdc_archive', kwargs={
-            'sfloc_id': sflib.pk, 'isdir': sflib.filetype.is_folder})
+            'sfloc_id': sfloc.pk, 'isdir': sflib.filetype.is_folder})
         self.assertEqual(pdcjobs.count(), 1)
 
     def test_trfstate_done_usrfile(self):
@@ -1026,7 +1017,7 @@ class TestFileTransfer(BaseFilesTest):
         upload_file = os.path.join(settings.TMP_UPLOADPATH,
                 f'{self.registered_raw.pk}.{self.uploadtoken.filetype.filetype}')
         jobs = jm.Job.objects.filter(funcname='rsync_transfer_fromweb', kwargs={
-            'src_path': upload_file, 'sfloc_id': sf.pk})
+            'src_path': upload_file, 'sfloc_id': sfns.get().pk})
         self.assertEqual(jobs.count(), 1)
         job = jobs.get()
         # this may fail occasionally
@@ -1279,69 +1270,8 @@ class TestDownloadUploadScripts(BaseFilesTest):
             self.assertEqual(contents[fn], self.zipsizes[fn])
 
 
-class TestPurgeFilesJob(ProcessJobTest):
-    jobclass = rjobs.PurgeFiles
-
-    def test_fns(self):
-        kwargs = {'sfloc_ids': [self.f3sss.pk, self.oldsss.pk]}
-        self.job.process(**kwargs)
-        exp_t = [
-                ((self.f3sss.servershare.name, os.path.join(self.f3sss.path, self.f3sf.filename),
-                    self.f3sf.pk, self.f3sf.filetype.is_folder), {}),
-                ((self.oldsss.servershare.name, os.path.join(self.oldsss.path, self.oldsf.filename),
-                    self.oldsf.pk, self.oldsf.filetype.is_folder), {})
-                ]
-        self.check(exp_t)
-
-    def test_is_dir(self):
-        self.ft.is_folder = True
-        self.ft.save()
-        kwargs = {'sfloc_ids': [self.f3sss.pk, self.f3mzsss.pk]}
-        self.job.process(**kwargs)
-        exp_t = [
-                ((self.f3sss.servershare.name, os.path.join(self.f3sss.path, self.f3sf.filename),
-                    self.f3sf.pk, True), {}),
-                ((self.f3mzsss.servershare.name, os.path.join(self.f3mzsss.path, self.f3sfmz.filename),
-                    self.f3sfmz.pk, False), {})
-                ]
-        self.check(exp_t)
-
-
-class TestMoveSingleFile(ProcessJobTest):
-    jobclass = rjobs.MoveSingleFile
-
-    def test_mv_fn(self):
-        newpath = os.path.split(self.f3sss.path)[0]
-        kwargs = {'sfloc_id': self.f3sss.pk, 'dst_path': newpath}
-        self.assertEqual(self.job.check_error(**kwargs), False)
-        self.job.process(**kwargs)
-        exp_t = [((self.f3sf.filename, self.f3sss.servershare.name, self.f3sss.path, newpath,
-            self.f3sf.pk, self.f3sss.servershare.name), {})]
-        self.check(exp_t)
-
-    def test_error_duplicatefn(self):
-        # Another fn exists w same name
-        oldraw = rm.RawFile.objects.create(name=self.f3sf.filename, producer=self.prod,
-                source_md5='rename_oldraw_fakemd5', size=10, date=timezone.now(), claimed=True)
-        sf = rm.StoredFile.objects.create(rawfile=oldraw, filename=self.f3sf.filename, md5=oldraw.source_md5,
-                filetype=self.ft, checked=True)
-        sfloc = rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.f3sss.servershare,
-                path='oldpath')
-        newpath = os.path.split(self.f3path)
-        kwargs = {'sfloc_id': sfloc.pk, 'dst_path': self.f3sss.path}
-        self.assertIn('A file in path', self.job.check_error(**kwargs))
-        self.assertIn('already exists. Please choose another', self.job.check_error(**kwargs))
-
-        # A dataset has the same name as the file
-        run = dm.RunName.objects.create(name='run1.raw', experiment=self.exp1)
-        storloc = os.path.join(self.p1.name, self.exp1.name, self.dtype.name, run.name)
-        ds = dm.Dataset.objects.create(date=self.p1.registered, runname=run,
-                datatype=self.dtype, storageshare=self.ssnewstore, storage_loc=storloc,
-                securityclass=1)
-        newpath, newname = os.path.split(storloc)
-        kwargs = {'sfloc_id': sfloc.pk, 'dst_path': newpath, 'newname': newname}
-        self.assertIn('A dataset with the same directory name as your new', self.job.check_error(**kwargs))
-
+# Job tests should test failure modes of jobs, the success happy path is tested inside the
+# integration tests
 
 class TestRenameFile(BaseIntegrationTest):
     url = '/files/rename/'

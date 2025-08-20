@@ -72,7 +72,7 @@ class BaseTest(TestCase):
         self.ana_newstor = rm.FileserverShare.objects.create(server=self.anaserver,
                 share=self.ssnewstore, path=os.path.join(self.rootdir, 'newstorage'))
         self.ssana = rm.ServerShare.objects.create(name='analysisfakename', max_security=1,
-                function=rm.ShareFunction.ANALYSISRESULTS)
+                function=rm.ShareFunction.ANALYSIS_DELIVERY)
         self.anashare = rm.FileserverShare.objects.create(server=self.storagecontroller, share=self.ssana,
                 path=os.path.join(self.rootdir, 'analysis'))
         # web share without a controller

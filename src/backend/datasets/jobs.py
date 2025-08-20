@@ -164,6 +164,11 @@ class RemoveDatasetFilesFromServershare(DatasetJob):
     queue = False
     task = filetasks.delete_file
 
+    def update_sourcefns_lastused(self, **kwargs):
+        '''Normally this updates timestamp on files, but since they
+        get deleted here, we do nothing'''
+        pass
+
     def check_error_on_creation(self, **kwargs):
         srcsfs = self.oncreate_getfiles_query(**kwargs)
         if srcsfs.filter(active=True).count() < len(kwargs['sfloc_ids']):

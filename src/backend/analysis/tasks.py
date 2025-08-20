@@ -178,18 +178,24 @@ def run_nextflow_workflow(self, run, params, stagefiles, profiles, nf_version, s
         # FIXME sharepath == NF_RUNDIR? Can we pass from job/db?
         full_path, fn = os.path.split(ofile)
         path = os.path.relpath(full_path, settings.NF_RUNDIR)
-        regfile = register_resultfile(fn, path, server_id=run['server_id'],
+        regresp = register_resultfile(fn, path, server_id=run['server_id'],
                 analysis_id=run['analysis_id'], sharepath=settings.NF_RUNDIR)
-        # FIXME this also, sometimes files with same MD5 arrive twice - can that be handled??:
-        # Yes - analysis/sfile can possibly have multiple analysis per sfile
-        if not regfile:
+        if not regresp:
+            # 500 error, no JSON
+            continue
+        elif regresp['error']:
+            # file can either be existing from a crashed-rerun, or from a similar analysis which
+            # produced the same file (i.e. param changed but no effect)
+            # file will have a new timestamp if it's from analysis, so it wont get deleted
+            raise RuntimeError('An error occurred trying to register analysis result file: '
+                    f'{regresp["error"]}')
             continue
         checksrvurl = urljoin(settings.KANTELEHOST, reverse('analysis:checkfileupload'))
         resp = requests.post(checksrvurl, json={'fname': fn, 'client_id': settings.APIKEY})
         if resp.status_code == 200:
             # Servable file found, upload also to web server
             # Somewhat complex POST to get JSON and files in same request
-            postdata = {'client_id': settings.APIKEY, 'sfid': regfile['sfid'], 'fname': fn,
+            postdata = {'client_id': settings.APIKEY, 'sfid': regresp['sfid'], 'fname': fn,
                     'path': os.path.basename(rundir)}
             response = requests.post(checksrvurl, files={
                 'ana_file': (fn, open(ofile, 'rb'), 'application/octet-stream'),

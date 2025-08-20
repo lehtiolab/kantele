@@ -105,7 +105,8 @@ def dataset_info(request, project_id, dataset_id=False):
             datatype_id=dset.datatype_id).select_related('component')
         project = dset.runname.experiment.project
         ds_servers = {x.storageshare_id: x.storage_loc_ui for x in
-                models.DatasetServer.objects.filter(dataset=dset, active=True)}
+                models.DatasetServer.objects.filter(dataset=dset, active=True,
+                    storageshare__function=filemodels.ShareFunction.RAWDATA)}
         response_json['dsinfo'] = {
                 'dataset_id': dset.id,
                 'experiment_id': dset.runname.experiment_id,

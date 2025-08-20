@@ -35,7 +35,7 @@ class Producer(models.Model):
     name = models.TextField()
     # client_id is a hash, so users cant accidentally mess up the identifier when
     # they edit transfer script, e.g. increment the client PK if that would be used
-    client_id = models.TextField()
+    client_id = models.TextField(unique=True)
     shortname = models.TextField()
     internal = models.BooleanField(default=False, help_text='Internal instrument with own raw file upload client')
 
@@ -90,10 +90,11 @@ class ShareFunction(models.IntegerChoices):
     raw storage (e.g. on remote analysis server)
     Only reports is likely to only be a single share since it is on web server'''
     RAWDATA = 1, 'Raw data'
-    ANALYSISRESULTS = 2, 'Analysis results'
+    ANALYSIS_DELIVERY = 2, 'Analysis results for user delivery, only 1 can exist'
     REPORTS = 3, 'Reports on web server'
     INBOX = 4, 'File inflow and tmp storage'
     LIBRARY = 5, 'Library and user reference files'
+    ANALYSISRESULTS = 6, 'Analysis results local to analysis server'
 
 
 class ServerShare(models.Model):

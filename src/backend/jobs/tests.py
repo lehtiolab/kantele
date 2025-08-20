@@ -122,7 +122,7 @@ class TestUpdateStorageLocFile(BaseJobTest):
 
     def test_one_fnid(self):
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'client_id': settings.ANALYSISCLIENT_APIKEY, 'sfloc_id': self.oldsf.pk,
+                data={'client_id': settings.ANALYSISCLIENT_APIKEY, 'sfloc_id': self.oldsss.pk,
                     'dst_path': 'new_path', 'task': self.taskid, 'newname': 'newfilename'})
         self.assertEqual(resp.status_code, 200)
         self.oldsss.refresh_from_db()
@@ -141,8 +141,8 @@ class TestUpdateStorageLocFile(BaseJobTest):
         sf2loc = rm.StoredFileLoc.objects.create(sfile=sf2, servershare=self.ssnewstore, path='',
                 purged=False, active=True)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'client_id': settings.ANALYSISCLIENT_APIKEY, 'sfloc_ids': [self.oldsf.pk,
-                    sf2.pk], 'dst_path': 'new_path', 'task': self.taskid, 'newname': 'newfilename'})
+                data={'client_id': settings.ANALYSISCLIENT_APIKEY, 'sfloc_ids': [self.oldsss.pk,
+                    sf2loc.pk], 'dst_path': 'new_path', 'task': self.taskid, 'newname': 'newfilename'})
         self.assertEqual(resp.status_code, 200)
         self.oldsss.refresh_from_db()
         self.assertEqual(self.oldsss.path, 'new_path')

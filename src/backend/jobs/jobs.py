@@ -102,7 +102,7 @@ class BaseJob:
         creation and running), and when running the job (to make a later timestamp in case of
         long waiting times'''
         self.oncreate_getfiles_query(**kwargs).update(last_date_used=timezone.now())
-        rm.StoredFileLoc.objects.filter(pk__in=self._get_extrafiles_to_rsync(**kwargs)).update(
+        StoredFileLoc.objects.filter(pk__in=self._get_extrafiles_to_rsync(**kwargs)).update(
                 last_date_used=timezone.now())
         dm.DatasetServer.objects.filter(pk__in=self.get_dss_ids(**kwargs)).update(
                 last_date_used=timezone.now())

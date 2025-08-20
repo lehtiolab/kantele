@@ -170,7 +170,8 @@ class RsyncFileTransferFromWeb(SingleFileJob):
     queue = settings.QUEUE_WEB_RSYNC
 
     def getfiles_query(self, **kwargs):
-        return self.oncreate_getfiles_query(**kwargs).filter(purged=True)
+        # purged can be false! E.g in case of there is a corrupt non-checked file
+        return self.oncreate_getfiles_query(**kwargs)
 
     def check_error(self, **kwargs):
         src_sfloc = self.getfiles_query(**kwargs).values('pk', 'path', 'sfile__filename',

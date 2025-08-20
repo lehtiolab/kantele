@@ -72,8 +72,8 @@ class Command(BaseCommand):
         all_ana_fns = activefns_raw_bup.filter(sfile__analysisresultfile__isnull=False)
         all_rm_anas = set()
         all_shared_sfls = set()
-        for share in rm.ServerShare.objects.filter(active=True,
-                function=rm.ShareFunction.ANALYSISRESULTS, maxdays_data__gt=0):
+        for share in rm.ServerShare.objects.filter(active=True, maxdays_data__gt=0,
+                function=[rm.ShareFunction.ANALYSIS_DELIVERY, rm.ShareFunction.ANALYSISRESULTS]):
             share_ana_fns = all_ana_fns.filter(servershare=share)
             # get analysis_id, max_date of last_used in analysis share files
             exp_ana = share_ana_fns.values('sfile__analysisresultfile__analysis_id').filter(

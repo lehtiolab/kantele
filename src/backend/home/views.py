@@ -268,20 +268,26 @@ def populate_files(dbfns):
             it['owner'] = fn.rawfile.datasetrawfile.dataset.datasetowner_set.select_related('user').first().user.username
             dsrf = fn.rawfile.datasetrawfile
             it['dataset'] = dsrf.dataset_id
-            fjobs = filemodels.FileJob.objects.select_related('job').filter(rawfile=fn.rawfile)
-            currentjobs = fjobs.exclude(job__state__in=jj.JOBSTATES_DONE)
-            it['job_ids'] = [x.job_id for x in currentjobs]
-            it['jobs'] = [x.job.state for x in currentjobs]
-            anjobs = fjobs.filter(job__nextflowsearch__isnull=False)
-            it['analyses'].extend([x.job.nextflowsearch.analysis_id for x in anjobs.select_related('job__nextflowsearch')])
-        elif hasattr(fn, 'analysisresultfile'):
-            it['owner'] = fn.analysisresultfile.analysis.user.username
-            it['analyses'].append(fn.analysisresultfile.analysis.id)
+            currentjobs = filemodels.FileJob.objects.filter(rawfile=fn.rawfile).exclude(
+                    job__state__in=jj.JOBSTATES_DONE).values('job_id', 'job__state')
+            it['job_ids'] = [x['job_id'] for x in currentjobs]
+            it['jobs'] = [x['job__state'] for x in currentjobs]
+            ana_afv = anmodels.Analysis.objects.filter(analysisfilevalue__sfile=fn)
+            ana_adsi = anmodels.Analysis.objects.filter(datasetanalysis__analysisdsinputfile__sfile=fn)
+            it['analyses'].extend([x['pk'] for x in ana_afv.union(ana_adsi).values('pk')])
+        elif arfs := anmodels.AnalysisResultFile.objects.filter(sfile=fn):
+            arfs = arfs.values('analysis_id', 'analysis__user__username')
+            it['owner'] = arfs.first()['analysis__user__username']
+            it['analyses'].extend([x.analysis_id for x in arfs.values('analysis_id')])
         else:
             # Claimed file without datasetrawfile, analysisfile, possibly file is 
             # QC or pending for dataset
-            if jm.Job.objects.filter(funcname='move_files_storage', state=jj.Jobstates.HOLD, 
-                    kwargs__rawfn_ids=[fn.rawfile_id]):
+            inbox_sfl = filemodels.StoredFileLoc.objects.filter(sfile=fn,
+                    servershare__function=filemodels.ShareFunction.INBOX)
+            if inbox_sfl.exists() and jm.Job.objects.filter(state=jj.Jobstates.HOLD,
+                    funcname='rsync_dset_files_to_servershare', 
+                    kwargs__sfloc_ids=[inbox_sfl.get().pk]).exists():
+                # Unknowns: dss_id, dstshare_id, dstsfloc_ids, cant query kwargs for those
                 it['smallstatus'].append({'text': 'dataset pending', 'state': 'active'})
         popfiles[fn.id] = it
     order = [x['id'] for x in sorted(popfiles.values(), key=lambda x: x['date'], reverse=True)]
@@ -310,7 +316,8 @@ def show_jobs(request):
                          'date': datetime.strftime(job.timestamp, '%Y-%m-%d'),
                          'analysis': analysis.id if analysis else False,
                          'actions': get_job_actions(job, ownership)}
-        items[job.id]['fn_ids'] = [x.storedfile_id for x in job.filejob_set.all()]
+        items[job.id]['fn_ids'] = [x['pk'] for x in filemodels.StoredFile.objects.filter(
+            rawfile__in=job.filejob_set.all().values('rawfile')).values('pk')]
         dsets = job.kwargs.get('dset_id', job.kwargs.get('dset_ids', []))
         if type(dsets) == int:
             dsets = [dsets]
@@ -364,8 +371,8 @@ class FakeAnalysis:
 
 class Throwaway:
     def __init__(self, kws):
-        for kw,val in kws:
-            setattr(self, kw, value)
+        for kw, val in kws.items():
+            setattr(self, kw, val)
 
 
 def populate_analysis(analyses, user):
@@ -379,11 +386,13 @@ def populate_analysis(analyses, user):
         wf = Throwaway({'wftype': ana['nextflowsearch__workflow__wftype']})
         nfsearch = Throwaway({'workflow': wf})
         ananame = Throwaway({'name': ana['name'], 'nextflowsearch': nfsearch})
-        ananame.get_fullname = anmodels.Analysis.get_fullname
         if ana['nextflowsearch__job_id']:
-            fjobs = filemodels.FileJob.objects.filter(job_id=ana['nextflowsearch__job_id']).values('rawfile_id')
-            fjobdsets = dsmodels.Dataset.objects.filter(datasetrawfile__rawfile__storedfile__in=[x['storedfile_id'] for x in fjobs]).distinct('pk').values('pk')
-            nfs = {'name': ananame.get_fullname(),
+            adsi = filemodels.StoredFile.objects.filter(analysisdsinputfile__dsanalysis__analysis_id=ana['pk'])
+            afv = filemodels.StoredFile.objects.filter(analysisfilevalue__analysis_id=ana['pk'])
+            infns = afv.union(adsi).values('pk', 'rawfile_id')
+            infn_ds = dsmodels.Dataset.objects.filter(datasetrawfile__rawfile__in=[x['rawfile_id']
+                for x in infns]).distinct('pk').values('pk')
+            nfs = {'name': anmodels.Analysis.get_fullname(ananame),
                     'jobstate': ana['nextflowsearch__job__state'],
                     'jobid': ana['nextflowsearch__job_id'],
                     'wf': f'{ana["nextflowsearch__workflow__name"]} - {ana["nextflowsearch__nfwfversionparamset__update"]}',
@@ -391,7 +400,7 @@ def populate_analysis(analyses, user):
                     }
         else:
             nfs = {'jobid': False, 'fn_ids': False, 'dset_ids': False, 'wflink': False}
-            fjobs, fjobdsets = [], []
+            infn_ds, infns= [], []
         tulosq = mm.Experiment.objects.filter(analysis_id=ana['pk'])
         if tulosq.exists():
             tulos_empty = {f'{x}': [] for x in tulos_keys}
@@ -412,8 +421,8 @@ def populate_analysis(analyses, user):
             'date': datetime.strftime(ana['date'], '%Y-%m-%d'),
             'deleted': ana['deleted'],
             'purged': ana['purged'],
-            'dset_ids': [x['pk'] for x in fjobdsets],
-            'fn_ids': [x['storedfile_id'] for x in fjobs],
+            'dset_ids': [x['pk'] for x in infn_ds],
+            'fn_ids':  [x['pk'] for x in infns],
             'mstulosq': tulos_filt,
             'actions': get_ana_actions(ana, user),
             **nfs,
@@ -456,10 +465,10 @@ def populate_dset(dsids, dbdsets, user):
     dsets = OrderedDict()
     jobmap = defaultdict(list)
     for job in jm.Job.objects.filter(
-            filejob__storedfile__rawfile__datasetrawfile__dataset_id__in=dsids
+            filejob__rawfile__datasetrawfile__dataset_id__in=dsids
             ).exclude(state__in=jj.JOBSTATES_DONE).distinct('pk').values('state', 'pk',
-                    'filejob__storedfile__rawfile__datasetrawfile__dataset_id'):
-        dsid = job['filejob__storedfile__rawfile__datasetrawfile__dataset_id']
+                    'filejob__rawfile__datasetrawfile__dataset_id'):
+        dsid = job['filejob__rawfile__datasetrawfile__dataset_id']
         jobmap[dsid].append((str(job['pk']), job['state']))
     for dset in dbdsets.values('pk', 'deleted', 'runname__experiment__project__ptype_id', 'locked',
             'date', 'runname__experiment__name', 'runname__experiment__project__ptype__name',
@@ -511,9 +520,11 @@ def populate_dset(dsids, dbdsets, user):
                 text = f'({ftype})' if state == 'deleted' else ftype
                 dsets[dset['pk']]['smallstatus'].append({'text': text, 'state': state})
 
-        # Pending files
-        if nrpenjobs := jm.Job.objects.filter(funcname='move_files_storage', state=jj.Jobstates.HOLD, 
-                kwargs__dset_id=dset['pk']).count():
+        # Pending files #inbox_sfl.exists() 
+        dss = dsmodels.DatasetServer.objects.filter(dataset_id=dset['pk']).values('pk')
+        if jm.Job.objects.filter(state=jj.Jobstates.HOLD, funcname='rsync_dset_files_to_servershare',
+                kwargs__dss_id__in=[x['pk'] for x in dss]).exists():
+                # Unknowns: sfloc_ids, dstshare_id, dstsfloc_ids, cant query kwargs for those
             dsets[dset['pk']]['smallstatus'].append({'text': f'{nrpenjobs} pending raw files',
                 'state': 'pending'})
 
@@ -635,15 +646,13 @@ def get_analysis_info(request, anid):
         nfs_info = {'name': ana.name, 'addToResults': False, 'wf': False}
     dsicount = anmodels.AnalysisDSInputFile.objects.filter(analysisset__analysis=ana).count()
     afscount = ana.analysisfilevalue_set.count()
-    storeloc = filemodels.StoredFileLoc.objects.select_related('servershare__server').filter(
-            sfile__analysisresultfile__analysis=ana).values('servershare__server__uri',
-                    'servershare__name', 'path')
+    storeloc = filemodels.StoredFileLoc.objects.filter(sfile__analysisresultfile__analysis=ana
+            ).values('servershare__name', 'path')
     linkedfiles = [(x.id, x.sfile.filename) for x in av.get_servable_files(
         ana.analysisresultfile_set.select_related('sfile'))]
     resp = {'nrdsets': len(dsets),
             'nrfiles': dsicount + afscount,
-            'storage_locs': [{'server': x['servershare__server__uri'],
-                'share': x['servershare__name'], 'path': x['path']} for x in storeloc],
+            'storage_locs': [{'share': x['servershare__name'], 'path': x['path']} for x in storeloc],
             'log': logentry, 
             'base_analysis': {'nfsid': False, 'name': False},
             'servedfiles': linkedfiles,
@@ -706,7 +715,7 @@ def get_job_info(request, job_id):
             errors.append(task.taskerror.message)
     return JsonResponse({'files': fj.count(), 'dsets': 0, 
                          'analysis': analysis, 
-                         'time': datetime.strftime(job.timestamp, '%Y-%m-%d %H:%M'),
+                         'timestamp': datetime.strftime(job.timestamp, '%Y-%m-%d %H:%M:%S'),
                          'errmsg': errors if len(errors) else False,
                          'tasks': {'error': tasks.filter(state=tstates.FAILURE).count(),
                                    'procpen': tasks.filter(state=tstates.PENDING).count(),
@@ -719,7 +728,6 @@ def get_dset_info(request, dataset_id):
     dset = dsmodels.Dataset.objects.filter(pk=dataset_id).select_related(
         'runname__experiment__project').get()
     info = fetch_dset_details(dset)
-    info['deleted'] = dset.deleted
     return JsonResponse(info)
 
 
@@ -783,12 +791,14 @@ def parse_mzml_pwiz(pwiz_sets, qset, numname):
 
 def fetch_dset_details(dset):
     # FIXME add more datatypes and microscopy is hardcoded
+    alldss = dsmodels.DatasetServer.objects.filter(dataset=dset, active=True,
+            storageshare__function=filemodels.ShareFunction.RAWDATA).values('pk', 'storageshare_id')
     info = {'owners': {x.user_id: x.user.username for x in dset.datasetowner_set.select_related('user').all()},
             'allowners': {x.id: '{} {}'.format(x.first_name, x.last_name) for x in User.objects.filter(is_active=True)}, 
-            'storage_shares': [x.storageshare_id for x in dsmodels.DatasetServer.objects.filter(
-                dataset=dset, active=True)],
+            'storage_shares': [x['storageshare_id'] for x in alldss],
             'all_storlocs': {x.id: {'name': x.name, 'id': x.pk, 'description': x.description}
-                for x in filemodels.ServerShare.objects.filter(active=True, has_rawdata=True)},
+                for x in filemodels.ServerShare.objects.filter(active=True,
+                    function=filemodels.ShareFunction.RAWDATA)},
             }
     try:
         info['qtype'] = {'name': dset.quantdataset.quanttype.name, 
@@ -800,7 +810,6 @@ def fetch_dset_details(dset):
                     if x.name in ['microscopy']}
     files = filemodels.StoredFile.objects.select_related('rawfile__producer', 'filetype').filter(
         rawfile__datasetrawfile__dataset_id=dset.id)
-    servers = [x[0] for x in files.distinct('storedfileloc__servershare').values_list('storedfileloc__servershare__server__uri')]
     info['instruments'] = list(set([x.rawfile.producer.name for x in files]))
     info['instrument_types'] = list(set([x.rawfile.producer.shortname for x in files]))
     rawfiles = files.filter(mzmlfile__isnull=True)
@@ -814,11 +823,12 @@ def fetch_dset_details(dset):
                 userworkflow__name__icontains='refine',
                 userworkflow__wftype=anmodels.UserWorkflow.WFTypeChoices.SPEC)]
         # go through all filejobs that are not done to find current jobs and get pwiz id
-        for mzj in filemodels.FileJob.objects.exclude(job__state__in=jj.JOBSTATES_DONE).filter(
-                storedfile__in=files, job__funcname__in=['refine_mzmls', 'convert_dataset_mzml']).distinct(
-                        'job').values('job__funcname', 'job__kwargs'):
+        for job in jm.Job.objects.exclude(state__in=jj.JOBSTATES_DONE).filter(
+                kwargs__dss_id__in=[x['pk'] for x in alldss],
+                funcname__in=['refine_mzmls', 'convert_dataset_mzml']).values(
+                        'funcname', 'kwargs'):
             try:
-                job_pwid = int(mzj['job__kwargs']['pwiz_id'])
+                job.kwargs['pwiz_id']
             except KeyError:
                 pass
             else:
