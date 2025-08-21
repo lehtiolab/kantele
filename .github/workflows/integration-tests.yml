@@ -56,6 +56,8 @@ jobs:
             - run: docker buildx bake --file src/docker/testing-bake.yml --file src/docker/docker-compose-gha-cache.json
             - name: Init test fixture "workflow repo"
               run: |
+                git config user.name 'Fake GHA'
+                git config user.email 'fakegha@'
                 git init
                 git add *.py
                 git commit -m 'test fixtures'
