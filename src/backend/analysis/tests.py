@@ -546,7 +546,10 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
                 'field_order': self.inputdef.value[-1:],
                 'error': False,
                 'errmsg': [],
-                'servers': [{'id': self.remoteanaserver.pk, 'name': self.remoteanaserver.name}],
+                # TODO update this when personal data hits (remove anaserver)
+                'servers': [
+                    {'id': self.anaserver.pk, 'name': self.anaserver.name},
+                    {'id': self.remoteanaserver.pk, 'name': self.remoteanaserver.name}]
                 }
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
 
@@ -586,7 +589,12 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
                 'field_order': self.inputdef.value[-1:],
                 'error': False,
                 'errmsg': [],
-                'servers': [{'id': self.remoteanaserver.pk, 'name': self.remoteanaserver.name}],
+                # TODO when we enable personal/sensitive data, this test
+                # will only return ONE server, uncomment the below line
+                #'servers': [{'id': self.remoteanaserver.pk, 'name': self.remoteanaserver.name}],
+                'servers': [
+                    {'id': self.anaserver.pk, 'name': self.anaserver.name},
+                    {'id': self.remoteanaserver.pk, 'name': self.remoteanaserver.name}]
                 }
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
 
