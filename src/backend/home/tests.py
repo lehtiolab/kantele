@@ -386,6 +386,7 @@ class TestRefineMzmls(MzmlTests):
         mzmlfn2 = os.path.join(self.f3path, mzmlfn)
         self.assertFalse(os.path.exists(mzmlfn1))
         self.run_job() # refining
+        print('Looking for', mzmlfn1)
         self.assertTrue(os.path.exists(mzmlfn1))
         self.assertFalse(os.path.exists(mzmlfn2))
         self.run_job() # rsync refined files

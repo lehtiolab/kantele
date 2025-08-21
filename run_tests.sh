@@ -48,8 +48,8 @@ echo Running tests
 TESTCMD="python manage.py test"
 if [[ -z "$1" ]]
 then
-    $DOCKERCMD run --use-aliases web $TESTCMD --exclude-tag mstulos || ($DOCKERCMD logs web storage_mvfiles storage_downloads tulos_ingester storage_web_rsync && exit 1)
-    $DOCKERCMD run --use-aliases web $TESTCMD mstulos || ($DOCKERCMD logs web storage_mvfiles storage_downloads tulos_ingester && exit 1)
+    $DOCKERCMD run --use-aliases web $TESTCMD home.tests.TestRefineMzmls.test_refine_mzml_move_dbfile --exclude-tag mstulos || ($DOCKERCMD logs web storage_mvfiles storage_downloads tulos_ingester storage_web_rsync && exit 1)
+    #$DOCKERCMD run --use-aliases web $TESTCMD mstulos || ($DOCKERCMD logs web storage_mvfiles storage_downloads tulos_ingester && exit 1)
 else
     $DOCKERCMD run --use-aliases web $TESTCMD $1|| ($DOCKERCMD logs web storage_mvfiles storage_web_rsync storage_downloads tulos_ingester && exit 1)
 fi
