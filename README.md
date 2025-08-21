@@ -98,10 +98,10 @@ docker compose -f src/docker/postgres-update-compose.yml --env-file .env exec ol
 # Stop old container, inspect dump file, then start new:
 docker compose -f src/docker/postgres-update-compose.yml --env-file .env up newdb
 # Load old dump in new container (`-T` is to disable tty so we can pipe the local dump file:
-docker compose -f src/docker/postgres-update-compose.yml --env-file .env exec -T newdb psql -U postgres -d postgres < dumpold.sql    
+docker compose -f src/docker/postgres-update-compose.yml --env-file .env exec -T newdb psql -U postgres < dumpold.sql
 
 When going from postgres 14 to 15 or higher you will also need to add:
-docker compose -f src/docker/postgres-update-compose.yml --env-file .env exec -T db psql -U postgres -d kantele
+docker compose -f src/docker/postgres-update-compose.yml --env-file .env exec -T newdb psql -U postgres -d kantele
 GRANT ALL ON SCHEMA public TO kanteleuser; 
 # Somehow in testing my migrations after this crash with "no permission" until I do it again
 # in the same compose environment as the migrations, which is weird since the web UI runs fine

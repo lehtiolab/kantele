@@ -116,7 +116,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='fileserver',
             name='can_rsync_remote',
-            field=models.BooleanField(default=False),
+            field=models.BooleanField(default=False, help_text='Does the server have rsync private keys for other servers (aka is some kind of controller)'),
         ),
         migrations.AddField(
             model_name='fileserver',
@@ -141,7 +141,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='servershare',
             name='function',
-            field=models.IntegerField(choices=[(1, 'Raw data'), (2, 'Analysis results for user delivery, only 1 can exist'), (3, 'Reports on web server'), (4, 'File inflow and tmp storage'), (5, 'Library and user reference files'), (6, 'Analysis results local to analysis server')]),
+            field=models.IntegerField(default=1, choices=[(1, 'Raw data'), (2, 'Analysis results for user delivery, only 1 can exist'), (3, 'Reports on web server'), (4, 'File inflow and tmp storage'), (5, 'Library and user reference files'), (6, 'Analysis results local to analysis server')]),
             preserve_default=False,
         ),
         migrations.AlterField(
