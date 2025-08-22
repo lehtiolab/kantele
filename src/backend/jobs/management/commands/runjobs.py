@@ -33,7 +33,7 @@ class Command(BaseCommand):
 
 
 def run_ready_jobs(job_fn_map, job_ds_map, active_jobs):
-    print('Checking job queue')
+    print('===================== Checking job queue ==========================')
     jobs_not_finished = Job.objects.order_by('timestamp').exclude(
         state__in=jj.JOBSTATES_DONE + [Jobstates.WAITING])
     print(f'{jobs_not_finished.count()} jobs in queue, including errored jobs')
@@ -50,11 +50,8 @@ def run_ready_jobs(job_fn_map, job_ds_map, active_jobs):
             print(f'Registering new job {job.id} - {job.funcname} - {job.state}')
             # Register files
             # FIXME do some jobs really have no files?
-            sf_ids = jwrapper.get_sf_ids_jobrunner(**job.kwargs)
-            FileJob.objects.filter(job_id=job.id).delete()
-            FileJob.objects.bulk_create([FileJob(storedfile_id=sf_id, job_id=job.id)
-                for sf_id in sf_ids])
-            job_fn_map[job.id] = set(sf_ids)
+            job_fn_map[job.id] = [x['rawfile_id'] for x in
+                    FileJob.objects.filter(job_id=job.pk).values('rawfile_id')]
             # Register dsets FIXME
             ds_ids = jwrapper.get_dsids_jobrunner(**job.kwargs)
             job_ds_map[job.id] = set(ds_ids)
@@ -80,7 +77,7 @@ def run_ready_jobs(job_fn_map, job_ds_map, active_jobs):
         elif job.state == Jobstates.REVOKING:
             # canceling job from revoke status only happens here
             # we do a new query update where state=revoking, as to not get race with someone quickly un-revoking
-            canceled = Job.objects.filter(pk=job.pk, state=jj.Jobstates.REVOKING).update(state=jj.Jobstates.CANCELED)
+            canceled = Job.objects.filter(pk=job.pk, state=Jobstates.REVOKING).update(state=Jobstates.CANCELED)
             # There is an extra check if the job actually has revokable tasks
             # Most jobs are not, but very long running user-ordered tasks are.
             if jwrapper.revokable and canceled:
@@ -119,16 +116,23 @@ def run_ready_jobs(job_fn_map, job_ds_map, active_jobs):
             job_ds = job_ds_map[job.id]
             # do not start job if there is activity on files or datasets
             active_files = {sf for jid in active_jobs for sf in job_fn_map[jid]}
-            active_datasets = {ds for jid in active_jobs for ds in job_ds_map[jid]}
+            # Blocking Dataset seem to be never used in production 
+#            active_datasets = {ds for jid in active_jobs for ds in job_ds_map[jid]}
             if blocking_files := active_files.intersection(jobfiles):
                 print(f'Deferring job since files {blocking_files} are being used in other job')
-            elif blocking_ds := active_datasets.intersection(job_ds):
-                print(f'Deferring job since datasets {blocking_ds} are being used in other job')
+            elif jwrapper.get_jobs_with_single_sfloc_to_wait_for(**job.kwargs).filter(timestamp__lt=job.timestamp, state__in=jj.JOBSTATES_RUNNER_WAIT).exists():
+                # Wait for aux files for jobs, e.g. search fasta, params etc, stuff not in a dataset
+                print(f'Deferring job since it demands to wait on another job for a file needed')
+                # Add job id to active jobs to make sure downstream jobs that do depend
+                # on this jobs src files will actually wait
+                active_jobs.add(job.id)
+#            elif blocking_ds := active_datasets.intersection(job_ds):
+#                print(f'Deferring job since datasets {blocking_ds} are being used in other job')
             else:
-                print('Executing job {}'.format(job.id))
+                print(f'Job {job.id} is ready for execution')
                 active_jobs.add(job.id)
                 job.state = Jobstates.PROCESSING
-                if errmsg := jwrapper.check_error(**job.kwargs):
+                if errmsg := jwrapper.check_error_on_running(**job.kwargs):
                     jwrapper.set_error(job, errmsg=errmsg)
                 else:
                     try:

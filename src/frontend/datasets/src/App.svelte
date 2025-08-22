@@ -33,6 +33,8 @@ let errors = {
 let saveerrors = Object.assign({}, errors);
 let comperrors = [];
 
+let dsdate = initdata.date;
+
 // Project info
 let project_id = initdata.proj_id;
 let project_name = initdata.name;
@@ -42,6 +44,7 @@ let securityclass = initdata.secclass;
 let isExternal = initdata.isExternal;
 let datasettypes = initdata.datasettypes;
 let allprojects = initdata.all_projects;
+let allstorlocs = initdata.all_storlocs;
 let allsecclasses = initdata.securityclasses;
 let allproj_order = Object.keys(initdata.all_projects);
 
@@ -56,7 +59,7 @@ let newClassification;
 
 let dsinfo = {
   datatype_id: '',
-  storage_location: '',
+  storage_locations: {},
   experiment_id: '',
   newexperimentname: '',
   newexperimentname: '',
@@ -210,6 +213,7 @@ async function save() {
       prefrac_amount: dsinfo.prefrac_amount,
       hiriefrange: dsinfo.hiriefrange,
       project_id: project_id,
+      storage_shares: dsinfo.storage_shares,
     };
     if (isNewExperiment) {
       postdata.newexperimentname = dsinfo.newexperimentname;
@@ -330,18 +334,30 @@ function showFiles() {
             <button class="button is-small" on:click={lockDataset}>Lock dataset</button>
             {/if}
             <div>
+              <span class="has-text-weight-bold">Creation date:</span>
+              <span>{dsdate}</span>
+            </div>
+            <div>
               <span class="has-text-weight-bold">Project:</span>
               <span>{project_name}</span>
               <span class="tag is-success is-small">{ptype}</span>
             </div>
             <div><span class="has-text-weight-bold">PI:</span> {pi_name}</div>
-            {#if dsinfo.storage_location}
-            <div><span class="has-text-weight-bold">Storage: {dsinfo.storage_location}</div>
-            {/if}
             <div>
               <span class="has-text-weight-bold">Classification:</span>
               <span class="tag is-danger is-small">{allsecclasses.filter(x => x.id === securityclass)[0].name}</span>
             </div>
+
+            <div class="has-text-weight-bold">Stored at:</div>
+            {#each Object.values(allstorlocs) as loc}
+              <div class={`tag is-medium ${loc.id in dsinfo.storage_locations ? 'is-success' : ''}`}>
+                  <label class="checkbox">
+                    <input value={loc.id} bind:group={dsinfo.storage_shares} on:change={editMade} type="checkbox" />
+                    {loc.name}
+                </label>
+              </div>
+            {/each}
+
             {#if !showDangerZone}
             <div class="field">
               <button on:click={e => showDangerZone = true} class="button is-small">Edit</button>

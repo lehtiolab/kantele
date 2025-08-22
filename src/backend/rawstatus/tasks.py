@@ -54,7 +54,7 @@ def search_raws_downloaded(serversharename, dirname):
     return raw_paths_found
 
 
-@shared_task(queue=settings.QUEUE_FILE_DOWNLOAD, bind=True)
+@shared_task(bind=True)
 def register_downloaded_external_raw(self, fpath, sf_id, raw_id, sharename, dset_id):
     """Downloaded external files on inbox somewhere get MD5 checked and associate
     with a dataset
@@ -80,7 +80,7 @@ def register_downloaded_external_raw(self, fpath, sf_id, raw_id, sharename, dset
     print('MD5 of {} is {}, registered in DB'.format(dstfile, postdata['md5']))
 
 
-@shared_task(queue=settings.QUEUE_FILE_DOWNLOAD, bind=True)
+@shared_task(bind=True)
 def download_px_file_raw(self, ftpurl, ftpnetloc, sf_id, raw_id, shasum, size, sharename, dset_id):
     """Downloads PX file, validate by file size and SHA1, get MD5.
     Uses separate queue on storage, because otherwise trouble when 
@@ -121,8 +121,63 @@ def download_px_file_raw(self, ftpurl, ftpnetloc, sf_id, raw_id, shasum, size, s
     print('MD5 of {} is {}, registered in DB'.format(dstfile, postdata['md5']))
 
 
-@shared_task(queue=settings.QUEUE_WEB_RSYNC, bind=True)
-def rsync_transfer_file(self, sfid, srcpath, dstpath, dstsharename, do_unzip, stablefiles):
+@shared_task(bind=True)
+def rsync_files_to_servershares(self, src_user, srcserver_url, srcpath, dst_user, dstserver_url,
+        dstbasepath, dstpath, rsync_key, fns, upd_sfl_ids):
+    '''Uses rsync to copy a dataset to other servershare. Can push or pull, depending
+    on where file is,   
+    Files are rsynced
+    one at a time, for more control in case there's some anomaly in the dataset folder.
+    This is always run on the storage controller
+    Clarification:
+    dstbasepath - /mnt/rawdata, /hpc/stor/proj123/raw
+    dstpath - proj/exp/run (dset path)
+    We dont supply these joined since the dstpath is used to update the
+    DB after the rsync
+    '''
+    for srcfn in fns:
+        # Dont compress, tests with raw data just make it slower and likely
+        # the raw data is already fairly well compressed.
+        cmd = ['rsync', '-av', '--mkpath']
+        if srcserver_url == dstserver_url:
+            # same controller on src and dst -> rsync over mounts
+            srcfpath = os.path.join(srcpath, srcfn)
+            dstfpath = os.path.join(dstbasepath, dstpath, srcfn)
+        elif src_user:
+            # two different controllers -> rsync over ssh, src is remote, pull from src
+            cmd.extend(['-e', f'ssh -l {src_user} -i {rsync_key} -o StrictHostKeyChecking=no'])
+            srcfpath = f'{srcserver_url}:{os.path.join(srcpath, srcfn)}'
+            dstfpath = os.path.join(dstbasepath, dstpath, srcfn)
+        elif dst_user:
+            # two different controllers -> rsync over ssh, dst is remote, push to dst
+            cmd.extend(['-e', f'ssh -l {dst_user} -i {rsync_key} -o StrictHostKeyChecking=no'])
+            srcfpath = os.path.join(srcpath, srcfn)
+            dstfpath = f'{dstserver_url}:{os.path.join(dstbasepath, dstpath, srcfn)}'
+        else:
+            raise RuntimeError('Rsync demanded but neither src not dst user specified')
+        cmd.extend([srcfpath, dstfpath])
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            print('Failed to run:', cmd)
+            try:
+                self.retry(countdown=60)
+            except MaxRetriesExceededError:
+                taskfail_update_db(self.request.id)
+                raise
+    # Do not delete files afterwards, as that cannot be done when they live on a different
+    # controller server
+
+    # report finished
+    fnpostdata = {'sfloc_ids': upd_sfl_ids, 'dst_path': dstpath, 'client_id': settings.APIKEY,
+            'task': self.request.id}
+    fnurl = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
+    update_db(fnurl, json=fnpostdata)
+
+
+@shared_task(bind=True)
+def rsync_transfer_file_web(self, sfloc_id, srcpath, dstsharepath, dstpath, dstsharename,
+        do_unzip, stablefiles):
     '''Uses rsync to transfer uploaded file from KANTELEHOST/other RSYNC_HOST to storage server.
     In case of a zipped folder transfer, the file is unzipped and an MD5 check is done 
     on its relevant file, in case the transferred file is corrupt'''
@@ -130,7 +185,7 @@ def rsync_transfer_file(self, sfid, srcpath, dstpath, dstsharename, do_unzip, st
     # (use case e.g. microscopy images), unlike e.g. .d folders from Bruker.
     ssh_host = settings.RSYNC_HOST
     ssh_srcpath = f'{settings.RSYNC_SSHUSER}@{ssh_host}:{srcpath}'
-    dstfpath = os.path.join(settings.SHAREMAP[dstsharename], dstpath)
+    dstfpath = os.path.join(dstsharepath, dstpath)
     fulldir, fn = os.path.split(dstfpath)
     if not os.path.exists(fulldir):
         os.makedirs(fulldir)
@@ -149,7 +204,7 @@ def rsync_transfer_file(self, sfid, srcpath, dstpath, dstsharename, do_unzip, st
         except MaxRetriesExceededError:
             taskfail_update_db(self.request.id)
             raise
-    postdata = {'sf_id': sfid, 'client_id': settings.APIKEY, 'task': self.request.id, 
+    postdata = {'sfloc_id': sfloc_id, 'client_id': settings.APIKEY, 'task': self.request.id, 
             'do_md5check': len(stablefiles) > 0, 'unzipped': do_unzip}
     if do_unzip:
         # Unzip if needed, in that case recheck MD5 to be sure of the zipping has been correct
@@ -190,7 +245,7 @@ def rsync_transfer_file(self, sfid, srcpath, dstpath, dstsharename, do_unzip, st
             postdata.update({'md5': md5result})
     # Done, notify database
     url = urljoin(settings.KANTELEHOST, reverse('jobs:download_file'))
-    msg = f'Rsync used for file transfer of {dstfpath} with id {sfid} to storage'
+    msg = f'Rsync used for file transfer of {dstfpath} with id {sfloc_id} to storage'
     try:
         update_db(url, json=postdata, msg=msg)
     except RuntimeError:
@@ -202,10 +257,10 @@ def rsync_transfer_file(self, sfid, srcpath, dstpath, dstsharename, do_unzip, st
     print(msg)
 
 
-@shared_task(bind=True, queue=settings.QUEUE_STORAGE)
-def delete_file(self, servershare, filepath, sfloc_id, is_dir=False):
-    print('Deleting file {} on {}'.format(filepath, servershare))
-    fileloc = os.path.join(settings.SHAREMAP[servershare], filepath)
+@shared_task(bind=True)
+def delete_file(self, sharepath, path, fname, sfloc_id, is_dir=False):
+    print(f'Deleting file {sharepath}/{path}/{fname}')
+    fileloc = os.path.join(sharepath, path, fname)
     try:
         if is_dir:
             shutil.rmtree(fileloc)
@@ -219,17 +274,16 @@ def delete_file(self, servershare, filepath, sfloc_id, is_dir=False):
         # FIXME proper feedback on error!
         fn_or_dir = ['directory', 'file']
         fn_or_dir = fn_or_dir if is_dir else fn_or_dir[::-1]
-        msg = (f'When trying to delete file {filepath}, expected a {fn_or_dir[0]}, but encountered '
+        msg = (f'When trying to delete file {path}/{fname}, expected a {fn_or_dir[0]}, but encountered '
                 f'a {fn_or_dir[1]}')
         taskfail_update_db(self.request.id, msg)
         raise
     except Exception:
-        taskfail_update_db(self.request.id, msg=f'Something went wrong trying to delete {filepath}')
+        taskfail_update_db(self.request.id, msg=f'Something went wrong trying to delete {path}/{fname}')
         raise
-    msg = f'after succesful deletion of fn {filepath}. {{}}'
+    msg = f'after succesful deletion of fn {path}/{fname}. {{}}'
     url = urljoin(settings.KANTELEHOST, reverse('jobs:deletefile'))
     postdata = {'sfloc_id': sfloc_id, 'task': self.request.id, 'client_id': settings.APIKEY}
-    print(postdata)
     try:
         update_db(url, postdata, msg)
     except RuntimeError:
@@ -240,12 +294,52 @@ def delete_file(self, servershare, filepath, sfloc_id, is_dir=False):
             raise
 
 
-@shared_task(bind=True, queue=settings.QUEUE_STORAGE)
-def delete_empty_dir(self, servershare, directory):
+@shared_task(bind=True)
+def rename_file(self, fn, srcsharepath, srcpath, dstpath, sfloc_id, newname):
+    '''Move or rename a file, to another name or another dir
+    # FIXME when move_single_file is gone, this can be simplified (no dstpath,
+    no makedirs, etc)
+    '''
+    src = os.path.join(srcsharepath, srcpath, fn)
+    dstfn = newname or fn
+    dst = os.path.join(srcsharepath, dstpath, dstfn)
+    url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
+    if src == dst:
+        print('Source and destination are identical, not moving file')
+        update_db(url, json={'client_id': settings.APIKEY, 'task': self.request.id})
+    print('Moving file {} to {}'.format(src, dst))
+    dstdir = os.path.split(dst)[0]
+    try:
+        os.makedirs(dstdir, exist_ok=True)
+    except Exception:
+            taskfail_update_db(self.request.id)
+            raise
+    if not os.path.isdir(dstdir):
+        taskfail_update_db(self.request.id)
+        raise RuntimeError('Directory {} is already on disk as a file name. '
+                           'Not moving files.')
+    try:
+        shutil.move(src, dst)
+    except Exception as e:
+        taskfail_update_db(self.request.id)
+        raise RuntimeError('Could not move file tot storage:', e)
+    postdata = {'sfloc_id': sfloc_id, 'dst_path': dstpath,
+            'client_id': settings.APIKEY, 'task': self.request.id}
+    if newname:
+        postdata['newname'] = newname
+    try:
+        update_db(url, json=postdata)
+    except RuntimeError:
+        shutil.move(dst, src)
+        raise
+
+
+@shared_task(bind=True)
+def delete_empty_dir(self, sharepath, directory):
     """Deletes the (reportedly) empty directory, then proceeds to delete any
     parent directory which is also empty"""
-    dirpath = os.path.join(settings.SHAREMAP[servershare], directory)
-    print('Trying to delete empty directory {}'.format(dirpath))
+    dirpath = os.path.join(sharepath, directory)
+    print(f'Trying to delete empty directory {dirpath}')
     try:
         os.rmdir(dirpath)
     except FileNotFoundError:
@@ -258,8 +352,8 @@ def delete_empty_dir(self, servershare, directory):
     # Now delete parent directories if any empty
     while os.path.split(directory)[0]:
         directory = os.path.split(directory)[0]
-        dirpath = os.path.join(settings.SHAREMAP[servershare], directory)
-        print('Trying to delete parent directory {}'.format(dirpath))
+        dirpath = os.path.join(sharepath, directory)
+        print(f'Trying to delete parent directory {dirpath}')
         try:
             os.rmdir(dirpath)
         except FileNotFoundError:
@@ -268,29 +362,27 @@ def delete_empty_dir(self, servershare, directory):
             # OSError raised on dir not empty
             print(f'Parent directory {dirpath} not empty, stop deletion')
     # Report
-    msg = ('Could not update database with deletion of dir {} :'
-           '{}'.format(dirpath, '{}'))
+    dberrmsg = f'Could not update database with deletion of dir {dirpath}'
     url = urljoin(settings.KANTELEHOST, reverse('jobs:rmdir'))
     postdata = {'task': self.request.id, 'client_id': settings.APIKEY}
     try:
-        update_db(url, postdata, msg)
+        update_db(url, postdata, dberrmsg)
     except RuntimeError:
         try:
             self.retry(countdown=60)
         except MaxRetriesExceededError:
-            update_db(url, postdata, msg)
+            update_db(url, postdata, dberrmsg)
             raise
 
 
-@shared_task(bind=True, queue=settings.QUEUE_BACKUP)
-def pdc_archive(self, md5, yearmonth, servershare, filepath, fn_id, isdir):
+@shared_task(bind=True)
+def pdc_archive(self, md5, yearmonth, sharepath, filepath, fn_id, isdir):
     print('Archiving file {} to PDC tape'.format(filepath))
-    basedir = settings.SHAREMAP[servershare]
-    fileloc = os.path.join(basedir, filepath)
+    fileloc = os.path.join(sharepath, filepath)
     if not os.path.exists(fileloc):
         taskfail_update_db(self.request.id, msg='Cannot find file to archive: {}'.format(fileloc))
         return
-    link = os.path.join(settings.BACKUPSHARE, yearmonth, md5)
+    link = os.path.join(sharepath, settings.BACKUP_LINKPATH, yearmonth, md5)
     linkdir = os.path.dirname(link)
     try:
         os.makedirs(linkdir)
@@ -347,19 +439,21 @@ def pdc_archive(self, md5, yearmonth, servershare, filepath, fn_id, isdir):
             pass
 
 
-@shared_task(bind=True, queue=settings.QUEUE_BACKUP)
-def pdc_restore(self, servershare, filepath, pdcpath, sfloc_id, isdir):
+@shared_task(bind=True)
+def pdc_restore(self, sharepath, filepath, pdcpath, sfloc_id, isdir):
     print('Restoring file {} from PDC tape'.format(filepath))
-    basedir = settings.SHAREMAP[servershare]
-    fileloc = os.path.join(basedir, filepath)
+    fileloc = os.path.join(sharepath, filepath)
     # restore to fileloc
     if isdir:
-        dstpath = os.path.join(settings.BACKUPSHARE, 'retrievals', '') # with slash
+        # dir (.d etc) files are retrieved to a specific folder first, then moved
+        # this is because they get downloaded as the pdcpath (an md5 hash of the file)
+        dstpath = os.path.join(sharepath, settings.BACKUP_LINKPATH, '') # this '' -> with slash
         if not os.path.exists(dstpath):
             os.makedirs(dstpath)
         pdcdirpath = os.path.join(pdcpath, '') # append a slash
         cmd = ['dsmc', 'retrieve', '-subdir=yes', '-replace=no', pdcdirpath, dstpath]
     else:
+        # direct retrieval to fileloc of normal raw files
         cmd = ['dsmc', 'retrieve', '-replace=no', pdcpath, fileloc]
     env = os.environ
     env['DSM_DIR'] = settings.DSM_DIR
@@ -383,8 +477,7 @@ def pdc_restore(self, servershare, filepath, pdcpath, sfloc_id, isdir):
         except Exception:
             taskfail_update_db(self.request.id, msg='File {} to retrieve from backup is directory '
             'type, it is retrieved to {} but errored when moving from there'.format(fileloc, pdcpath))
-    postdata = {'sflocid': sfloc_id, 'task': self.request.id, 'client_id': settings.APIKEY,
-            'serversharename': servershare}
+    postdata = {'sflocid': sfloc_id, 'task': self.request.id, 'client_id': settings.APIKEY}
     url = urljoin(settings.KANTELEHOST, reverse('jobs:restoredpdcarchive'))
     msg = ('Restore from archive could not update database with for fn {} with PDC path {} :'
            '{}'.format(filepath, pdcpath, '{}'))
@@ -397,9 +490,10 @@ def pdc_restore(self, servershare, filepath, pdcpath, sfloc_id, isdir):
             raise
 
 
-@shared_task(bind=True, queue=settings.QUEUE_SEARCH_INBOX)
-def classify_msrawfile(self, token, fnid, ftypename, servershare, path, fname):
-    path = os.path.join(settings.SHAREMAP[servershare], path)
+@shared_task(bind=True)
+def classify_msrawfile(self, token, fnid, ftypename, sharepath, path, fname):
+    # TODO remove token
+    path = os.path.join(sharepath, path)
     fpath = os.path.join(path, fname)
     val = False
     if ftypename == settings.THERMORAW:

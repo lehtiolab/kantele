@@ -1,11 +1,11 @@
-import json
 import requests
 
 from celery import states
+from django.utils import timezone
 
 from kantele import settings
 from jobs.models import Task, Job, JobError
-from rawstatus.models import StoredFile, StoredFileLoc
+from rawstatus.models import RawFile, StoredFile, StoredFileLoc, DataSecurityClass, ShareFunction, ServerShare
 from datasets import models as dm
 
 
@@ -61,6 +61,8 @@ JOBSTATES_WAIT = [Jobstates.WAITING, Jobstates.PENDING, Jobstates.QUEUED, Jobsta
 # Jobs retryable / startable
 JOBSTATES_RETRYABLE = [Jobstates.WAITING, Jobstates.HOLD, Jobstates.PROCESSING, Jobstates.ERROR, Jobstates.REVOKING, Jobstates.CANCELED]
 
+# Jobrunner filters using this for get_jobs_with_single_sfloc_to_wait_for
+JOBSTATES_RUNNER_WAIT = [Jobstates.HOLD, Jobstates.QUEUED, Jobstates.PROCESSING, Jobstates.ERROR, Jobstates.REVOKING]
 # FIXME Deprecate below line, is not used:
 JOBSTATES_PRE_OK_JOB = [Jobstates.WAITING, Jobstates.ERROR, Jobstates.REVOKING, Jobstates.CANCELED, Jobstates.HOLD]
 
@@ -79,22 +81,105 @@ class BaseJob:
         self.run_tasks = []
     
     def check_error(self, **kwargs):
+        # FIXME check_error will be used differently when creating vs when running, please fix!
+        return self.check_error_on_creation(**kwargs)
+
+    def check_error_on_creation(self, **kwargs):
         return False
 
+    def check_error_on_running(self, **kwargs):
+        return False
+
+    def oncreate_getfiles_query(self, **kwargs):
+        return StoredFileLoc.objects.none()
+
     def getfiles_query(self, **kwargs):
+        return self.oncreate_getfiles_query(**kwargs).filter(purged=False)
+
+    def update_sourcefns_lastused(self, **kwargs):
+        '''Updating last_date_used timestamps on SFLoc and DSS.
+        This gets called when creating a job (to make sure files arent deleted between
+        creation and running), and when running the job (to make a later timestamp in case of
+        long waiting times'''
+        self.oncreate_getfiles_query(**kwargs).update(last_date_used=timezone.now())
+        StoredFileLoc.objects.filter(pk__in=self._get_extrafiles_to_rsync(**kwargs)).update(
+                last_date_used=timezone.now())
+        dm.DatasetServer.objects.filter(pk__in=self.get_dss_ids(**kwargs)).update(
+                last_date_used=timezone.now())
+
+    def on_create_addkwargs(self, **kwargs):
+        # FIXME we could have a create(, **kw) function that calls addkwargs,
+        # maybe sets sfloc to active, etc, and creates the actual job in Dfor ana_id in B
+        return {}
+
+    def _get_extrafiles_to_rsync(self, **kwargs):
         return []
 
-    def get_sf_ids_jobrunner(self, **kwargs):
+    def on_create_prep_rsync_jobs(self, **kwargs):
+        '''If needed, rsync the DB and other singlefiles which is not on the analysis share,
+        this function provides a dict with the job name and kwargs for that'''
+        newjobs = []
+        if all_exfiles_sfpk := self._get_extrafiles_to_rsync(**kwargs):
+            extra_sfl_q = StoredFileLoc.objects.filter(sfile_id__in=all_exfiles_sfpk, active=True)
+            if extra_sfl_q.distinct('sfile').count() < len(all_exfiles_sfpk):
+                raise RuntimeError('Not all parameter files could be found on disk, make sure they exist')
+            # Make rsync jobs for those extrafiles which there is no sfl in the servershare we want:
+            sfl = self.getfiles_query(**kwargs).values('servershare_id', 'servershare__function').first()
+            newjobs = []
+            for extra_sf in StoredFile.objects.filter(
+                    pk__in=set(all_exfiles_sfpk).difference([x['sfile_id'] for x in 
+                        extra_sfl_q.filter(servershare_id=sfl['servershare_id']).values('sfile_id')])):
+                extra_sfls_q = extra_sf.storedfileloc_set.filter(active=True)
+                if rs_extra_sfl := extra_sfls_q.filter(
+                        servershare__fileservershare__server__can_rsync_remote=True):
+                    # either the extra sfl is on an rsync-capable server:
+                    extra_sfl = rs_extra_sfl.values('pk', 'servershare__function', 'path').get()
+                elif ServerShare.objects.filter(pk=sfl['servershare_id'],
+                        fileservershare__server__can_rsync_remote=True):
+                    # or the target server is rsync capable
+                    extra_sfl = extra_sfls_q.values('pk', 'servershare__function', 'path').first()
+                else:
+                    raise RuntimeError('Could not find a source file to upload to analysis server for '
+                        f'{extra_sf.filename}')
+                blankpathshares = [ShareFunction.LIBRARY, ShareFunction.INBOX]
+                if extra_sfl['servershare__function'] in blankpathshares and sfl['servershare__function'] not in blankpathshares:
+                    # e.g. libfile from path '' needs a path in the dst if that is rawdata!
+                    path = '__kantele_library'
+                else:
+                    path = extra_sfl['path']
+                newjobs.append({'name': 'rsync_otherfiles_to_servershare',
+                    'kwargs': {'sfloc_id': extra_sfl['pk'], 'dstshare_id': sfl['servershare_id'],
+                        'dstpath': path}})
+        return newjobs
+
+    def get_jobs_with_single_sfloc_to_wait_for(self, **kwargs):
+        '''Need to wait for non-dataset jobs on files involved in this job. One could
+        add those to the get_sf_ids_for_filejobs but then you wouldnt be able to run two
+        analyses in parallel if theyd use the same DB.
+        However, a problem now is that such a file could be deleted mid-analysis,
+        in a parallel job - make sure these files are fairly stable
+        '''
+        # FIXME make sure any single file job checks for these jobs as well.
+        if sfpks := self._get_extrafiles_to_rsync(**kwargs):
+            all_sfl = StoredFileLoc.objects.filter(sfile_id__in=sfpks, active=True).values('pk')
+            return Job.objects.filter(kwargs__sfloc_id__in=[x['pk'] for x in all_sfl])
+        else:
+            return Job.objects.none()
+
+    def get_rf_ids_for_filejobs(self, **kwargs):
         """This is run before running job, to define files used by
         the job (so it cant run if if files are in use by other job)"""
-        return [x['sfile_id'] for x in self.getfiles_query(**kwargs)]
-
+        return [x['sfile__rawfile_id'] for x in self.oncreate_getfiles_query(**kwargs).values('sfile__rawfile_id')]
 
     def get_dsids_jobrunner(self, **kwargs):
         return []
 
+    def get_dss_ids(self, **kwargs):
+        return []
+
     def run(self, **kwargs):
         self.process(**kwargs)
+        self.update_sourcefns_lastused(**kwargs)
         self.queue_tasks()
 
     def post(self):
@@ -109,26 +194,33 @@ class BaseJob:
     def on_pause(self, **kwargs):
         pass
 
+    def get_server_based_queue(self, servername, queue):
+        return f'{servername}__{queue}'
+
     def queue_tasks(self):
-        for task in self.run_tasks:
-            args, kwargs = task[0], task[1]
-            tid = self.task.delay(*args, **kwargs)
-            self.create_db_task(tid, *args, **kwargs)
-    
-    def create_db_task(self, task_id, *args, **kwargs):
-        return Task.objects.create(asyncid=task_id, job_id=self.job_id, state=states.PENDING,
-                args=[args, kwargs])
+        '''If queue is defined on job, run that queue, otherwise, get queue
+        from the task (in case of variable server-dependent queues'''
+        for runtask in self.run_tasks:
+            if self.queue:
+                args = runtask
+                queue = self.queue
+            else:
+                args, queue = runtask
+            print(f'Queueing task for job {self.job_id} to queue {queue}')
+            tid = self.task.apply_async(args=args, queue=queue)
+            self.create_db_task(tid, *args)
+
+    def create_db_task(self, task_id, *args):
+        return Task.objects.create(asyncid=task_id, job_id=self.job_id, state=states.PENDING, args=args)
 
 
 class SingleFileJob(BaseJob):
-    def getfiles_query(self, **kwargs):
-        # FIXME do .get and .select_related in jobs itself?
-        # As in multifile job (PurgeFiles)
-        return StoredFileLoc.objects.filter(pk=kwargs['sfloc_id']).select_related(
-                'servershare', 'sfile__rawfile').get()
+    '''Job class for any job which specifies a single file on a share (so an StoredFileLoc).
+    '''
 
-    def get_sf_ids_jobrunner(self, **kwargs):
-        return [self.getfiles_query(**kwargs).sfile_id]
+    def oncreate_getfiles_query(self, **kwargs):
+        return StoredFileLoc.objects.filter(pk=kwargs['sfloc_id'])
+        # As in multifile job (PurgeFiles)
 
     def get_dsids_jobrunner(self, **kwargs):
         ''''In case a single file has a dataset'''
@@ -137,7 +229,9 @@ class SingleFileJob(BaseJob):
 
 
 class MultiFileJob(BaseJob):
-    def getfiles_query(self, **kwargs):
+    '''Job class to specify any job on a number of files on a specific share.
+    '''
+    def oncreate_getfiles_query(self, **kwargs):
         return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'])
 
     def get_dsids_jobrunner(self, **kwargs):
@@ -147,50 +241,50 @@ class MultiFileJob(BaseJob):
 
 
 class DatasetJob(BaseJob):
-    '''Any job that changes a dataset (rename, adding/removing files, backup, reactivate)'''
+    '''Any job that changes a dataset (rename, adding/removing files, backup, reactivate).
+    We include add/remove etc since the jobrunner will wait for the entire dataset file operations
+    then, not only for the files-to-be-added, which is good since otherwise you could start
+    an analysis on the dataset without those files, for example.
+    '''
 
     def get_dsids_jobrunner(self, **kwargs):
-        return [kwargs['dset_id']]
+        return [x.pk for x in dm.Dataset.objects.filter(datasetserver__pk=kwargs['dss_id'])]
 
-    def get_sf_ids_jobrunner(self, **kwargs):
-        '''Let all files associated with dataset wait, including added files on other path, and 
-        removed files on dset path (will be moved to new folder before their move to tmp)'''
-        dset = dm.Dataset.objects.get(pk=kwargs['dset_id'])
-        dsfiles = StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=kwargs['dset_id'])
-        ds_ondisk = StoredFile.objects.filter(storedfileloc__servershare=dset.storageshare, storedfileloc__path=dset.storage_loc)
-        return [x.pk for x in dsfiles.union(ds_ondisk)]
+    def get_dss_ids(self, **kwargs):
+        return [kwargs['dss_id']]
 
-    def getfiles_query(self, **kwargs):
-        '''Get all files with same path as dset.storage_loc. This gets all files in the dset dir,
-        not only the ones that have a datasetrawfile. If this job runs just after a user removes
-        files from the dataset, the job that runs the removal comes after this, and the removed files
-        will not have a datasetrawfile, so we need to take care of all the files in the dset.
-        Also, files ADDED to the dataset will still be on tmp and need not to be included in this
-        job, even though they will have a datasetrawfile.
-        # FIXME to avoid this particular issue, create_job could create the sfids instead of dset_id when being run.
+    def get_rf_ids_for_filejobs(self, **kwargs):
+        '''Let runner wait for entire dataset'''
+        return [x['pk'] for x in RawFile.objects.filter(
+            datasetrawfile__dataset__datasetserver__id=kwargs['dss_id']).values('pk')]
+
+    def oncreate_getfiles_query(self, **kwargs):
+        '''Get all files which had a datasetrawfile association when this job was created/retried,
+        (so get the FileJob entries). Files will either be used in the
+        job itself and/or post the job in e.g. re-setting their paths etc.
+
+        FileJob records: let all files associated with dataset wait,
+        this means that the job is created AFTER new datasetrawfile associations, and BEFORE
+        removed datasetrawfile association.
+
+        When e.g. check_job_error is used, there is no job yet, and this will return the files
+        of a dataset'
         '''
-        dset = dm.Dataset.objects.get(pk=kwargs['dset_id'])
-        return StoredFileLoc.objects.filter(servershare=dset.storageshare, path=dset.storage_loc)
+        return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'])
 
 
-class ProjectJob(BaseJob):
-    def get_dsids_jobrunner(self, **kwargs):
-        return [x.pk for x in dm.Dataset.objects.filter(deleted=False, purged=False,
-            runname__experiment__project_id=kwargs['proj_id'])]
+class MultiDatasetJob(BaseJob):
+    '''For jobs on multiple datasets, currently NF search job'''
 
-    def getfiles_query(self, **kwargs):
-        '''Get all files with same path as project_dsets.storage_locs, used to update
-        path of those files post-job'''
-        dsets = dm.Dataset.objects.filter(runname__experiment__project_id=kwargs['proj_id'])
-        return StoredFileLoc.objects.filter(
-                servershare__in=[x.storageshare for x in dsets.distinct('storageshare')],
-                path__in=[x.storage_loc for x in dsets.distinct('storage_loc')])
+    def get_dss_ids(self, **kwargs):
+        return kwargs['dss_ids']
 
-    def get_sf_ids_jobrunner(self, **kwargs):
-        """Get all sf ids in project to mark them as not using pre-this-job"""
-        projfiles = StoredFile.objects.filter(deleted=False, storedfileloc__purged=False,
-                rawfile__datasetrawfile__dataset__runname__experiment__project_id=kwargs['proj_id'])
-        dsets = dm.Dataset.objects.filter(runname__experiment__project_id=kwargs['proj_id'])
-        allfiles = StoredFile.objects.filter(storedfileloc__servershare__in=[x.storageshare for x in dsets.distinct('storageshare')],
-                storedfileloc__path__in=[x.storage_loc for x in dsets.distinct('storage_loc')]).union(projfiles)
-        return [x.pk for x in allfiles]
+    def get_rf_ids_for_filejobs(self, **kwargs):
+        '''Let runner wait for entire datasets'''
+        dss = dm.DatasetServer.objects.filter(pk__in=kwargs['dss_ids'])
+        return [x['pk'] for x in RawFile.objects.filter(
+            datasetrawfile__dataset__datasetserver__in=dss).values('pk')]
+
+    def oncreate_getfiles_query(self, **kwargs):
+        '''As for dataset job'''
+        return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'])

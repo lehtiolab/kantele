@@ -1,5 +1,5 @@
 # Django app
-FROM python:3.10.4 AS django
+FROM python:3.13.3 AS django
 ARG USER_ID
 ARG GROUP_ID
 RUN addgroup --system --gid $GROUP_ID kantele
@@ -8,13 +8,13 @@ RUN apt-get update && apt-get install -y libpq-dev python3-psycopg2 zip
 COPY backend/requirements.txt /
 RUN pip install -r requirements.txt
 RUN mkdir /assets
-RUN chdir /assets && wget https://files.pythonhosted.org/packages/ca/91/6d9b8ccacd0412c08820f72cebaa4f0c0441b5cda699c90f618b6f8a1b42/requests-2.28.1-py3-none-any.whl
-RUN chdir /assets && wget https://files.pythonhosted.org/packages/6a/34/cd29f4dd8a23ce45f2b8ce9631ff2d4205fb74eddb412a3dc4fd1e4aa800/certifi-2022.9.14-py3-none-any.whl
-RUN chdir /assets && wget https://files.pythonhosted.org/packages/60/ef/7681134338fc097acef8d9b2f8abe0458e4d87559c689a8c306d0957ece5/requests_toolbelt-0.9.1-py2.py3-none-any.whl
-RUN chdir /assets && wget https://files.pythonhosted.org/packages/fc/34/3030de6f1370931b9dbb4dad48f6ab1015ab1d32447850b9fc94e60097be/idna-3.4-py3-none-any.whl 
-RUN chdir /assets && wget https://files.pythonhosted.org/packages/db/51/a507c856293ab05cdc1db77ff4bc1268ddd39f29e7dc4919aa497f0adbec/charset_normalizer-2.1.1-py3-none-any.whl
-RUN chdir /assets && wget https://files.pythonhosted.org/packages/6f/de/5be2e3eed8426f871b170663333a0f627fc2924cc386cd41be065e7ea870/urllib3-1.26.12-py2.py3-none-any.whl
-RUN chdir /assets && wget https://files.pythonhosted.org/packages/11/91/87fa6f060e649b1e1a7b19a4f5869709fbf750b7c8c262ee776ec32f3028/psutil-6.1.0-cp37-abi3-win_amd64.whl
+RUN chdir /assets && wget https://files.pythonhosted.org/packages/f9/9b/335f9764261e915ed497fcdeb11df5dfd6f7bf257d4a6a2a686d80da4d54/requests-2.32.3-py3-none-any.whl
+RUN chdir /assets && wget https://files.pythonhosted.org/packages/38/fc/bce832fd4fd99766c04d1ee0eead6b0ec6486fb100ae5e74c1d91292b982/certifi-2025.1.31-py3-none-any.whl
+RUN chdir /assets && wget https://files.pythonhosted.org/packages/3f/51/d4db610ef29373b879047326cbf6fa98b6c1969d6f6dc423279de2b1be2c/requests_toolbelt-1.0.0-py2.py3-none-any.whl
+RUN chdir /assets && wget https://files.pythonhosted.org/packages/76/c6/c88e154df9c4e1a2a66ccf0005a88dfb2650c1dffb6f5ce603dfbd452ce3/idna-3.10-py3-none-any.whl
+RUN chdir /assets && wget https://files.pythonhosted.org/packages/0e/f6/65ecc6878a89bb1c23a086ea335ad4bf21a588990c3f535a227b9eea9108/charset_normalizer-3.4.1-py3-none-any.whl
+RUN chdir /assets && wget https://files.pythonhosted.org/packages/6b/11/cc635220681e93a0183390e26485430ca2c7b5f9d33b15c74c2861cb8091/urllib3-2.4.0-py3-none-any.whl
+RUN chdir /assets && wget https://files.pythonhosted.org/packages/50/1b/6921afe68c74868b4c9fa424dad3be35b095e16687989ebbb50ce4fceb7c/psutil-7.0.0-cp37-abi3-win_amd64.whl
 COPY docker/setup.bat /assets/
 RUN cd /assets && zip producer.zip *.whl setup.bat && chown kantele:kantele producer.zip
 USER kantele
@@ -38,7 +38,7 @@ ARG SECRET_KEY=abcd1234
 RUN python manage.py collectstatic --no-input
 
 # Compile node frontend stuff for prod container
-FROM node:18 AS build_frontend
+FROM node:23 AS build_frontend
 COPY frontend /src/frontend
 RUN cd /src/frontend/analysis && npm install && npm run build
 RUN cd /src/frontend/dashboard && npm install && npm run build
@@ -51,7 +51,7 @@ RUN cd /src/frontend/corefac && npm install && npm run build
 
 # Nginx to serve static stuff, uploads etc
 # also copy in the relevant config files
-FROM nginx:1.21 AS nginx_prod
+FROM nginx:1.27.5 AS nginx_prod
 COPY --from=build_frontend /static /static
 COPY --from=django_static /kantele/static/ /static/
 COPY docker/nginx.conf /etc/nginx/nginx.conf
@@ -60,6 +60,7 @@ COPY docker/uwsgi_params /etc/nginx/uwsgi_params
 
 # Rsync SSH host for testing (SSHD would run on the web host machine outside of container
 # in normal circumstances)
+# Ubuntu 24 has already ubuntu/ubuntu user with 1000/1000, so sticking with 22 for now.
 FROM ubuntu:22.04 AS rsync_storage
 RUN apt-get update && apt-get install -y openssh-server rsync
 ARG USER_ID
@@ -74,7 +75,7 @@ CMD service ssh start -D
 # Analysis if needed
 FROM django AS nextflow
 USER root
-RUN apt install -y openjdk-17-jre
+RUN apt install -y openjdk-17-jre git-core
 RUN mkdir /nxf && cd /nxf && curl -s https://get.nextflow.io | bash
 RUN chown -R kantele:kantele /nxf
 USER kantele

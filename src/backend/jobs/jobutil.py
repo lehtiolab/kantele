@@ -1,5 +1,3 @@
-
-
 from django.utils import timezone
 
 from datasets import jobs as dsjobs
@@ -8,34 +6,30 @@ from analysis import jobs as anjobs
 from mstulos import jobs as mtjobs
 from jobs.jobs import Jobstates
 from jobs.models import Job
+from rawstatus.models import FileJob
 
 
 alljobs = [
         dsjobs.RenameDatasetStorageLoc,
-        dsjobs.MoveFilesToStorage,
-        dsjobs.MoveFilesStorageTmp,
+        dsjobs.RsyncDatasetServershare,
+        dsjobs.RemoveDatasetFilesFromServershare,
         dsjobs.ConvertDatasetMzml,
-        dsjobs.DeleteActiveDataset,
-        dsjobs.DeleteDatasetMzml,
-        dsjobs.BackupPDCDataset,
-        dsjobs.ReactivateDeletedDataset,
-        dsjobs.DeleteDatasetPDCBackup,
-        dsjobs.RenameProject,
-        dsjobs.MoveDatasetServershare,
-        rsjobs.RsyncFileTransfer,
+        #dsjobs.DeleteDatasetPDCBackup,
+        rsjobs.RsyncOtherFileServershare,
+        rsjobs.RsyncFileTransferFromWeb,
+        rsjobs.RemoveFilesFromServershare,
         rsjobs.CreatePDCArchive,
         rsjobs.RestoreFromPDC,
+        rsjobs.BackupPDCDataset,
+        rsjobs.ReactivateDeletedDataset,
         rsjobs.RenameFile,
-        rsjobs.MoveSingleFile,
         rsjobs.DeleteEmptyDirectory,
-        rsjobs.PurgeFiles,
-        rsjobs.DownloadPXProject,
-        rsjobs.RegisterExternalFile,
+        rsjobs.DownloadPXProject, # FIXME later
+        rsjobs.RegisterExternalFile,  # FIXME later
         rsjobs.ClassifyMSRawFile,
         anjobs.RunLongitudinalQCWorkflow,
         anjobs.RunNextflowWorkflow,
         anjobs.RefineMzmls,
-        anjobs.PurgeAnalysis,
         anjobs.DownloadFastaFromRepos,
         mtjobs.ProcessAnalysis,
         ]
@@ -48,24 +42,30 @@ def check_job_error(name, **kwargs):
     return jwrap.check_error(**kwargs)
 
 
-def create_job(name, state=False, **kwargs):
+def create_job(name, state=False, check_errors=True, **kwargs):
     '''Checks errors and then creates the job'''
     if not state:
         state = Jobstates.PENDING
-    if error := check_job_error(name, **kwargs):
-        jobdata = {'id': False, 'error': error}
-    else:
-        job = Job.objects.create(funcname=name, timestamp=timezone.now(),
-            state=state, kwargs=kwargs)
-        jobdata = {'id': job.id, 'error': False}
+    jwrap = jobmap[name](False)
+    if check_errors:
+        if error := check_job_error(name, **kwargs):
+            return {'id': False, 'kwargs': kwargs, 'error': error}
+    # Fall through if no errors or no checking    
+    # addkwargs should be here, after error check, otehrwise
+    # new SFL will be created at error check even when its failing
+    kwargs.update(jwrap.on_create_addkwargs(**kwargs))
+    jwrap.update_sourcefns_lastused(**kwargs)
+    for extrajob in jwrap.on_create_prep_rsync_jobs(**kwargs):
+        create_job(extrajob['name'], **extrajob['kwargs'])
+    job = Job.objects.create(funcname=name, timestamp=timezone.now(),
+        state=state, kwargs=kwargs)
+    jobdata = {'id': job.id, 'kwargs': kwargs, 'error': False}
+    FileJob.objects.bulk_create([FileJob(rawfile_id=rf_id, job_id=job.id) for rf_id in 
+        jwrap.get_rf_ids_for_filejobs(**kwargs)])
     return jobdata
 
 
 def create_job_without_check(name, state=False, **kwargs):
     '''In case you do error checking before creating jobs, you can use this
     for quicker creation without another check'''
-    if not state:
-        state = Jobstates.PENDING
-    job = Job.objects.create(funcname=name, timestamp=timezone.now(),
-            state=state, kwargs=kwargs)
-    return {'id': job.id, 'error': False}
+    create_job(name, state=state, check_errors=False, **kwargs)

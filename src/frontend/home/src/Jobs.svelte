@@ -72,6 +72,7 @@ async function refreshJob(jobid) {
 async function getJobDetails(jobId) {
        const resp = await getJSON(`/show/job/${jobId}`);
   return `
+    <p>${resp.timestamp}</p>
     <p>${resp.files} files in job</p>
     ${resp.errmsg ? `<p>Error msg: ${resp.errmsg}</p>` : ''}
     <p>

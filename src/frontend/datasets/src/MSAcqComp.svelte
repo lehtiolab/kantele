@@ -139,7 +139,9 @@ onMount(async() => {
 <div class="field">
   <label class="label">Reverse phase length</label>
   <div class="control">
-    <input type="checkbox" on:change={editMade} bind:checked={dsinfo.dynamic_rp}>Dynamic
+    <label class="checkbox">
+      <input type="checkbox" on:change={editMade} bind:checked={dsinfo.dynamic_rp}>Dynamic
+    </label>
     {#if !dsinfo.dynamic_rp}
     <input type="number" on:change={editMade} class="input" placeholder="in minutes" bind:value={dsinfo.rp_length}>
     {/if}

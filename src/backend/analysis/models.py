@@ -1,3 +1,7 @@
+import os
+import re
+from datetime import datetime
+
 from django.db import models
 from django.contrib.auth.models import User
 
@@ -267,9 +271,32 @@ class Analysis(models.Model):
     name = models.TextField()
     log = models.JSONField(default=list)
     deleted = models.BooleanField(default=False)
+    # FIXME purged lost its meaning now? w sfl in multi location
     purged = models.BooleanField(default=False)
     storage_dir = models.TextField()
     editable = models.BooleanField(default=True)
+    #  to make sure that we dont accidentally put sens output on a public server
+    # using rsync
+    #securityclass = models.IntegerField(choices=dsmodels.DataSecurityClass.choices)
+
+    def get_fullname(self, wftype=False):
+        if wftype:
+            pass
+        elif hasattr(self, 'nextflowsearch'):
+            wftype = self.nextflowsearch.workflow.wftype
+        else:
+            wftype = UserWorkflow.WFTypeChoices.USER
+        shortname = UserWorkflow.WFTypeChoices(wftype).name
+        return f'{shortname}_{self.name}'
+
+    def get_run_base_dir(self, wftype=False):
+       cleanname = re.sub('[^a-zA-Z0-9\.\-_]', '_', self.get_fullname(wftype))
+       return (f'{self.pk}_{cleanname}_{datetime.strftime(self.date, "%Y%m%d_%H.%M")}')
+
+    def get_public_output_dir(self):
+        return os.path.join(self.user.username, self.get_run_base_dir())
+
+
 
 
 # Can this be generalized to deleted log for also files?
@@ -301,7 +328,7 @@ class NextflowSearch(models.Model):
 
 class AnalysisResultFile(models.Model):
     analysis = models.ForeignKey(Analysis, on_delete=models.CASCADE)
-    sfile = models.OneToOneField(filemodels.StoredFile, on_delete=models.CASCADE)
+    sfile = models.ForeignKey(filemodels.StoredFile, on_delete=models.CASCADE)
 
 
 class Proteowizard(models.Model):

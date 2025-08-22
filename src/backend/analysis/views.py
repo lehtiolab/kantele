@@ -1,14 +1,14 @@
 import re
 import os
 import json
+import shutil
 from datetime import datetime, timedelta
 from collections import defaultdict
-from uuid import uuid4
+from tempfile import NamedTemporaryFile
 
 from django.utils import timezone
 from django.http import (HttpResponseForbidden, HttpResponse, JsonResponse,
         HttpResponseNotFound)
-from django.db import IntegrityError
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_GET, require_POST
 from django.shortcuts import render
@@ -16,8 +16,8 @@ from django.db.models import Q, Count
 
 from kantele import settings
 from analysis import models as am
-from analysis import jobs as aj
 from datasets import models as dm
+from datasets.views import get_quantprot_id
 from rawstatus import models as rm
 from rawstatus.views import create_upload_token
 from home import views as hv
@@ -25,6 +25,16 @@ from jobs import jobs as jj
 from jobs import views as jv
 from jobs.jobutil import create_job
 from jobs import models as jm
+
+
+def get_dset_prefrac_hiriefrange(d):
+    prefrac, hrrange_id = False, False
+    if hasattr(d, 'prefractionationdataset') and hasattr(d.prefractionationdataset, 'hiriefdataset'):
+        hrrange_id = d.prefractionationdataset.hiriefdataset.hirief_id
+        prefrac = d.prefractionationdataset.prefractionation
+    elif hasattr(d, 'prefractionationdataset'):
+        prefrac = d.prefractionationdataset.prefractionation
+    return prefrac, hrrange_id
 
 
 @login_required
@@ -42,9 +52,19 @@ def get_analysis_init(request):
         dserrors.append('Deleted datasets can not be analysed')
     if dbdsets.filter(deleted=False).count() + deleted < len(dsids):
         dserrors.append('Some datasets could not be found, they may not exist')
-    dsnames = {d.pk: format_dset_tag(d) for d in dbdsets}
-    dslocks = {d.pk: d.locked for d in dbdsets}
-    context = {'dsets': {'names': dsnames, 'locks': dslocks}, 'ds_errors': dserrors, 'analysis': False, 'wfs': get_allwfs()}
+    qpid = get_quantprot_id()
+    dsnames, dslocks, dssec = {}, {}, {}
+    for d in dbdsets.select_related('runname__experiment__project',
+            'datatype', 'prefractionationdataset__hiriefdataset',
+
+            'prefractionationdataset__prefractionation'):
+        prefrac, hrrange_id = get_dset_prefrac_hiriefrange(d)
+        dsnames[d.pk] = format_dset_tag(qpid, d.runname.experiment.project, d.runname.experiment,
+                d, d.datatype, prefrac, hrrange_id)
+        dslocks[d.pk] = d.locked
+        dssec[d.pk] = d.securityclass
+    context = {'dsets': {'names': dsnames, 'locks': dslocks, 'secclasses': dssec},
+            'ds_errors': dserrors, 'analysis': False, **get_allstuff()}
     return render(request, 'analysis/analysis.html', context)
 
 
@@ -77,7 +97,7 @@ def load_analysis_resultfiles(request, anid):
         wftype = ana.nextflowsearch.workflow.wftype
     else:
         wftype = am.UserWorkflow.WFTypeChoices.USER
-    ananame = aj.get_ana_fullname(ana, wftype)
+    ananame = ana.get_fullname()
     anadate = datetime.strftime(ana.date, '%Y-%m-%d')
     resultfiles = [{'id': x.sfile_id, 'fn': x.sfile.filename, 'ana': ananame, 'date': anadate}
         for x in ana.analysisresultfile_set.exclude(sfile__pk__in=already_loaded_files)]
@@ -110,7 +130,7 @@ def load_base_analysis(request, wfversion_id, baseanid):
         ana = am.Analysis.objects.select_related('nextflowsearch__workflow').get(pk=baseanid)
     except am.Analysis.DoesNotExist:
         return JsonResponse({'error': 'Base analysis not found'}, status=403)
-    baseana_dsids = [dss.dataset_id for dss in ana.datasetanalysis_set.all()]
+    baseana_dsids = [dsa.dataset_id for dsa in ana.datasetanalysis_set.all()]
     analysis = {
             'analysis_id': ana.pk,
             'dsets_identical': set(baseana_dsids) == set(new_ana_dsids),
@@ -219,7 +239,7 @@ def load_base_analysis(request, wfversion_id, baseanid):
         analysis_id__in=added_ana_ids).exclude(sfile_id__in=analysis_prev_resfiles_ids)]
     already_loaded_files = analysis_prev_resfiles_ids + added_files_ids
     base_resfiles = [{'id': x.sfile_id, 'fn': x.sfile.filename,
-        'ana': aj.get_ana_fullname(ana, ana.nextflowsearch.workflow.wftype),
+        'ana': ana.get_fullname(),
         'date': datetime.strftime(ana.date, '%Y-%m-%d')}
         for x in ana.analysisresultfile_set.exclude(sfile__pk__in=already_loaded_files)]
     return JsonResponse({'base_analysis': analysis, 'datasets': dsets, 'resultfiles': base_resfiles})
@@ -252,18 +272,26 @@ def get_analysis(request, anid):
             'external_desc': '',
             'wfversion_id': False,
             'wfid': False,
+            'analysisserver_id': False,
             'external_results': False,
             'base_analysis': {},
             }
-    dsets, dslocks = {}, {}
-    for x in ana.datasetanalysis_set.select_related('dataset').all():
-        dsets[x.dataset_id] = format_dset_tag(x.dataset) 
+    dsets, dslocks, dssec = {}, {}, {}
+    qpid = get_quantprot_id()
+    for x in ana.datasetanalysis_set.select_related('dataset__runname__experiment__project',
+            'dataset__datatype', 'dataset__prefractionationdataset__hiriefdataset',
+            'dataset__prefractionationdataset__prefractionation').all():
+        prefrac, hrrange_id = get_dset_prefrac_hiriefrange(x.dataset)
+        dsets[x.dataset_id] = format_dset_tag(qpid, x.dataset.runname.experiment.project,
+                x.dataset.runname.experiment, x.dataset, x.dataset.datatype, prefrac, hrrange_id)
         dslocks[x.dataset_id] = x.dataset.locked
+        dssec[x.dataset_id] = x.dataset.securityclass
     prev_resultfiles_ids = get_prev_resultfiles(dsets.keys(), only_ids=True)
     if hasattr(ana, 'nextflowsearch'):
         analysis.update({
                 'wfversion_id': ana.nextflowsearch.nfwfversionparamset_id,
                 'wfid': ana.nextflowsearch.workflow_id,
+                'analysisserver_id': ana.nextflowsearch.job.kwargs.get('fserver_id', False),
                 'jobstate': ana.nextflowsearch.job.state,
                 })
         PTypes = am.Param.PTypes
@@ -284,8 +312,7 @@ def get_analysis(request, anid):
         if ana_base.exists():
             ana_base = ana_base.get()
             base_dsids = [x.dataset_id for x in ana_base.base_analysis.datasetanalysis_set.all()]
-            baname = aj.get_ana_fullname(ana_base.base_analysis,
-                    ana_base.base_analysis.nextflowsearch.workflow.wftype)
+            baname = ana_base.base_analysis.get_fullname()
             badate = datetime.strftime(ana_base.base_analysis.date, '%Y-%m-%d')
             analysis['base_analysis'] = {
                     #### these are repeated in ana/wf if same dsets
@@ -345,15 +372,13 @@ def get_analysis(request, anid):
             'external_results': True})
 
     context = {
-            'dsets': {'names': dsets, 'locks': dslocks},
-            'ds_errors': [],
-            'analysis': analysis,
-            'wfs': get_allwfs()
+            'dsets': {'names': dsets, 'locks': dslocks, 'secclasses': dssec},
+            'ds_errors': [], 'analysis': analysis, **get_allstuff(),
             }
     return render(request, 'analysis/analysis.html', context)
 
 
-def get_allwfs():
+def get_allstuff():
     allwfs = [{
         'id': x.id, 'name': x.name, 'wftype': am.UserWorkflow.WFTypeChoices(x.wftype).name,
         'versions': [{'name': wfv.update, 'id': wfv.id,
@@ -363,7 +388,8 @@ def get_allwfs():
             for x in am.UserWorkflow.objects.filter(public=True).order_by('pk')[::-1]]
     order = [x['id'] for x in allwfs]
     allwfs = {x['id']: x for x in allwfs}
-    return {'wfs': allwfs, 'order': order}
+    return {'wfs': {'wfs': allwfs, 'order': order},
+            'allsecclass': {x.value: x.label for x in rm.DataSecurityClass}}
 
 
 def get_msdataset_files_by_type(alldsfiles, nrrawfiles=False):
@@ -407,11 +433,11 @@ def get_base_analyses(request):
                 'nextflowsearch__nfwfversionparamset').filter(query, deleted=False):
                         # nextflowsearch__isnull=False, 
             if hasattr(x, 'nextflowsearch'):
-                txt = (f'{aj.get_ana_fullname(x, x.nextflowsearch.workflow.wftype)} - '
+                txt = (f'{x.get_fullname} - '
                         f'{x.nextflowsearch.workflow.name, x.nextflowsearch.nfwfversionparamset.update}')
             else:
 
-                txt = f'{aj.get_ana_fullname(x, am.UserWorkflow.WFTypeChoices.USER)}'
+                txt = x.get_fullname()
             resp[x.id] = {'id': x.id,
             'name': f'{txt} - {x.user.username} - {datetime.strftime(x.date, "%Y%m%d")}'}
         return JsonResponse(resp)
@@ -453,19 +479,21 @@ def get_datasets(request, wfversion_id):
         analysis_dsfiles = {x for x in has_filesamples}
     
     # FIXME accumulate errors across data sets and show all, but do not report other stuff if error
-    for dset in dbdsets.select_related('runname__experiment__project', 'prefractionationdataset',
-            'quantdataset'):
+    qpid = get_quantprot_id()
+    for dset in dbdsets.select_related('runname__experiment__project', 'datatype', 'quantdataset',
+            'prefractionationdataset__hiriefdataset', 'prefractionationdataset__prefractionation'):
         # For error reporting per dset:
         dsname = f'{dset.runname.experiment.project.name} / {dset.runname.experiment.name} / {dset.runname.name}'
         # Fractionation
-        prefrac, hr, frregex = False, False, ''
-        if 'PREFRAC' in wfcomponents:
-            if hasattr(dset, 'prefractionationdataset'):
-                pf = dset.prefractionationdataset
-                prefrac = str(pf.prefractionation.name)
-                if 'hirief' in pf.prefractionation.name.lower():
-                    hr = f'HiRIEF {str(pf.hiriefdataset.hirief)}'
+        prefracname, hr, frregex = False, False, ''
+        prefrac, hrrange_id = get_dset_prefrac_hiriefrange(dset)
+        if 'PREFRAC' in wfcomponents and prefrac:
+            prefracname = str(prefrac.name)
+            if 'hirief' in prefrac.name.lower():
+                hr = f'HiRIEF {str(dset.prefractionationdataset.hiriefdataset.hirief)}'
             frregex = wfcomponents['PREFRAC']
+        tag = format_dset_tag(qpid, dset.runname.experiment.project, dset.runname.experiment,
+                dset, dset.datatype, prefrac, hrrange_id)
 
         # Sample(set) names, adsv fields and previously used files
         setname = ''
@@ -487,7 +515,7 @@ def get_datasets(request, wfversion_id):
         # Get dataset files
         dssfiles = rm.StoredFile.objects.select_related('rawfile__producer', 'filetype').filter(
                 rawfile__datasetrawfile__dataset=dset, deleted=False,
-                storedfileloc__purged=False, checked=True)
+                storedfileloc__active=True, checked=True)
         dsrawfiles = dssfiles.filter(mzmlfile__isnull=True)
 
         # For reporting in interface and checking
@@ -599,10 +627,10 @@ def get_datasets(request, wfversion_id):
                 'proj': dset.runname.experiment.project.name,
                 'exp': dset.runname.experiment.name,
                 'run': dset.runname.name,
-                'storage': format_dset_tag(dset),
+                'storage': tag,
                 'locked': dset.locked,
                 'dtype': dset.datatype.name,
-                'prefrac': prefrac,
+                'prefrac': prefracname,
                 'hr': hr,
                 'setname': setname,
                 'fields': {'__regex': frregex, **fields},
@@ -615,11 +643,17 @@ def get_datasets(request, wfversion_id):
                 'incomplete_files': incomplete_files,
                 'picked_ftype': picked_ft,
                 'allfilessamesample': allfilessamesample,
+                'secclass': dset.securityclass,
                 }
     if len(response['errmsg']):
         return JsonResponse({**response, 'error': True}, status=400)
     else:
-        response.update({'dsets': dsetinfo, 'field_order': field_order})
+        max_sec = max(x['secclass'] for x in dsetinfo.values())
+        response.update({'dsets': dsetinfo, 'field_order': field_order, 
+            'servers': [{'id': x['server_id'], 'name': x['server__name']} for x in
+                rm.FileserverShare.objects.filter(server__is_analysis=True,
+                share__max_security__gte=max_sec).values('server_id', 'server__name').distinct('server_id')],
+            })
         return JsonResponse(response)
 
 
@@ -636,9 +670,8 @@ def get_workflow_versioned(request):
     params = wf.paramset.psetparam_set.select_related('param')
     files = wf.paramset.psetfileparam_set.select_related('param')
     multifiles = wf.paramset.psetmultifileparam_set.select_related('param')
-    ftypes = [x['param__filetype_id'] for x in files.values('param__filetype_id').distinct()]
-    ftypes.extend([x['param__filetype_id'] for x in multifiles.values('param__filetype_id').distinct()])
-    ftypes = set(ftypes)
+    ftypes = {x['param__filetype_id'] for x in files.values('param__filetype_id').distinct()}
+    ftypes.update({x['param__filetype_id'] for x in multifiles.values('param__filetype_id').distinct()})
     selectable_files = [x for x in am.LibraryFile.objects.select_related('sfile__filetype').filter(
         sfile__filetype__in=ftypes).order_by('-sfile__regdate')]
     userfiles = [x for x in rm.UserFile.objects.select_related('sfile__filetype').filter(
@@ -701,23 +734,21 @@ def get_prev_resultfiles(dsids, only_ids=False):
         prev_resultfiles = [x['sfile_id'] for x in qset_arf.values('sfile_id')]
     else:
         prev_resultfiles = [{'id': x.sfile.id, 'fn': x.sfile.filename,
-            'ana': aj.get_ana_fullname(x.analysis, x.analysis.nextflowsearch.workflow.wftype),
+            'ana': x.analysis.get_fullname(),
             'date': datetime.strftime(x.analysis.date, '%Y-%m-%d')}
         for x in qset_arf.select_related('analysis__nextflowsearch__workflow')]
     return prev_resultfiles
 
 
 def get_added_analysis_contents(afp, prev_or_base_resultfns, added_results):
-    if (hasattr(afp.sfile, 'analysisresultfile') and not hasattr(afp.sfile, 'libraryfile')
-            and not afp.sfile_id in prev_or_base_resultfns
-            and afp.sfile.analysisresultfile.analysis_id not in added_results):
-        arf = afp.sfile.analysisresultfile
+    for arf in afp.sfile.analysisresultfile_set.filter(analysis__deleted=False).exclude(
+            analysis_id__in=added_results, sfile_id__in=prev_or_base_resultfns):
         arf_date = datetime.strftime(arf.analysis.date, '%Y-%m-%d')
         if hasattr(arf.analysis, 'nextflowsearch'):
             wftype = arf.analysis.nextflowsearch.workflow.wftype
         else:
             wftype = am.UserWorkflow.WFTypeChoices.USER
-        arf_ananame = aj.get_ana_fullname(arf.analysis, wftype)
+        arf_ananame = arf.analysis.get_fullname()
         arf_fns = [{'id': x.sfile_id, 'fn': x.sfile.filename, 'ana': arf_ananame,
             'date': arf_date} for x in arf.analysis.analysisresultfile_set.all()]
         added_results[arf.analysis_id] = {'analysisname': arf_ananame, 'date': arf_date, 'fns': arf_fns}
@@ -745,7 +776,7 @@ def store_analysis(request):
     # First do checks so we dont save stuff on errors:
     try:
         req = json.loads(request.body.decode('utf-8'))
-        req['dsids']
+        dsids = [int(x) for x in req['dsids']]
         req['analysis_id']
         req['infiles']
         req['nfwfvid']
@@ -761,35 +792,36 @@ def store_analysis(request):
         req['base_analysis']
         req['wfid']
         req['upload_external']
-    except json.decoder.JSONDecodeError:
-        return JsonResponse({'error': 'Something went wrong, contact admin concerning a bad request'}, status=400)
+        req['analysisserver_id']
+    except (json.decoder.JSONDecodeError, ValueError):
+        return JsonResponse({'multierror': [], 'errmsg': 'Something went wrong, contact admin concerning a bad request'}, status=400)
     except KeyError:
-        return JsonResponse({'error': 'Something went wrong, contact admin concerning missing data'}, status=400)
-    dsetquery = dm.Dataset.objects.filter(pk__in=req['dsids']).select_related(
+        return JsonResponse({'multierror': [], 'errmsg': 'Something went wrong, contact admin concerning missing data'}, status=400)
+    dsetquery = dm.Dataset.objects.filter(pk__in=dsids).select_related(
             'prefractionationdataset__prefractionation',
-            'storageshare__server',
             )
     if dsetquery.filter(deleted=True).exists():
-        return JsonResponse({'error': 'Deleted datasets cannot be analyzed'}, status=403)
+        return JsonResponse({'multierror': [], 'errmsg': 'Deleted datasets cannot be analyzed'}, status=403)
     if dsetquery.filter(locked=False).exists():
-        return JsonResponse({'error': 'Only locked datasets can be analyzed'}, status=403)
+        return JsonResponse({'multierror': [], 'errmsg': 'Only locked datasets can be analyzed'}, status=403)
     if req['analysis_id']:
         analysis = am.Analysis.objects.select_related('nextflowsearch__job').get(pk=req['analysis_id'])
         if analysis.user_id != request.user.id and not request.user.is_staff:
-            return JsonResponse({'error': 'You do not have permission to edit this analysis'}, status=403)
+            return JsonResponse({'multierror': [], 'errmsg': 'You do not have permission to edit this analysis'}, status=403)
         elif hasattr(analysis, 'nextflowsearch') and analysis.nextflowsearch.job.state == jj.Jobstates.DONE:
-            return JsonResponse({'error': 'This analysis has already finished running, it cannot be edited'}, status=403)
+            return JsonResponse({'multierror': [], 'errmsg': 'This analysis has already finished running, it cannot be edited'}, status=403)
         elif hasattr(analysis, 'nextflowsearch') and analysis.nextflowsearch.job.state not in jj.JOBSTATES_JOB_NOT_SENT:
-            return JsonResponse({'error': 'This analysis has a running or queued job, it cannot be edited, please stop the job first'}, status=403)
+            return JsonResponse({'multierror': [], 'errmsg': 'This analysis has a running or queued job, it cannot be edited, please stop the job first'}, status=403)
         elif not analysis.editable:
-            return JsonResponse({'error': 'This analysis cannot be edited'}, status=403)
+            return JsonResponse({'multierror': [], 'errmsg': 'This analysis cannot be edited'}, status=403)
 
     response_errors = []
-    dsets = {str(x.pk): x for x in dsetquery}
+    dsets = {x.pk: x for x in dsetquery}
     # Check if files have not changed while editing an analysis (e.g. long open window)
+    # FIXME look at this because it gets errors sometimes with mzML
     frontend_files_not_in_ds, ds_withfiles_not_in_frontend = {int(x) for x in req['infiles']}, set()
     dsfiles = {}
-    for dsid in req['dsids']:
+    for dsid in dsids:
         if req['upload_external'] and not req['wfid']:
             # Do not do any other dset processing if there is no WF
             continue
@@ -798,35 +830,35 @@ def store_analysis(request):
         if not hasattr(dset, 'quantdataset'):
             response_errors.append(f'File(s) or channels in dataset {dsname} do not have '
                     'sample annotations, please edit the dataset first')
-        dsregfiles = rm.RawFile.objects.filter(datasetrawfile__dataset_id=dsid)
         dssfiles = rm.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dsid,
-                        deleted=False, storedfileloc__purged=False, checked=True)
+                deleted=False, checked=True)
         dsrawfiles = dssfiles.filter(mzmlfile__isnull=True)
         nrrawfiles = dsrawfiles.count()
-        if nrrawfiles < dsregfiles.count():
+        if nrrawfiles < rm.RawFile.objects.filter(datasetrawfile__dataset_id=dsid).count():
             response_errors.append(f'Dataset {dsname} contains registered files that dont '
                 'have a storage entry yet. Maybe the transferring hasnt been finished, '
                 'or they are deleted.')
         # Load the raw files
+        ds_pick_ftype = req['picked_ftypes'][str(dsid)]
         try:
             dsfiles[dsid] = {dsrawfiles.values('filetype__name').distinct().get()['filetype__name']: dsrawfiles}
         except rm.StoredFile.MultipleObjectsReturned:
             response_errors.append(f'Files of multiple datatypes exist in dataset {dsname}')
-            dsfiles[dsid] = {req['picked_ftypes'][dsid]: dsrawfiles}
+            dsfiles[dsid] = {ds_pick_ftype:  dsrawfiles}
         except rm.StoredFile.DoesNotExist:
-            dsfiles[dsid] = {req['picked_ftypes'][dsid]: dsrawfiles}
+            dsfiles[dsid] = {ds_pick_ftype:  dsrawfiles}
             response_errors.append(f'No stored files exist for dataset {dsname}')
         # MS data get mzML files 
         if dsrawfiles.filter(rawfile__producer__msinstrument__isnull=False).count():
             ds_msfiles, _ = get_msdataset_files_by_type(dssfiles)
             dsfiles[dsid].update(ds_msfiles)
         # Settle for picked type
-        dsfiles[dsid] = dsfiles[dsid][req['picked_ftypes'][dsid]]
+        dsfiles[dsid] = dsfiles[dsid][ds_pick_ftype]
         if dsfiles[dsid].count() < nrrawfiles:
-            response_errors.append(f'Files of type {req["picked_ftypes"][dsid]} are fewer than '
+            response_errors.append(f'Files of type {ds_pick_ftype} are fewer than '
                     f'raw files, please fix - for dataset {dsname}')
 
-    for dsid in req['dsids']:
+    for dsid in dsids:
         if req['upload_external'] and not req['wfid']:
             # Do not do any other dset processing if there is no WF
             continue
@@ -852,7 +884,7 @@ def store_analysis(request):
 
     # Check if labelcheck - do we have quantchannel in single-file:
     if 'LABELCHECK_ISO' in wf_components and 'channel' in wf_components['INPUTDEF']:
-        for dsid in req['dsids']:
+        for dsid in dsids:
             qfcnr = dsets[dsid].datasetrawfile_set.filter(quantfilechannel__isnull=False).count()
             if qfcnr < nrrawfiles:
                 response_errors.append('Single-file-channel labelcheck needs file/channel '
@@ -910,37 +942,52 @@ def store_analysis(request):
         response_errors.append('No workflow passed, also not uploading external data, '
                 'need at least one of those.')
 
+    dss = dm.DatasetServer.objects.filter(dataset_id__in=dsids,
+            storageshare__fileservershare__server_id=req['analysisserver_id'],
+            storageshare__fileservershare__server__is_analysis=True).distinct('dataset')
+    server_dss_args = {}
     if req['wfid']:
         wftype = am.UserWorkflow.objects.get(pk=req['wfid']).wftype
+        for missing_dsid in set(dsids).difference(
+                set(x['dataset_id'] for x in dss.values('dataset_id'))):
+            response_errors.append(f'Dataset {missing_dsid} does not have its files available '
+                    'to the selected analysis server')
+        if fserver := rm.FileServer.objects.filter(pk=req['analysisserver_id'], is_analysis=True):
+            server_dss_args.update({'fserver_id': fserver.values('pk').get()['pk'],
+                'dss_ids': [x['pk'] for x in dss.values('pk')],
+                })
+        else:
+            response_errors.append('You must select a server with analysis capacity, '
+                    'maybe the infrastructure has changed, please reload the analysis')
+
     elif req['upload_external']:
         wftype = am.UserWorkflow.WFTypeChoices.USER
     else:
         # Shouldnt happen but keeps linter happy about init variable
         wftype = False
+    sflocs = rm.StoredFileLoc.objects.filter(sfile_id__in=[int(x) for x in req['infiles'].keys()],
+            servershare__fileservershare__server_id=server_dss_args['fserver_id'])
+
     # In case of errors, do not save anything
     # No storing above this line
     if len(response_errors):
-        return JsonResponse({'error': response_errors, **response_special}, status=400)
+        return JsonResponse({'multierror': response_errors, **response_special}, status=400)
 
     # Checks passed, now start storing to database
     if req['analysis_id']:
         analysis.name = req['analysisname']
         analysis.save()
-        dss = am.DatasetAnalysis.objects.filter(analysis=analysis)
-        excess_dss = {x.dataset_id for x in dss}.difference(req['dsids'])
-        dss.filter(dataset_id__in=excess_dss).delete()
+        dsa = am.DatasetAnalysis.objects.filter(analysis=analysis)
+        excess_dss = {x.dataset_id for x in dsa}.difference(dsids)
+        dsa.filter(dataset_id__in=excess_dss).delete()
         newdss = am.DatasetAnalysis.objects.bulk_create([am.DatasetAnalysis(dataset_id=dsid, analysis=analysis) 
-            for dsid in set(req['dsids']).difference({x.dataset_id for x in dss})])
-        dss_map = {x.dataset_id: x.pk for x in [*dss, *newdss]}
+            for dsid in set(dsids).difference({x.dataset_id for x in dsa})])
+        dsa_map = {x.dataset_id: x.pk for x in [*dsa, *newdss]}
     else:
         analysis = am.Analysis.objects.create(name=req['analysisname'], user_id=request.user.id)
-        dss = am.DatasetAnalysis.objects.bulk_create([am.DatasetAnalysis(dataset_id=dsid,
-            analysis=analysis) for dsid in req['dsids']])
-        dss_map = {x.dataset_id: x.pk for x in dss}
-    ana_storpathname = (f'{analysis.pk}_{aj.get_ana_fullname(analysis, wftype)}_'
-            f'{datetime.strftime(analysis.date, "%Y%m%d_%H.%M")}')
-    analysis.storage_dir = f'{analysis.user.username}/{ana_storpathname}'
-    analysis.save()
+        dsa = am.DatasetAnalysis.objects.bulk_create([am.DatasetAnalysis(dataset_id=dsid,
+            analysis=analysis) for dsid in dsids])
+        dsa_map = {x.dataset_id: x.pk for x in dsa}
 
     if req['upload_external']:
         # Generate new upload token if it does not already exist
@@ -971,10 +1018,9 @@ def store_analysis(request):
 
     in_components = {k: v for k, v in req['components'].items() if v}
     jobinputs = {'components': wf_components, 'singlefiles': {}, 'multifiles': {}, 'params': {}}
-    sflocs = rm.StoredFileLoc.objects.filter(sfile_id__in=[int(x) for x in req['infiles'].keys()],
-            servershare__name=settings.PRIMARY_STORAGESHARENAME).values('pk')
     data_args = {'filesamples': {}, 'platenames': {}, 'filefields': defaultdict(dict),
-            'infiles': req['infiles'], 'sfloc_ids': [x['pk'] for x in sflocs]}
+            **server_dss_args, 'infiles': req['infiles'],
+            'sfloc_ids': [x['pk'] for x in sflocs.values('pk')]}
 
     # Input file definition
     if 'INPUTDEF' in wf_components:
@@ -991,15 +1037,16 @@ def store_analysis(request):
     # setnames for datasets, optionally fractions and strips
     new_ads = {}
     am.AnalysisDSInputFile.objects.filter(analysisset__analysis=analysis).exclude(sfile_id__in=req['infiles']).delete()
-    for dsid, setname in req['dssetnames'].items():
-        for fieldname, value in req['dsetfields'][dsid].items():
+    for str_dsid, setname in req['dssetnames'].items():
+        dsid = int(str_dsid)
+        for fieldname, value in req['dsetfields'][str_dsid].items():
             ads, created = am.AnalysisDatasetSetValue.objects.update_or_create(
                     defaults={'setname_id': setname_ids[setname], 'value': value},
                     analysis=analysis, field=fieldname, dataset_id=dsid) 
             new_ads[ads.pk] = created
         for sf in dsfiles[dsid]:
             am.AnalysisDSInputFile.objects.get_or_create(sfile=sf, analysisset_id=setname_ids[setname],
-                    dsanalysis_id=dss_map[dsid])
+                    dsanalysis_id=dsa_map[dsid])
             data_args['filesamples'][sf.pk] = setname
         dset = dsets[dsid]
         if 'PREFRAC' in wf_components and hasattr(dset, 'prefractionationdataset'):
@@ -1052,19 +1099,17 @@ def store_analysis(request):
             param_id__in=req['singlefiles']).delete()
     for pid, sfid in req['singlefiles'].items():
         afp, created = am.AnalysisFileParam.objects.update_or_create(defaults={'sfile_id': sfid}, analysis=analysis, param_id=pid)
-        sfloc = rm.StoredFileLoc.objects.get(sfile_id=sfid)
-        jobinputs['singlefiles'][afp.param.nfparam] = sfloc.pk
+        jobinputs['singlefiles'][afp.param.nfparam] = sfid
     # Re-create multifiles, they cannot be updated since all files map to analysis/param_id
     # resulting in only a single row in DB
     for pid, sfids in req['multifiles'].items():
         for sfid in sfids:
             afp = am.AnalysisFileParam.objects.create(sfile_id=sfid,
                     analysis=analysis, param_id=pid)
-            sfloc = rm.StoredFileLoc.objects.get(sfile_id=sfid)
             try:
-                jobinputs['multifiles'][afp.param.nfparam].append(sfloc.pk)
+                jobinputs['multifiles'][afp.param.nfparam].append(sfid)
             except KeyError:
-                jobinputs['multifiles'][afp.param.nfparam] = [sfloc.pk]
+                jobinputs['multifiles'][afp.param.nfparam] = [sfid]
 
     # Base analysis
     if req['base_analysis']['selected']:
@@ -1082,7 +1127,7 @@ def store_analysis(request):
             except KeyError:
                 shadow_dss[x.dataset_id] = {'setname': x.setname.setname, 'fields': {x.field: x.value}}
         shadow_isoquants = get_isoquants(base_ana, sampletables)
-        # Add the base analysis' own base analysis shadow isquants/dss is any
+        # Add the base analysis' own base analysis shadow isquants/dsa is any
         try:
             baseana_dbrec = am.AnalysisBaseanalysis.objects.get(analysis=base_ana)
         except am.AnalysisBaseanalysis.DoesNotExist:
@@ -1155,11 +1200,10 @@ def store_analysis(request):
     # All data collected, now create a job in WAITING state
     if not req['upload_external']:
         fname = 'run_nf_search_workflow'
-        jobinputs['params'] = [x for nf, vals in jobparams.items() for x in [nf, ';'.join([str(v) for v in vals])]]
+        jobinputs['params'] = [x for nf, vals in jobparams.items() for x in [nf, ';'.join([str(v) for v in vals])] if x]
         #param_args = {'wfv_id': req['nfwfvid'], 'inputs': jobinputs}
-        kwargs = {'analysis_id': analysis.id, 'dstsharename': settings.ANALYSISSHARENAME,
-                'wfv_id': req['nfwfvid'], 'inputs': jobinputs, 'fullname': ana_storpathname,
-                'storagepath': analysis.storage_dir, **data_args}
+        kwargs = {'analysis_id': analysis.id, 'wfv_id': req['nfwfvid'], 'inputs': jobinputs,
+                **data_args}
         if req['analysis_id'] and hasattr(analysis, 'nextflowsearch'):
             jobq = jm.Job.objects.filter(nextflowsearch__analysis=analysis)
             jobq.update(kwargs=kwargs, state=jj.Jobstates.WAITING)
@@ -1167,7 +1211,9 @@ def store_analysis(request):
         else:
             jobid = create_job(fname, state=jj.Jobstates.WAITING, **kwargs)['id']
         am.NextflowSearch.objects.update_or_create(defaults={'nfwfversionparamset_id': req['nfwfvid'], 'job_id': jobid, 'workflow_id': req['wfid'], 'token': ''}, analysis=analysis)
-    return JsonResponse({'error': False, 'analysis_id': analysis.id, 'token': api_token})
+        analysis.storage_dir = analysis.get_public_output_dir()
+        analysis.save()
+    return JsonResponse({'errmsg': False, 'multierror': [], 'analysis_id': analysis.id, 'token': api_token})
 
 
 def get_isoquants(analysis, sampletables):
@@ -1245,6 +1291,8 @@ def delete_analysis(request):
         analysis = am.Analysis.objects.select_related('nextflowsearch__job').get(pk=req['item_id'])
     except am.Analysis.DoesNotExist:
         return JsonResponse({'error': 'Analysis does not exist'}, status=403)
+    except KeyError:
+        return JsonResponse({'error': 'Bad request'}, status=400)
     if analysis.deleted:
         return JsonResponse({'error': 'Analysis is already deleted'}, status=403)
     if analysis.user == request.user or request.user.is_staff:
@@ -1272,28 +1320,39 @@ def purge_analysis(request):
         analysis = am.Analysis.objects.get(pk=req['item_id'])
     except am.Analysis.DoesNotExist:
         return JsonResponse({'error': 'Analysis does not exist'}, status=403)
+    except KeyError:
+        return JsonResponse({'error': 'Bad request'}, status=400)
     if not analysis.deleted:
         return JsonResponse({'error': 'Analysis is not deleted, cannot purge'}, status=403)
     analysis.purged = True
     analysis.save()
-    webshare = rm.ServerShare.objects.get(name=settings.WEBSHARENAME)
+    webshares = rm.ServerShare.objects.filter(function=rm.ShareFunction.REPORTS)
     # Delete files on web share here since the job tasks run on storage cannot do that
-    for webfile in rm.StoredFile.objects.filter(analysisresultfile__analysis__id=analysis.pk,
-            storedfileloc__servershare_id=webshare.pk):
-        fpath = os.path.join(settings.WEBSHARE, webfile.path, webfile.filename)
+    webfiles = rm.StoredFileLoc.objects.filter(sfile__analysisresultfile__analysis__id=analysis.pk,
+            servershare__in=webshares, active=True)
+    for webfile in webfiles.values('path', 'sfile__filename'):
+        fpath = os.path.join(settings.WEBSHARE, webfile['path'], webfile['sfile__filename'])
         os.unlink(fpath)
+    webfiles.update(active=False, purged=True)
     sfiles = rm.StoredFile.objects.filter(analysisresultfile__analysis__id=analysis.pk)
     sfiles.update(deleted=True)
-    sf_ids = [x['pk'] for x in sfiles.values('pk')]
-    create_job('purge_analysis', analysis_id=analysis.pk, sf_ids=sf_ids)
-    create_job('delete_empty_directory', sf_ids=sf_ids)
+    sfls = rm.StoredFileLoc.objects.filter(sfile__in=sfiles, active=True)
+    # One job per servershare as empty dir deleter needs that
+    share_pks = defaultdict(list)
+    for sfl in sfls.values('pk', 'servershare_id', 'path'):
+        share_pks[f'{sfl["servershare_id"]}__{sfl["path"]}'].append(sfl['pk'])
+    for share_path, sfloc_ids in share_pks.items():
+        shareid, path = share_path.split('__')
+        purgejob = create_job('purge_files', sfloc_ids=sfloc_ids)
+        if not purgejob['error']:
+            rm.StoredFileLoc.objects.filter(pk__in=sfloc_ids).update(active=False)
+            rmdirjob = create_job('delete_empty_directory', sfloc_ids=sfloc_ids, path=path, share_id=shareid)
     return JsonResponse({})
 
 
 @login_required
+@require_POST
 def start_analysis(request):
-    if request.method != 'POST':
-        return JsonResponse({'error': 'Must use POST'}, status=405)
     req = json.loads(request.body.decode('utf-8'))
     if 'item_id' in req:
         # home app
@@ -1377,13 +1436,11 @@ def unfreeze_analysis(request):
 
 @login_required
 def serve_analysis_file(request, arf_id):
-    # FIXME this will possibly have multiple files on get() call -> error 500
-    # since we moved to storedfileloc
-    # THERE IS NO ACTUAL STOREDFILELOC YET FOR WEB SERVED FILES!
+    # FIXME old report files have sfloc, so they cannot be deleted
     try:
         arf = get_servable_files(am.AnalysisResultFile.objects.filter(pk=arf_id,
             sfile__deleted=False)).values('sfile__storedfileloc__path',
-                    'sfile__filename').get()
+                    'sfile__filename').distinct('sfile').get()
     except am.AnalysisResultFile.DoesNotExist:
         return HttpResponseForbidden()
     resp = HttpResponse()
@@ -1393,11 +1450,36 @@ def serve_analysis_file(request, arf_id):
 
 @require_POST
 def upload_servable_file(request):
-    data = json.loads(request.body.decode('utf-8'))
+    try:
+        data = json.loads(request.body.decode('utf-8'))
+    except json.decoder.JSONDecodeError:
+        data =  json.loads(request.POST['json'])
     if 'client_id' not in data or data['client_id'] !=settings.ANALYSISCLIENT_APIKEY:
         return JsonResponse({'msg': 'Forbidden'}, status=403)
     elif 'fname' not in data or data['fname'] not in settings.SERVABLE_FILENAMES:
         return JsonResponse({'msg': 'File is not servable'}, status=406)
+    elif request.FILES:
+        # store any potential servable file on share on web server
+        webshare = rm.ServerShare.objects.filter(function=rm.ShareFunction.REPORTS).first()
+        sfloc, _ = rm.StoredFileLoc.objects.get_or_create(sfile_id=data['sfid'], servershare=webshare,
+                path=data['path'])
+        # FIXME servershare path webshare does not have fileservershare interface
+        srvpath = os.path.join(settings.WEBSHARE, sfloc.path)
+        srvdst = os.path.join(srvpath, sfloc.sfile.filename)
+        try:
+            os.makedirs(srvpath, exist_ok=True)
+        except FileExistsError:
+            pass
+        with NamedTemporaryFile(mode='wb+') as fp:
+            for chunk in request.FILES['ana_file']:
+                fp.write(chunk)
+            fp.flush()
+            os.fsync(fp.fileno())
+            shutil.copy(fp.name, srvdst)
+            os.chmod(srvdst, 0o644)
+        sfloc.purged = False
+        sfloc.save()
+        return JsonResponse({})
     else:
         return JsonResponse({'msg': 'File can be uploaded and served'}, status=200)
 
@@ -1407,11 +1489,14 @@ def upload_servable_file(request):
 def find_datasets(request):
     searchterms = [x for x in request.GET['q'].split() if x != '']
     dbdsets = hv.dataset_query_creator(searchterms).filter(deleted=False)
-    dsets = {d.id: {
-        'id': d.id,
-        'name': format_dset_tag(d),
-        'locked': d.locked, 
-        } for d in dbdsets}
+    dsets = {}
+    qpid = get_quantprot_id()
+    for d in dbdsets.select_related('runname__experiment__project', 'datatype',
+            'prefractionationdataset__hiriefdataset', 'prefractionationdataset__prefractionation'):
+        prefrac, hrrange_id = get_dset_prefrac_hiriefrange(d)
+        tag = format_dset_tag(qpid, d.runname.experiment.project, d.runname.experiment,
+                d, d.datatype, prefrac, hrrange_id)
+        dsets[d.pk] = {'id': d.pk, 'name': tag, 'locked': d.locked, 'secclass': d.securityclass}
     return JsonResponse(dsets)
     
 
@@ -1449,8 +1534,18 @@ def nextflow_analysis_log(request):
     return HttpResponse()
 
 
-def format_dset_tag(dset):
-    return f'{dset.storage_loc.replace(os.path.sep, f" {os.path.sep} ")}'
+def format_dset_tag(quantprot_id, project, exp, dset, dtype, prefrac, hiriefrange_id):
+    tag = ''
+    if dtype.id in settings.LC_DTYPE_IDS:
+        return f'{project.name} - {exp.name} - {dset.runname_id}'
+    if dtype.pk != quantprot_id:
+        tag = dtype.name
+    if prefrac and hiriefrange_id:
+        hr = dm.HiriefRange.objects.get(pk=hiriefrange_id)
+        tag = f'{tag} - {hr}'
+    elif prefrac:
+        tag = f'{tag} - {prefrac.name}'
+    return f'{project.name} - {exp.name} - {tag} - {dset.runname.name}'
 
 
 def append_analysis_log(request):

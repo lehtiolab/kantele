@@ -1,6 +1,6 @@
 from django.contrib import admin
 from rawstatus.models import (Producer, StoredFileType, MSInstrument, MSInstrumentType,
-        ServerShare, FileServer)
+        ServerShare, FileServer, FileserverShare)
 
 # Register your models here.
 
@@ -10,3 +10,4 @@ admin.site.register(MSInstrumentType)
 admin.site.register(MSInstrument)
 admin.site.register(FileServer)
 admin.site.register(ServerShare)
+admin.site.register(FileserverShare)

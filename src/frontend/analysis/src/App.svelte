@@ -27,8 +27,10 @@ let resfn_arr = [];
 let resultfiles = {}
 let resultfnorder = [];
 let field_order = [];
+let avail_servers = [];
 let dsnames = initial_dsets.names;
 let dslocked = initial_dsets.locks;
+let dssec = initial_dsets.secclasses;
 
 let base_analysis = {
   isComplement: false,
@@ -87,6 +89,7 @@ function updateResultfiles() {
 let config = {
   wfid: false,
   wfversion: false,
+  analysisserver_id: false,
   analysisname: '',
   editable: true,
   external_results: false,
@@ -202,6 +205,7 @@ async function storeAnalysis() {
     wfid: config.wfid,
     nfwfvid: config.wfversion.id || false,
     analysisname: config.analysisname,
+    analysisserver_id: config.analysisserver_id,
     // Most params are {param.id: value, param2.id: value}, but multicheck
     // is checkboxes and is thus {param.id: [value1.id, value2.id]}
     params: {
@@ -234,16 +238,12 @@ async function storeAnalysis() {
    
   // Post the payload
   if (!Object.entries(notif.errors).filter(([k,v]) => v).length) {
-    msg = `Storing analysis for ${config.analysisname}`;
-    notif.messages[msg] = 1;
-    setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg);
     const resp = await postJSON('/analysis/store/', post);
-    if (resp.error.length) {
-      let msg = 'Errors found, please fix and try again';
-      notif.errors[msg] = 1;
-      resp.error.forEach(msg => {
-        notif.errors[msg] = 1;
-      });
+    if (!resp.ok) {
+      // Errors found:
+      for (let errmsg of [resp.errmsg, ...resp.multierror]) {
+        notif.errors[errmsg] = 1;
+      }
       if ('files_nods' in resp) {
         // Dsets have been changed while editing analysis
         const files_nodset = new Set(resp.files_nods);
@@ -382,12 +382,14 @@ async function fetchDatasetDetails(fetchdsids) {
       dsets[x].changed = false;
       dsnames[x] = dsets[x].storage;
       dslocked[x] = dsets[x].locked;
+      dssec[x] = dsets[x].secclass;
       });
     Object.keys(dsets).forEach(x => {
       dsets[x].changed = false;
     })
     Object.entries(dsets).filter(x=>x[1].prefrac).forEach(x=>matchFractions(dsets[x[0]]));
     field_order = result.field_order;
+    avail_servers = result.servers;
   }
 }
 
@@ -642,6 +644,7 @@ async function populate_analysis_and_fetch_wf() {
   // Only runs in onMount
   if (existing_analysis.wfid) {
     config.wfid = existing_analysis.wfid;
+    config.analysisserver_id = existing_analysis.analysisserver_id;
     if (existing_analysis.wfid in allwfs) {
       config.wfversion = allwfs[existing_analysis.wfid].versions.filter(
         x => x.id === existing_analysis.wfversion_id)[0];
@@ -803,19 +806,28 @@ onMount(async() => {
   <div class="box">
     <h5 class="title is-5">Datasets selected</h5>
     <DynamicSelect placeholder='Find dataset to add' bind:selectval={dsetToAdd} on:selectedvalue={addDataset} niceName={x => x.name} fetchUrl="/analysis/find/datasets/" />
-    <div class="tags">
+    <div class="field is-grouped is-grouped-multiline">
     {#each Object.entries(dsnames) as [dsid, name]}
-      {#if dslocked[dsid]}
+      <span class="tags has-addons">
+      {#if !(dsid in dslocked)}
+      <span class="tag is-medium">
+        {name}
+        <button class="delete is-small" on:click={e => removeDataset(dsid)}></button>
+      </span>
+      {:else if dslocked[dsid]}
+      <span class="tag is-medium">Security: {allsecclasses[dssec[dsid]]}</span>
       <span class="tag is-medium is-info">
         {name}
         <button class="delete is-small" on:click={e => removeDataset(dsid)}></button>
       </span>
       {:else}
+      <span class="tag is-medium">Security: {allsecclasses[dssec[dsid]]}</span>
       <span class="tag is-medium is-warning">
         {name} (not locked)
         <button class="delete is-small" on:click={e => removeDataset(dsid)}></button>
       </span>
       {/if}
+      </span>
     {/each}
     {#if !Object.entries(dsnames).length}
     No datasets selected
@@ -858,6 +870,21 @@ onMount(async() => {
           </div>
         </div>
       </div>
+      <div class="field-label is-normal">
+        <label class="label">Analysis server:</label>
+      </div>
+      <div class="field-body">
+        <div class="field">
+          <div class="select">
+            <select bind:value={config.analysisserver_id}>
+              <option disabled value={false}>Select analysis server</option>
+              {#each avail_servers as {id, name}}
+              <option value={id}>{name}</option>
+              {/each}
+            </select>
+          </div>
+        </div>
+      </div>
     </div>
     {#if config.wfid && !(config.wfid in allwfs)}
     <p class="has-text-danger">Workflow used is not selectable in interface</p>
@@ -870,14 +897,14 @@ onMount(async() => {
     {#if wf && 'COMPLEMENT_ANALYSIS' in wf.components && base_analysis.selected}
     <div class="checkbox">
       {#if base_analysis.dsets_identical}
-      <input type="checkbox" bind:checked={base_analysis.runFromPSM}>
       <label class="checkbox">
+      <input type="checkbox" bind:checked={base_analysis.runFromPSM}>
         Re-analyze previous analysis from PSM table, skipping identification steps
       </label>
       <a title="For output changes post-PSM table, e.g. for changes in quantification only. Any changes to fractions, input datasets, modifications etc will be ignored. For this to work you may not change set names."><i class="fa fa-question-circle"></i></a>
       {:else}
-      <input type="checkbox" bind:checked={base_analysis.isComplement}>
       <label class="checkbox">
+      <input type="checkbox" bind:checked={base_analysis.isComplement}>
         Complement previous analysis with new or re-run sets (with replaced or extra raw data)
       </label>
       <a title="Skips parts of analysis already run, faster output"><i class="fa fa-question-circle"></i></a>
@@ -915,8 +942,9 @@ onMount(async() => {
 		<div class="columns">
 		  <div class="column">
         {#if !ds.prefrac && !ds.qtype.is_isobaric}
-        <input type="checkbox" bind:checked={ds.allfilessamesample}>
-        <label class="checkbox">Same sample in each file in the dataset</label>
+        <label class="checkbox">Same sample in each file in the dataset
+          <input type="checkbox" bind:checked={ds.allfilessamesample}>
+        </label>
         {/if}
         {#if ds.allfilessamesample}
 			  <div class="field">
@@ -1014,8 +1042,9 @@ onMount(async() => {
       {#if 'ISOQUANT_SAMPLETABLE' in wf.components}
         {#if !Object.values(isoq[1].denoms).some(x=>x)}
         <div class="field">
+          <label class="checkbox">
           <input type="checkbox" bind:checked={isoq[1].sweep}>
-          <label class="checkbox">Use median sweeping (no predefined denominators)
+            Use median sweeping (no predefined denominators)
             <span class="icon is-small">
               <a title="Pick median denominator per PSM, only for single-set analyses"><i class="fa fa-question-circle"></i></a>
             </span>
@@ -1025,8 +1054,9 @@ onMount(async() => {
 
         {#if !isoq[1].sweep && !Object.values(isoq[1].denoms).some(x=>x)}
         <div class="field">
-          <input type="checkbox" bind:checked={isoq[1].report_intensity}>
-          <label class="checkbox">Report isobaric ion intensities instead of ratios
+          <label class="checkbox">
+            <input type="checkbox" bind:checked={isoq[1].report_intensity}>
+            Report isobaric ion intensities instead of ratios
             <span class="icon is-small">
               <a title="Reports median intensity rather than fold changes, not for use with DEqMS"><i class="fa fa-question-circle"></i></a>
             </span>
@@ -1110,8 +1140,10 @@ onMount(async() => {
         <code>{nf}</code></label> 
       {#each Object.entries(opts) as opt}
       <div>
-        <input value={`${id}___${opt[0]}`} bind:group={config.multicheck} type="checkbox">
-        <label class="checkbox">{opt[1]}</label>
+        <label class="checkbox">
+          <input value={`${id}___${opt[0]}`} bind:group={config.multicheck} type="checkbox">
+          {opt[1]}
+        </label>
       </div>
       {/each}
     </div>
@@ -1162,11 +1194,13 @@ onMount(async() => {
     <label class="label">Config flags</label>
     {#each wf.flags as {nf, id, name, help}}
     <div>
-      <input value={id} bind:group={config.flags} type="checkbox">
-      <label class="checkbox">{name}</label>: <code>{nf}</code> 
-        {#if help}
-          <a title={help}><i class="fa fa-question-circle"></i></a>
-        {/if}
+      <label class="checkbox">
+        <input value={id} bind:group={config.flags} type="checkbox">
+        {name}
+      </label>: <code>{nf}</code> 
+      {#if help}
+        <a title={help}><i class="fa fa-question-circle"></i></a>
+      {/if}
     </div>
     {/each}
 	</div>

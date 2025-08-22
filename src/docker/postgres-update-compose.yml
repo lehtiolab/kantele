@@ -1,0 +1,22 @@
+services:
+    olddb: 
+        image: postgres:14.3
+        environment:
+            POSTGRES_PASSWORD: "${PG_SUPERUSER_PASSWORD}"
+            KANTELE_PASSWORD: "${PG_KANTELE_PASSWORD}"
+            KANTELE_DB: "${KANTELE_DB_NAME}"
+            KANTELE_ROLE: "${PG_KANTELE_USER}"
+        volumes:
+          # FIXME prod will have different data dir
+            - "./create_kantele_db.sh:/docker-entrypoint-initdb.d/create_kantele_db.sh"
+            - "../../data/olddb:/var/lib/postgresql/data"
+            - "${BACKUP_PATH}:/pgbackups"
+
+    newdb:
+        image: postgres:17.5
+        ## Comment user: line on MacOS, not on linux
+        user: "${DBUID:-0}:${DBGID:-0}"
+        environment:
+            POSTGRES_PASSWORD: "${PG_SUPERUSER_PASSWORD}"
+        volumes:
+          - "../../data/db:/var/lib/postgresql/data"

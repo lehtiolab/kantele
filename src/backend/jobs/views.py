@@ -16,13 +16,13 @@ from django.db.models import F
 from jobs import models
 
 from rawstatus.models import (RawFile, StoredFile, StoredFileLoc, ServerShare, StoredFileType,
-        SwestoreBackedupFile, PDCBackedupFile, Producer, UploadToken)
+        SwestoreBackedupFile, PDCBackedupFile, Producer, UploadToken, FileJob)
 from rawstatus import jobs as rj
 from analysis import models as am
 from analysis.views import write_analysis_log
 from dashboard import views as dashviews
 from datasets import views as dsviews
-from datasets.models import DatasetRawFile, Dataset
+from datasets.models import DatasetRawFile, Dataset, DatasetServer
 from jobs.jobs import Jobstates, JOBSTATES_PAUSABLE, JOBSTATES_JOB_SENT, JOBSTATES_JOB_NOT_SENT, JOBSTATES_RETRYABLE
 from jobs.jobutil import create_job, jobmap
 from kantele import settings
@@ -64,11 +64,10 @@ def update_storage_loc_dset(request):
     if 'client_id' not in data or not taskclient_authorized(
             data['client_id'], [settings.STORAGECLIENT_APIKEY]):
         return HttpResponseForbidden()
-    dset = Dataset.objects.filter(pk=data['dset_id'])
-    dset.update(storage_loc=data['storage_loc'])
-    if data['newsharename']:
-        newshare = ServerShare.objects.get(name=data['newsharename'])
-        dset.update(storageshare=newshare)
+    dss = DatasetServer.objects.filter(pk=data['dss_id'])
+    dss.update(storage_loc=data['dst_path'])
+    sfns = StoredFileLoc.objects.filter(pk__in=[int(x) for x in data['sfloc_ids']])
+    sfns.update(path=data['dst_path'], purged=False)
     if 'task' in data:
         set_task_done(data['task'])
     return HttpResponse()
@@ -81,48 +80,19 @@ def update_storagepath_file(request):
             data['client_id'], [settings.STORAGECLIENT_APIKEY, settings.ANALYSISCLIENT_APIKEY]):
         return HttpResponseForbidden()
     print('Updating storage task finished')
-    print(data)
     if 'sfloc_id' in data:
-        sfloc = StoredFileLoc.objects.get(pk=data['sfloc_id'])
-        print(sfloc)
-        sfloc.servershare = ServerShare.objects.get(name=data['servershare'])
-        sfloc.path = data['dst_path']
+        StoredFileLoc.objects.filter(pk=data['sfloc_id']).update(path=data['dst_path'], purged=False)
+        sf_q = StoredFile.objects.filter(storedfileloc__pk=data['sfloc_id'])
         if 'newname' in data:
-            sfloc.sfile.filename = data['newname']
-            sfloc.sfile.rawfile.name = data['newname']
-            sfloc.sfile.rawfile.save()
-        sfloc.sfile.save()
-        sfloc.save()
+            # FIXME newname sfile/rawfile should be done prejob, not post job? only rawfile, sfile is current!
+            sf_q.update(filename=data['newname'])
+            RawFile.objects.filter(storedfile__storedfileloc__pk=data['sfloc_id']).update(
+                    name=data['newname'])
     elif 'sfloc_ids' in data:
         sfns = StoredFileLoc.objects.filter(pk__in=[int(x) for x in data['sfloc_ids']])
-        sfns.update(path=data['dst_path'])
-        if 'servershare' in data:
-            sshare = ServerShare.objects.get(name=data['servershare'])
-            sfns.update(servershare=sshare)
+        sfns.update(path=data['dst_path'], purged=False)
     if 'task' in data:
         set_task_done(data['task'])
-    return HttpResponse()
-
-
-@require_POST
-def renamed_project(request):
-    """
-    After project renaming on disk, we need to set all paths of the storedfile objects
-    to the new path name, and rename the project in the DB as well.
-    """
-    data = json.loads(request.body.decode('utf-8'))
-    print('Updating storage task finished')
-    if 'client_id' not in data or not taskclient_authorized(
-            data['client_id'], [settings.STORAGECLIENT_APIKEY, settings.ANALYSISCLIENT_APIKEY]):
-        return HttpResponseForbidden()
-    # this updates also deleted files. Good in case restoring backup etc
-    proj_sfiles = StoredFileLoc.objects.filter(pk__in=data['sfloc_ids'])
-    for dset in Dataset.objects.filter(runname__experiment__project_id=data['proj_id']):
-        newstorloc = dsviews.rename_storage_loc_toplvl(data['newname'], dset.storage_loc)
-        dset.storage_loc = newstorloc
-        dset.save()
-        proj_sfiles.filter(sfile__rawfile__datasetrawfile__dataset=dset).update(path=newstorloc)
-    set_task_done(data['task'])
     return HttpResponse()
 
 
@@ -248,25 +218,33 @@ def register_external_file(request):
 
 @require_POST
 def downloaded_file(request):
-    '''When files are downloaded in a job this can clean up afterwards
+    '''When files are downloaded from web upload
+    in a job this can clean up afterwards
     '''
     data = json.loads(request.body.decode('utf-8'))
     if 'client_id' not in data or not taskclient_authorized(
             data['client_id'], [settings.STORAGECLIENT_APIKEY]):
         return HttpResponseForbidden()
-    sfile = StoredFile.objects.select_related('rawfile').get(pk=data['sf_id'])
-    # Delete file in tmp download area
+    sfloc = StoredFileLoc.objects.select_related('sfile__rawfile', 'sfile__filetype').get(
+            pk=data['sfloc_id'])
     if data['do_md5check']:
-        sfile.checked = sfile.rawfile.source_md5 == data['md5']
+        # FIXME Deprecate when no longer uploading .d files this route
+        # md5 is checked for raws with stablefiles inside a .d
+        sfloc.sfile.checked = sfloc.sfile.rawfile.source_md5 == data['md5']
+        sfloc.purged = not sfloc.sfile.checked
     else:
-        # rsync checks integrity so we should not have problems here
-        sfile.checked = True
+        # md5 is done on upload in transfer_file
+        sfloc.sfile.checked = True
+        sfloc.purged = False
+
     if data['unzipped']:
-        sfile.filename = sfile.filename.rstrip('.zip')
-        sfile.rawfile.name = sfile.rawfile.name.rstrip('.zip')
-        sfile.rawfile.save()
-    sfile.save()
-    fpath = rj.create_upload_dst_web(sfile.rawfile.pk, sfile.filetype.filetype)
+        sfloc.sfile.filename = sfloc.sfile.filename.rstrip('.zip')
+        sfloc.sfile.rawfile.name = sfloc.sfile.rawfile.name.rstrip('.zip')
+        sfloc.sfile.rawfile.save()
+    sfloc.sfile.save()
+    sfloc.save()
+    # Delete file in tmp download area
+    fpath = rj.create_upload_dst_web(sfloc.sfile.rawfile.pk, sfloc.sfile.filetype.filetype)
     os.unlink(fpath)
     if 'task' in data:
         set_task_done(data['task'])
@@ -292,8 +270,7 @@ def restored_archive_file(request):
     if 'client_id' not in data or not taskclient_authorized(
             data['client_id'], [settings.STORAGECLIENT_APIKEY]):
         return HttpResponseForbidden()
-    StoredFileLoc.objects.filter(pk=data['sflocid']).update(purged=False,
-            servershare_id=ServerShare.objects.get(name=data['serversharename']))
+    StoredFileLoc.objects.filter(pk=data['sflocid']).update(purged=False)
     if 'task' in request.POST:
         set_task_done(request.POST['task'])
     return HttpResponse()
@@ -314,29 +291,6 @@ def analysis_run_done(request):
 
 
 @require_POST
-def mzml_convert_or_refine_file_done(request):
-    """Converted/Refined mzML file already copied to analysis result storage 
-    server with MD5, fn, path. This function then queues a job to move it to 
-    dataset directory from the analysis dir"""
-    # FIXME need to remove the empty dir after moving all the files, how?
-    # create cleaning task queue on ana server
-    data = json.loads(request.POST['json'])
-    if ('client_id' not in data or
-            data['client_id'] != settings.ANALYSISCLIENT_APIKEY):
-        return HttpResponseForbidden()
-    sfloc = StoredFileLoc.objects.select_related('sfile__rawfile__datasetrawfile__dataset').get(pk=data['fn_id'])
-    sfloc.sfile.md5 = data['md5']
-    sfloc.sfile.checked = True
-    sfloc.sfile.save()
-    # FIXME buggy - if you remove fns from dataset, they will not have a datasetrawfile!
-    # do not use that here! instead, direct pass the storage loc from the job!
-    sfloc.save()
-    create_job('move_single_file', sfloc_id=sfloc.id, dstsharename=settings.PRIMARY_STORAGESHARENAME,
-            dst_path=sfloc.sfile.rawfile.datasetrawfile.dataset.storage_loc)
-    return HttpResponse()
-
-
-@require_POST
 def store_longitudinal_qc(request):
     data = json.loads(request.body.decode('utf-8'))
     if ('client_id' not in data or
@@ -348,55 +302,6 @@ def store_longitudinal_qc(request):
             return JsonResponse(storeresult, status=400)
     if 'task' in data:
         set_task_done(data['task'])
-    return HttpResponse()
-
-
-@require_POST
-def confirm_internal_file(request):
-    """Stores the reporting of a transferred analysis result file,
-    and of downloaded uniprot files, checks its md5"""
-    data =  json.loads(request.POST['json'])
-    upload = UploadToken.validate_token(data['token'], [])
-    if not upload:
-        return HttpResponseForbidden()
-    dstshare = ServerShare.objects.get(name=data['dstsharename'])
-
-    # Reruns lead to trying to store files multiple times, avoid that here:
-    sfile, created = StoredFile.objects.get_or_create(rawfile_id=data['fn_id'], md5=data['md5'],
-            defaults={'filetype_id': upload.filetype_id, 'checked': True, 'filename': data['filename']})
-    sfloc, _ = StoredFileLoc.objects.get_or_create(sfile=sfile, servershare=dstshare, path=data['outdir'])
-    if data['analysis_id'] and created:
-        am.AnalysisResultFile.objects.create(analysis_id=data['analysis_id'], sfile=sfile)
-    elif data['is_fasta'] and created:
-        fa = data['is_fasta']
-        # set fasta download files
-        libfile = am.LibraryFile.objects.create(sfile=sfile, description=fa['desc'])
-        dbmodel = {'uniprot': am.UniProtFasta, 'ensembl': am.EnsemblFasta}[fa['dbname']]
-        kwargs = {'version': fa['version'], 'libfile_id': libfile.id, 'organism': fa['organism']}
-        subtype = False
-        if fa['dbname'] == 'uniprot':
-            subtype = am.UniProtFasta.UniprotClass[fa['dbtype']]
-            kwargs['dbtype'] = subtype
-        dbmodel.objects.create(**kwargs)
-
-    # Also store any potential servable file on share on web server
-    if data['filename'] in settings.SERVABLE_FILENAMES and request.FILES:
-        # FIXME web files are not currently tracked by an sfloc (or previously by an sf)
-        #webshare = ServerShare.objects.get(name=settings.WEBSHARENAME)
-        #srvfile, _cr = StoredFileLoc.objects.get_or_create(sfile=sfile, servershare=webshare, path=data['outdir'])
-        srvpath = os.path.join(settings.WEBSHARE, sfloc.path)
-        srvdst = os.path.join(srvpath, sfile.filename)
-        try:
-            os.makedirs(srvpath, exist_ok=True)
-        except FileExistsError:
-            pass
-        with NamedTemporaryFile(mode='wb+') as fp:
-            for chunk in request.FILES['ana_file']:
-                fp.write(chunk)
-            fp.flush()
-            os.fsync(fp.fileno())
-            shutil.copy(fp.name, srvdst)
-            os.chmod(srvdst, 0o644)
     return HttpResponse()
 
 
@@ -418,11 +323,11 @@ def get_job_ownership(job, request):
         usernames = [ana.user.username]
         owner_loggedin = request.user.id == ana.user.id
     else:
-        fjs = job.filejob_set.select_related('storedfile__rawfile__datasetrawfile__dataset')
+        fjs = job.filejob_set.select_related('rawfile__datasetrawfile__dataset')
         try:
-            users = list({y.user for x in fjs for y in x.storedfile.rawfile.datasetrawfile.dataset.datasetowner_set.all()})
+            users = list({y.user for x in fjs for y in x.rawfile.datasetrawfile.dataset.datasetowner_set.all()})
         except DatasetRawFile.DoesNotExist:
-            usernames = list({x.storedfile.rawfile.producer.name for x in fjs})
+            usernames = list({x.rawfile.producer.name for x in fjs})
             ownertype = 'admin'
         else:
             usernames = [x.username for x in users]
@@ -482,10 +387,16 @@ def do_retry_job(job, force=False):
     if not is_job_ready(job=job, tasks=tasks) and not force:
         print('Tasks not all ready yet, will not retry, try again later')
         return
-    jobq = models.Job.objects.filter(pk=job.pk, state__in=JOBSTATES_RETRYABLE).update(
-            state=Jobstates.PENDING)
     # revoke tasks in case they are still running (force retry)
     revoke_and_delete_tasks(tasks.exclude(state=states.SUCCESS))
+    # Redo file jobs (for runner) in case the job has been in WAITING state and other jobs 
+    # have changed files associated to a dset or such.
+    jwrap = jobmap[job.funcname](job.pk)
+    FileJob.objects.filter(job_id=job.pk).delete()
+    FileJob.objects.bulk_create([FileJob(rawfile_id=rf_id, job_id=job.id) for rf_id in 
+        jwrap.get_rf_ids_for_filejobs(**job.kwargs)])
+    jobq = models.Job.objects.filter(pk=job.pk, state__in=JOBSTATES_RETRYABLE).update(
+            state=Jobstates.PENDING)
     try:
         job.joberror.delete()
     except models.JobError.DoesNotExist:

@@ -21,11 +21,7 @@ services:
       APIKEY: "${APIKEY_STORAGE}"
       KANTELEHOST: nginx
       PROTOCOL: http
-      TMPSHARE: '/s3storage/tmp'
-      ANALYSISSHARE: /analysisfiles
       RABBITHOST: mq
       RABBIT_VHOST: "${RABBIT_VHOST}"
       RABBITUSER: "${RABBITUSER:-guest}"
       RABBITPASS: "${RABBITPASS:-guest}"
-      STORAGESHARES: '/storage,/newstorage'
-      PRIMARY_STORAGE: s3storage

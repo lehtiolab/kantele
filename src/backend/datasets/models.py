@@ -46,6 +46,8 @@ class ProjectLog(models.Model):
 
 
 class UserPtype(models.Model):
+    # FIXME deprecate, we dont use this? is_staff now  is used for CF users
+    # probably not a good idea anyway
     ptype = models.ForeignKey(ProjectTypeName, on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
 
@@ -104,13 +106,46 @@ class Dataset(models.Model):
     #runname = models.TextField()
     datatype = models.ForeignKey(Datatype, on_delete=models.CASCADE)
     securityclass = models.IntegerField(choices=DataSecurityClass.choices)
-    # NB! storage_loc/share should only ever be updated in jobs' post-run (after moves)
-    # because it is source of truth for where to/from move files
-    storage_loc = models.TextField(max_length=200, unique=True)
-    storageshare = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
     deleted = models.BooleanField(default=False) # for UI only, indicate deleted from active storage
     purged = models.BooleanField(default=False) # for UI only, indicate permanent deleted from cold storage too
     locked = models.BooleanField(default=False)
+
+
+class DatasetServer(models.Model):
+    '''
+    - for 1. reporting of dataset locations to user in UI
+          2. source of dset location for jobs
+    - 1. will contain future locations (edit in views updates here immediately)
+    - this is to make sure dataset paths of files wont be duplicates when running a job,
+        but user will find out immediately here
+    - cannot delete these rows or job runner will crash as dset jobs will have dss_id in kwargs
+        but can be set to active=False, which is also future
+    '''
+    # FIXME check that jobs dont use this info from DB
+    # Dataset and storageshare should NEVER change (in case of change it will be deactivation)
+    dataset = models.ForeignKey(Dataset, on_delete=models.CASCADE)
+    storageshare = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
+    # Storage loc can be renamed, the base one is used in jobs, the _ui one is
+    # updated by the UI immediately
+    storage_loc = models.TextField()
+    storage_loc_ui = models.TextField()
+    # Keep track of when dataset was on storage (startdate when instantiated, last_date_used
+    # and when files added/removed, used in analysis), for log or expiry reasons
+    startdate = models.DateTimeField()
+    last_date_used = models.DateTimeField(auto_now=True)
+    # Active is an intention field, so when set to False, dataset will be deleted soon
+    # So views can use it in order to know if their next job will work there.
+    active = models.BooleanField(default=True)
+    log = models.JSONField(default=list)
+
+    class Meta:
+        '''We will only have one server/storage loc combination (so no path crash),
+        and each dataset can only be in a given server once'''
+        constraints = [
+                models.UniqueConstraint(fields=['storageshare', 'storage_loc'], name='uni_dsloc'),
+                models.UniqueConstraint(fields=['storageshare', 'storage_loc_ui'], name='uni_dsloc_ui'),
+                models.UniqueConstraint(fields=['dataset', 'storageshare'], name='uni_dsshare'),
+                ]
 
 
 class DatasetOwner(models.Model):

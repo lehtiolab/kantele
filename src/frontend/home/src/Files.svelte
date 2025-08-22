@@ -10,8 +10,6 @@ import { flashtime } from '../../util.js'
 let selectedFiles = []
 let notif = {errors: {}, messages: {}};
 let detailsVisible = false;
-let cleanupsize = false;
-let fetchingCleanup = false;
 let treatItems;
 
 const tablefields = [
@@ -62,59 +60,9 @@ function archiveFiles() {
 function purgeFiles() {
 }
 
-
-async function runCleanup() {
-  fetchingCleanup = true;
-  cleanupsize = false;
-  let msg;
-  const resp = await postJSON('files/cleanup/', {queue_job: true} );
-  if (!resp.ok) {
-    if ('error' in resp) {
-      msg = resp.error;
-    } else {
-      msg = 'Something went wrong trying to run mzML clean-up';
-    }
-    notif.errors[msg] = 1;
-    setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg);
-  } else {
-    fetchingCleanup = false;
-    msg = 'Queued job to delete old mzML from disk';
-    notif.messages[msg] = 1;
-    setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg);
-  }
-}
-
-
-async function fetchCleanup() {
-  fetchingCleanup = true;
-  let msg;
-  const resp = await postJSON('files/cleanup/', {queue_job: false} );
-  if (!resp.ok) {
-    if ('error' in resp) {
-      msg = resp.error;
-    } else {
-      msg = 'Something went wrong trying to fetch mzML clean-up size';
-    }
-    notif.errors[msg] = 1;
-    setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg);
-  } else {
-    cleanupsize = resp.mzml_cleanupsize_raws;
-    setTimeout(function() {cleanupsize = false } , 300000);
-  }
-  fetchingCleanup = false;
-}
-
 </script>
 
 <Tabs tabshow="Files" notif={notif} />
-{#if cleanupsize}
-<a class="button is-small" on:click={runCleanup}>Cleanup mzML for {cleanupsize} of raw files</a>
-{:else if fetchingCleanup}
-<a class="button is-small is-loading">Cleanup mzML for {cleanupsize} of raw files</a>
-{:else}
-<a class="button is-small" on:click={fetchCleanup}>Get old mzML cleanup space</a>
-{/if}
-
 {#if selectedFiles.length}
 <a class="button is-small" title="Move deleted files to active storage (admins only)" on:click={reactivateFiles}>Undelete files</a>
 <a class="button is-small" title="Move files to cold storage (admins only)" on:click={archiveFiles}>Archive files</a>

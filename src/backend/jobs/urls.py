@@ -6,9 +6,8 @@ app_name = 'jobs'
 urlpatterns = [
     path('set/task/', views.set_task_status, name='settask'),
     path('retry/', views.retry_job, name='retry'),
+    path('set/storagepathds/', views.update_storage_loc_dset, name='updatestorageds'),
     path('set/storagepath/', views.update_storagepath_file, name='updatestorage'),
-    path('set/dsstoragepath/', views.update_storage_loc_dset, name='update_ds_storage'),
-    path('set/projectname/', views.renamed_project, name='renameproject'),
     path('delete/', views.delete_job, name='deletejob'),
     path('pause/', views.pause_job, name='pausejob'),
     path('resume/', views.resume_job, name='resumejob'),
@@ -20,6 +19,4 @@ urlpatterns = [
     path('pdcrestore/set/', views.restored_archive_file, name='restoredpdcarchive'),
     path('set/longqc/', views.store_longitudinal_qc, name='storelongqc'),
     path('set/analysis/', views.analysis_run_done, name='analysisdone'),
-    path('set/mzmlfile/', views.mzml_convert_or_refine_file_done, name='mzmlfiledone'),
-    path('set/internalfile/', views.confirm_internal_file, name='internalfiledone'),
 ]
