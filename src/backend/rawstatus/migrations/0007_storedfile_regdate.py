@@ -4,7 +4,7 @@ from __future__ import unicode_literals
 
 import datetime
 from django.db import migrations, models
-from django.utils.timezone import utc
+#from django.utils.timezone import utc
 
 
 class Migration(migrations.Migration):
@@ -17,7 +17,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='storedfile',
             name='regdate',
-            field=models.DateTimeField(default=datetime.datetime(2018, 10, 15, 11, 31, 20, 773071, tzinfo=utc)),
+            field=models.DateTimeField(default=datetime.datetime(2018, 10, 15, 11, 31, 20, 773071)), #, tzinfo=utc)),
             preserve_default=False,
         ),
     ]
