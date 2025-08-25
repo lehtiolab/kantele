@@ -23,7 +23,7 @@ services:
             SERVABLE_FILE_PATH: "${CONTAINER_ANALYSISPATH}"
     
     db:
-        image: postgres:17.4
+        image: postgres:17.5
         ## Comment user: line on MacOS, not on linux
         user: "${DBUID:-0}:${DBGID:-0}"
         environment:
