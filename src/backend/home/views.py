@@ -829,11 +829,11 @@ def fetch_dset_details(dset):
                 funcname__in=['refine_mzmls', 'convert_dataset_mzml']).values(
                         'funcname', 'kwargs'):
             try:
-                job.kwargs['pwiz_id']
+                job['kwargs']['pwiz_id']
             except KeyError:
                 pass
             else:
-                info[job['funcname']].append(job.kwargs['pwiz_id'])
+                info[job['funcname']].append(job['kwargs']['pwiz_id'])
         pw_sets = parse_mzml_pwiz({}, anmodels.Proteowizard.objects.filter(
             mzmlfile__sfile__rawfile__datasetrawfile__dataset=dset, mzmlfile__sfile__deleted=True),
             'deleted')
@@ -951,6 +951,14 @@ def create_mzmls(request):
     if rawsfl.count() != num_rawfns:
         return JsonResponse({'error': 'This dataset does not have (all) its raw files on a server '
             'with analysis capability, please make sure it is correctly stored'}, status=403)
+    # Select possible servers
+    source_ssid = rawsfl.values('servershare_id').first()['servershare_id']
+    anaserver_q = filemodels.FileServer.objects.filter(fileservershare__share_id=source_ssid,
+            is_analysis=True)
+    if not (analocalshare_q := filemodels.FileserverShare.objects.filter(server__in=anaserver_q,
+            share__function=filemodels.ShareFunction.ANALYSISRESULTS)):
+        return JsonResponse({'error': 'Analysis server does not have an output share configured'},
+            status=403)
 
     # Saving starts here
     # Remove other pwiz mzMLs
@@ -968,14 +976,14 @@ def create_mzmls(request):
         del_sfl_q.update(active=False)
     # Now queue the convert, then queue redistribution to other places
     # Pick one but any servershare which is reachable on an analysis server:
-    source_ssid = rawsfl.values('servershare_id').first()['servershare_id']
     srcsfl_pk = [x['pk'] for x in rawsfl.filter(servershare_id=source_ssid).values('pk')]
     dss_id = dsmodels.DatasetServer.objects.filter(dataset=dset,
             storageshare_id=source_ssid).values('pk').get()['pk']
+
     # we dont do error checking earlier, before deleting old mzML, because deleting those is fine
     mzjob = create_job('convert_dataset_mzml', options=options, filters=filters, dss_id=dss_id,
             pwiz_id=pwiz.pk, timestamp=datetime.strftime(datetime.now(), '%Y%m%d_%H.%M'),
-            sfloc_ids=srcsfl_pk)
+            server_id=analocalshare_q.values('server_id').first()['server_id'], sfloc_ids=srcsfl_pk)
     if mzjob['error']:
         pass
     elif mzjob['kwargs'].get('dstsfloc_ids', False):

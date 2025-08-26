@@ -214,11 +214,9 @@ class ConvertDatasetMzml(DatasetJob):
         dst_sfls = []
         dss = DatasetServer.objects.values('storageshare_id', 'dataset_id').get(
                 pk=kwargs['dss_id'])
-        anaserver = FileServer.objects.filter(fileservershare__share_id=dss['storageshare_id'],
-                is_analysis=True).first()
         analocalshare = FileserverShare.objects.filter(share__function=rm.ShareFunction.ANALYSISRESULTS,
-                server=anaserver).values('share_id', 'path').first()
-        anasrcshareonserver = FileserverShare.objects.filter(server=anaserver,
+                server_id=kwargs['server_id']).values('share_id', 'path').first()
+        anasrcshareonserver = FileserverShare.objects.filter(server_id=kwargs['server_id'],
                 share_id=dss['storageshare_id']).values('path').first()
 
         runpath = f'{dss["dataset_id"]}_convert_mzml_{kwargs["timestamp"]}'
@@ -230,7 +228,7 @@ class ConvertDatasetMzml(DatasetJob):
             localmzsf, localmzsfl = get_or_create_mzmlentry(sfl.sfile, pwiz=pwiz, refined=False,
                     servershare_id=analocalshare['share_id'], path=dstpath, mzmlfilename=mzmlfilename)
             dst_sfls.append(localmzsfl.pk)
-        return {'dstsfloc_ids': dst_sfls, 'server_id': anaserver.pk, 'runpath': runpath, 
+        return {'dstsfloc_ids': dst_sfls, 'runpath': runpath, 
                 'srcsharepath': anasrcshareonserver['path']}
 
     def process(self, **kwargs):
