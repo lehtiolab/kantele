@@ -480,7 +480,7 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertEqual(dashm.QCRun.objects.filter(rawfile=newraw).count(), 1)
         self.assertEqual(rsjobs.count(), 1)
         self.assertEqual(qcjobs.count(), 1)
-        self.run_job() # run mv to analysis
+        self.run_job() # run rsync to analysis
         self.run_job() # run qc
         qcrun = dashm.QCRun.objects.last()
         self.assertTrue(dashm.LineplotData.objects.filter(qcrun=qcrun,

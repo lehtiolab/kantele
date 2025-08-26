@@ -92,7 +92,7 @@ def check_ensembl_uniprot_fasta_download(self, dbname, version, organism, dbtype
 def run_nextflow(run, params, rundir, gitwfdir, profiles, nf_version, scratchdir):
     """Fairly generalized code for kantele celery task to run a WF in NXF"""
     print('Starting nextflow workflow {}'.format(run['nxf_wf_fn']))
-    outdir = os.path.join(rundir, 'output')
+    outdir = os.path.join(run['outsharepath'], os.path.basename(rundir))
     try:
         clone(run['repo'], gitwfdir, checkout=run['wf_commit'])
     except FileExistsError:
@@ -176,11 +176,10 @@ def run_nextflow_workflow(self, run, params, stagefiles, profiles, nf_version, s
 
     # Register output files to web host
     for ofile in outfiles:
-        # FIXME sharepath == NF_RUNDIR? Can we pass from job/db?
         full_path, fn = os.path.split(ofile)
-        path = os.path.relpath(full_path, settings.NF_RUNDIR)
+        path = os.path.relpath(full_path, run['outsharepath'])
         regresp = register_resultfile(fn, path, server_id=run['server_id'],
-                analysis_id=run['analysis_id'], sharepath=settings.NF_RUNDIR)
+                analysis_id=run['analysis_id'], sharepath=run['outsharepath'])
         if not regresp:
             # 500 error, no JSON
             continue
@@ -394,6 +393,8 @@ def run_nextflow_longitude_qc(self, run, params, stagefiles, profiles, nf_versio
     params, gitwfdir, no_stagedir, scratchdir = prepare_nextflow_run(run, self.request.id, rundir,
             stagefiles, params, scratchbasedir)
     # QC has no stagedir, we put the raw in rundir to stage
+    # Also, outsharepath can be NF_RUNDIR since these files are thrown away after run
+    run['outsharepath'] = os.path.join(settings.NF_RUNDIR, 'output')
     try:
         outdir = run_nextflow(run, params, rundir, gitwfdir, profiles, nf_version, scratchdir)
     except subprocess.CalledProcessError:

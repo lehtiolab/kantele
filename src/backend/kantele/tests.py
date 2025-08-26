@@ -82,7 +82,7 @@ class BaseTest(TestCase):
         self.ssanaruns = rm.ServerShare.objects.create(name='analysisruns', max_security=1,
                 function=rm.ShareFunction.ANALYSISRESULTS, maxdays_data=1)
         self.nfrunshare = rm.FileserverShare.objects.create(server=self.anaserver,
-                share=self.ssanaruns, path=os.path.join(self.rootdir, 'nf_runs'))
+                share=self.ssanaruns, path=os.path.join(self.rootdir, 'nf_run_output'))
 
         self.remoteanaserver = rm.FileServer.objects.create(name='analysis2', uri='s0.test',
                 fqdn='analysis_ssh_2', can_rsync_remote=False, is_analysis=True, rsyncusername='kantele',
@@ -92,7 +92,7 @@ class BaseTest(TestCase):
         self.ssanaruns2 = rm.ServerShare.objects.create(name='analysisruns2', max_security=1,
                 function=rm.ShareFunction.ANALYSISRESULTS, maxdays_data=1)
         self.nfrunshare2 = rm.FileserverShare.objects.create(server=self.remoteanaserver,
-                share=self.ssanaruns2, path=os.path.join(self.rootdir, 'nf_runs2'))
+                share=self.ssanaruns2, path=os.path.join(self.rootdir, 'nf_run_output2'))
         self.oldstorctrl = rm.FileserverShare.objects.create(server=self.remoteanaserver,
                 share=self.analocalstor, path=os.path.join(self.rootdir, 'oldstorage'))
 

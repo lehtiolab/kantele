@@ -222,7 +222,7 @@ class ConvertDatasetMzml(DatasetJob):
                 share_id=dss['storageshare_id']).values('path').first()
 
         runpath = f'{dss["dataset_id"]}_convert_mzml_{kwargs["timestamp"]}'
-        dstpath = os.path.join(analocalshare['path'], runpath, 'output')
+        dstpath = os.path.join(analocalshare['path'], runpath)
 
         pwiz = Proteowizard.objects.get(pk=kwargs['pwiz_id'])
         for sfl in self.getfiles_query(**kwargs):
@@ -244,9 +244,9 @@ class ConvertDatasetMzml(DatasetJob):
         srcpath = os.path.join(kwargs['srcsharepath'], dss['storage_loc'])
         for fn in self.getfiles_query(**kwargs).values('sfile__rawfile_id', 'sfile__filename'):
             # Have to line up the sfl with their dst mzml sfl ids, so we cant just oneline it
-            mzsfl = StoredFileLoc.objects.values('pk', 'sfile__filename', 'sfile__filetype__name'
-                    ).get(pk__in=kwargs['dstsfloc_ids'], sfile__rawfile_id=fn['sfile__rawfile_id'])
-
+            mzsfl = StoredFileLoc.objects.values('pk', 'sfile__filename', 'sfile__filetype__name',
+                    'servershare_id').get(pk__in=kwargs['dstsfloc_ids'],
+                            sfile__rawfile_id=fn['sfile__rawfile_id'])
             nf_raws.append((srcpath, fn['sfile__filename'], mzsfl['pk'], mzsfl['sfile__filename']))
         if not nf_raws:
             return
@@ -259,6 +259,7 @@ class ConvertDatasetMzml(DatasetJob):
                'repo': nfwf.nfworkflow.repo,
                'runname': kwargs['runpath'],
                'server_id': anaserver.pk,
+               'outsharepath': sharemap[mzsfl['servershare_id']],
                }
         params = ['--container', pwiz.container_version]
         for pname in ['options', 'filters']:

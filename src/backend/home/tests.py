@@ -103,8 +103,8 @@ class TestCreateMzmls(MzmlTests):
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
         mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}.mzML'
-        mzmlfn0 = os.path.join(self.rootdir, 'nf_runs2',
-                f'{self.ds.pk}_convert_mzml_{j.kwargs["timestamp"]}', 'output', mzmlfn)
+        mzmlfn0 = os.path.join(self.rootdir, self.nfrunshare2.path,
+                f'{self.ds.pk}_convert_mzml_{j.kwargs["timestamp"]}', mzmlfn)
         mzmlfn1 = os.path.join(self.f3path, mzmlfn)
         mzmlfn2 = os.path.join(dss2_fpath, mzmlfn)
         mzml_sf = rm.StoredFile.objects.get(rawfile=self.f3raw, mzmlfile__pwiz=self.pwiz.pk)
@@ -183,8 +183,8 @@ class TestCreateMzmls(MzmlTests):
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
         mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}.mzML'
-        mzmlfn0 = os.path.join(self.rootdir, 'nf_runs2',
-                f'{self.ds.pk}_convert_mzml_{j.kwargs["timestamp"]}', 'output', mzmlfn)
+        mzmlfn0 = os.path.join(self.rootdir, self.nfrunshare2.path,
+                f'{self.ds.pk}_convert_mzml_{j.kwargs["timestamp"]}', mzmlfn)
         mzmlfn1 = os.path.join(self.rootdir, 'oldstorage', dss2path, mzmlfn)
         mzmlfn2 = os.path.join(dss2_fpath, mzmlfn)
         mzmlfn3 = os.path.join(self.f3path, mzmlfn)
@@ -222,8 +222,8 @@ class TestCreateMzmls(MzmlTests):
         mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}_refined.mzML'
         ref_ana = am.Analysis.objects.last()
         timestamp = datetime.strftime(ref_ana.date, '%Y%m%d_%H.%M')
-        mzmlfn0 = os.path.join(self.rootdir, 'nf_runs2',
-                f'{ref_ana.pk}_{self.wf.wftype.name}_refine_dataset_{self.ds.pk}_{timestamp}', 'output', mzmlfn)
+        mzmlfn0 = os.path.join(self.rootdir, self.nfrunshare2.path,
+                f'{ref_ana.pk}_{self.wf.wftype.name}_refine_dataset_{self.ds.pk}_{timestamp}', mzmlfn)
         mzmlfn1 = os.path.join(dss2_fpath, mzmlfn)
         mzmlfn2 = os.path.join(self.inboxctrl.path, 'datasets', str(self.ds.pk),  mzmlfn)
         mzmlfn3 = os.path.join(self.f3path, mzmlfn)
@@ -280,8 +280,8 @@ class TestCreateMzmls(MzmlTests):
                 path=dss2path, active=True)
         self.assertTrue(mzsfl_q_stor.filter(purged=True).exists())
         self.assertTrue(mzsfl_q_tmp.filter(purged=True).exists())
-        mzmlfn0 = os.path.join(self.rootdir, 'nf_runs',
-                f'{self.ds.pk}_convert_mzml_{j.kwargs["timestamp"]}', 'output', mzmlfn)
+        mzmlfn0 = os.path.join(self.rootdir, self.nfrunshare.path,
+                f'{self.ds.pk}_convert_mzml_{j.kwargs["timestamp"]}', mzmlfn)
         mzmlfn1 = os.path.join(self.f3path, mzmlfn)
         mzmlfn2 = os.path.join(dss2_fpath, mzmlfn)
         self.assertFalse(os.path.exists(mzmlfn1))
@@ -382,7 +382,7 @@ class TestRefineMzmls(MzmlTests):
         self.run_job() # rsync db
         mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}_refined.mzML'
         ana = am.Analysis.objects.last()
-        mzmlfn1 = os.path.join(self.rootdir, 'nf_runs', ana.get_run_base_dir(), 'output', mzmlfn)
+        mzmlfn1 = os.path.join(self.rootdir, self.nfrunshare.path, ana.get_run_base_dir(), mzmlfn)
         mzmlfn2 = os.path.join(self.f3path, mzmlfn)
         self.assertFalse(os.path.exists(mzmlfn1))
         self.run_job() # refining

@@ -754,9 +754,7 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.run_job() # rsync the results
         reports = rm.StoredFileLoc.objects.filter(sfile__filename='report.html', purged=False)
         self.assertEqual(reports.count(), 3) # analysisruns, web, analysis storage
-        x = os.path.join(self.nfrunshare.path, ana.get_run_base_dir())
-        nfrunsfl = reports.filter(servershare=self.ssanaruns,
-                path=os.path.join(ana.get_run_base_dir(), 'output')).get()
+        nfrunsfl = reports.filter(servershare=self.ssanaruns, path=ana.get_run_base_dir()).get()
         nfrunfn = os.path.join(self.nfrunshare.path, nfrunsfl.path, 'report.html')
         self.assertTrue(os.path.exists(nfrunfn))
 

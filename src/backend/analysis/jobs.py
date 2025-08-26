@@ -44,17 +44,14 @@ class RefineMzmls(DatasetJob):
         local_dst_sfls, remote_dst_sfls = [], []
         dst_sfls = []
         dss = dm.DatasetServer.objects.values('storageshare_id').get(pk=kwargs['dss_id'])
-        # Pick any server capable:
-        anaserver = rm.FileServer.objects.filter(fileservershare__share_id=dss['storageshare_id'],
-                is_analysis=True).first()
-        analocalshare = rm.FileserverShare.objects.filter(share__function=rm.ShareFunction.ANALYSISRESULTS,
-                server=anaserver).values('share_id', 'path').first()
-        anasrcshareonserver = rm.FileserverShare.objects.filter(server=anaserver,
+        analocalshare = rm.FileserverShare.objects.filter(server_id=kwargs['anaserver_id'],
+                share__function=rm.ShareFunction.ANALYSISRESULTS).values('share_id', 'path').first()
+        anasrcshareonserver = rm.FileserverShare.objects.filter(server_id=kwargs['anaserver_id'],
                 share_id=dss['storageshare_id']).values('path').first()
 
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
         dstpath = os.path.join(analocalshare['path'],
-                analysis.get_run_base_dir(models.UserWorkflow.WFTypeChoices.SPEC), 'output')
+                analysis.get_run_base_dir(models.UserWorkflow.WFTypeChoices.SPEC))
         for sfl in self.getfiles_query(**kwargs).select_related('sfile__mzmlfile__pwiz', 'sfile'):
             mzmlfilename = f'{os.path.splitext(sfl.sfile.filename)[0]}_refined.mzML'
             # Create local mzsfl for the analysis server, to rsync from
@@ -65,7 +62,7 @@ class RefineMzmls(DatasetJob):
                 local_dst_sfls.append(localmzsfl.pk)
 
             dst_sfls.append(localmzsfl.pk)
-        return {'dstsfloc_ids': dst_sfls, 'server_id': anaserver.pk,
+        return {'dstsfloc_ids': dst_sfls, 'server_id': kwargs['anaserver_id'],
                 'srcsharepath': anasrcshareonserver['path']}
 
     def _get_extrafiles_to_rsync(self, **kwargs):
@@ -99,12 +96,14 @@ class RefineMzmls(DatasetJob):
         srcpath = os.path.join(kwargs['srcsharepath'], dss['storage_loc'])
         for x in self.getfiles_query(**kwargs).values('sfile__rawfile_id', 'sfile__filename', 'path',
                 ):
-            ref_sfl = rm.StoredFileLoc.objects.values('pk', 'sfile__filename').get(
+            ref_sfl = rm.StoredFileLoc.objects.values('pk', 'sfile__filename', 'servershare_id').get(
                     pk__in=kwargs['dstsfloc_ids'], sfile__rawfile_id=x['sfile__rawfile_id'])
             mzmls.append({'srcpath': srcpath, 'fn': x['sfile__filename'], 'refinedpk': ref_sfl['pk'],
                 'refinedname': ref_sfl['sfile__filename']})
         if not mzmls:
             return
+        if not (outsharepath := sharemap.get(ref_sfl['servershare_id'], False)):
+            return RuntimeError('Analysis server seems to not have the output share connected')
         params = ['--instrument', kwargs['instrument']]
         if kwargs['qtype'] != 'labelfree':
             params.extend(['--isobaric', kwargs['qtype']])
@@ -114,6 +113,7 @@ class RefineMzmls(DatasetJob):
                'nxf_wf_fn': nfwf.filename,
                'repo': nfwf.nfworkflow.repo,
                'runname':  analysis.get_run_base_dir(),
+               'outsharepath': outsharepath,
                'server_id': anaserver.pk,
                }
         if not len(nfwf.profiles):
@@ -260,6 +260,9 @@ class RunNextflowWorkflow(MultiDatasetJob):
         self.queue = self.get_server_based_queue(fserver.name, settings.QUEUE_NXF)
         sharemap = {fss['share_id']: fss['path'] for fss in
                 fserver.fileservershare_set.values('share_id', 'path')}
+        if not (outshare := fserver.fileservershare_set.filter(
+                share__function=rm.ShareFunction.ANALYSISRESULTS).values('share_id').first()):
+            raise RuntimeError('Analysis server has no defined results share connected or known')
         stagefiles = {}
         for flag, sfid in kwargs['inputs']['singlefiles'].items():
             sfl_q = rm.StoredFileLoc.objects.filter(sfile_id=sfid,
@@ -336,7 +339,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
                'nxf_wf_fn': nfwf.filename,
                'repo': nfwf.nfworkflow.repo,
                'runname': analysis.get_run_base_dir(),
-               'outdir': analysis.user.username,
+               'outsharepath': sharemap[outshare['pk']],
                'infiles': [],
                'old_infiles': False,
                'server_id': fserver.pk,

@@ -1076,6 +1076,19 @@ def refine_mzmls(request):
            userworkflow__wftype=anmodels.UserWorkflow.WFTypeChoices.SPEC).count() != 1:
         return JsonResponse({'error': 'Wrong workflow to refine with'}, status=403)
 
+    # Pick one but any servershare which is reachable on an analysis server:
+    srcdss = dsmodels.DatasetServer.objects.filter(dataset=dset,
+            storageshare_id__in=mzmlsfl.values('servershare_id')).values('pk', 'storageshare_id').first()
+    if not (anaserver_q := filemodels.FileServer.objects.filter(is_analysis=True,
+            fileservershare__share_id=srcdss['storageshare_id']).values('pk')):
+        return JsonResponse({'error': 'Cannot find an analysis server that has access'
+            'to this dataset'}, status=403)
+    if anafss_q := filemodels.FileserverShare.objects.filter(server_id__in=[x['pk'] for x in anaserver_q],
+            share__function=filemodels.ShareFunction.ANALYSISRESULTS):
+        anaserver_id = anafss_q.values('server_id').first()['server_id']
+    else:
+        return RuntimeError('Analysis server seems to not have the output share connected')
+
     # Checks done, refine data, now we can start storing POST data
     # Move entire project if not on same file server (403 is checked before saving anything
     # or queueing jobs)
@@ -1084,14 +1097,11 @@ def refine_mzmls(request):
     analysis = anmodels.Analysis.objects.create(user=request.user, name=f'refine_dataset_{dset.pk}',
             editable=False)
 
-    # Pick one but any servershare which is reachable on an analysis server:
-    srcdss = dsmodels.DatasetServer.objects.filter(dataset=dset,
-            storageshare_id__in=mzmlsfl.values('servershare_id')).values('pk', 'storageshare_id').first()
     dss_id, source_ssid = srcdss['pk'], srcdss['storageshare_id']
     srcsfl_pk = [x['pk'] for x in mzmlsfl.filter(servershare_id=source_ssid).values('pk')]
     job = create_job('refine_mzmls', dss_id=dss_id, analysis_id=analysis.id, wfv_id=data['wfid'],
             sfloc_ids=srcsfl_pk, dbfn_id=dbid, qtype=dset.quantdataset.quanttype.shortname,
-            instrument=instrument)
+            instrument=instrument, anaserver_id=anaserver_id)
     if job['error']:
         analysis.delete()
         return JsonResponse({'error': 'Error trying to create a refine dataset job: {job["error"]}'},

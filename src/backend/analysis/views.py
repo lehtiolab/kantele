@@ -959,6 +959,10 @@ def store_analysis(request):
         else:
             response_errors.append('You must select a server with analysis capacity, '
                     'maybe the infrastructure has changed, please reload the analysis')
+        if fserver and not (outshare := rm.FileserverShare.objects.filter(
+                server_id=req['analysisserver_id'], share__function=rm.ShareFunction.ANALYSISRESULTS
+                ).values('pk').first()):
+            response_errors.append('Analysis server has results share connected or known')
 
     elif req['upload_external']:
         wftype = am.UserWorkflow.WFTypeChoices.USER
