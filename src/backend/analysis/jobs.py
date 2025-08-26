@@ -339,7 +339,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
                'nxf_wf_fn': nfwf.filename,
                'repo': nfwf.nfworkflow.repo,
                'runname': analysis.get_run_base_dir(),
-               'outsharepath': sharemap[outshare['pk']],
+               'outsharepath': sharemap[outshare['share_id']],
                'infiles': [],
                'old_infiles': False,
                'server_id': fserver.pk,
