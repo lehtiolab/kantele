@@ -1,8 +1,8 @@
-CELERYD_NODES="local download backup scaninbox webrsync"
+CELERYD_NODES="fastfnop rsyncstorage backup scaninbox webrsync"
 CELERY_BIN="{{ kanteledir }}/venv/bin/celery"
 CELERYD_MULTI="multi"
 CELERY_APP="kantele"
-CELERYD_OPTS="-c:local 4 -c:download 1 -c:webrsync 1 -c:backup 1 -c:scaninbox 1 -Q:local {{ queue_local }} -Q:download {{ queue_dl }} -Q:webrsync {{ queue_web_rsync }} -Q:backup {{ queue_backup }} -Q:scaninbox {{ queue_scan }} --statedb={{ kantelelogdir }}/%n%I.state"
+CELERYD_OPTS="-c:fastfnop 4 -c:rsyncstorage 1 -c:webrsync 1 -c:backup 1 -c:scaninbox 1 -Q:fastfnop '{{ inventory_hostname }}__{{ queue_fastfnop }}' -Q:rsyncstorage '{{ inventory_hostname }}__{{ queue_rsyncstorage }}' -Q:webrsync '{{ inventory_hostname }}__{{ queue_web_rsync }}' -Q:backup '{{ inventory_hostname }}__{{ queue_backup }}' -Q:scaninbox '{{ inventory_hostname }}__{{ queue_scan }}' --statedb={{ kantelelogdir }}/%n%I.state"
 CELERYD_LOG_LEVEL="INFO"
 CELERYD_LOG_FILE="{{ kantelelogdir }}/%n%I.log"
 CELERYD_PID_FILE="{{ kantelelogdir }}/%n%I.pid"
@@ -29,7 +29,8 @@ PRIMARY_STORAGE='{{ primary_storagename }}'
 SECONDARY_STORAGE_RSYNC_USER='{{ secondary_storage_user }}'
 SECONDARY_STORAGE_RSYNC_KEY='{{ secondary_storage_sshkey }}'
 
-QUEUE_STORAGE="{{ queue_local }}"
+QUEUE_STORAGE="{{ queue_rsyncstorage }}"
+QUEUE_FASTSTORAGE="{{ queue_fastfnop }}"
 QUEUE_WEB_RSYNC ="{{ queue_web_rsync }}"
 QUEUE_FILE_DOWNLOAD="{{ queue_dl }}"
 QUEUE_BACKUP="{{ queue_backup }}"

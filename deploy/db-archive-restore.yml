@@ -6,7 +6,7 @@
   become_user: '{{ kanteleuser }}'
   tasks:
       - name: Remove running docker containers
-        community.docker.docker_compose:
+        community.docker.docker_compose_v2:
             project_src: '{{ kanteledir }}'
             files:
                 - '{{ kanteledir }}/docker-compose-base.yml'
@@ -45,7 +45,7 @@
             dest: '{{ host_pgbackup_path }}'
 
       - name: DB service up
-        community.docker.docker_compose:
+        community.docker.docker_compose_v2:
             project_src: '{{ kanteledir }}'
             services: db
             files:
@@ -75,7 +75,7 @@
             cmd: 'docker-compose --env-file .compose.prod.env -f docker-compose-base.yml -f src/docker/docker-compose-prod.yml exec db psql -U {{ kanteledbuser }} -d {{ kanteledb }} -f /pgbackups/{{ sqldump | basename }}'
 
       - name: Remove running docker containers
-        community.docker.docker_compose:
+        community.docker.docker_compose_v2:
             project_src: '{{ kanteledir }}'
             files:
                 - '{{ kanteledir }}/docker-compose-base.yml'
@@ -87,7 +87,7 @@
             - GROUP_ID: '{{ kantelegid }}'
 
       - name: Build and start production docker containers
-        community.docker.docker_compose:
+        community.docker.docker_compose_v2:
             project_src: '{{ kanteledir }}'
             files:
                 - '{{ kanteledir }}/docker-compose-base.yml'

@@ -21,7 +21,8 @@ compose_env_file: '{{ homedir }}/kantele/.compose.prod.env'
 celeryenv_file: "{{ kanteledir }}/celery.env"
 kantelelogdir: "{{ kanteledir }}/log"
 
-queue_local: mv_md5_storage
+queue_fastfnop: fast_fn_ops
+queue_rsyncstorage: rsyncstorage
 queue_web_rsync: web_rsync
 queue_dl: file_download
 queue_backup: backup_archive

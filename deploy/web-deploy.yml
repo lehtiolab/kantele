@@ -17,7 +17,7 @@
             dest: '{{ item[1] }}'
         loop:
             - ['.compose.prod.env.j2', '{{ compose_env_file }}']
-            - ['container_env_vars.j2', '{{ kanteledir }}/src/docker/prod-container.env']
+            - ['container_env_vars.j2', '{{ kanteledir }}/prod-container.env']
             - ['nginx_prod.conf.j2', '{{ kanteledir }}/src/docker/nginx.conf']
 
       - name: Build compose images
@@ -29,19 +29,22 @@
             - GROUP_ID: '{{ kantelegid }}'
 
       - name: Start production docker containers
-        community.docker.docker_compose:
+        community.docker.docker_compose_v2:
             project_src: '{{ kanteledir }}'
+            project_name: 'kantele'
             files:
                 - '{{ kanteledir }}/src/docker/docker-compose-base.yml'
                 - '{{ kanteledir }}/src/docker/docker-compose-prod.yml'
-            env_file: '{{ compose_env_file }}'
-            build: false
-            state: present
-            restarted: true
+            env_files:
+              - '{{ compose_env_file }}'
+            build: never
+              # restarted only works when it is running, if down, use "present"
+              # does it remove old container or restart it instead?
+            state: restarted
 
       - name: Perform any outstanding migrations
         ansible.builtin.command:
-            cmd: "docker-compose --env-file {{ compose_env_file }} -f src/docker/docker-compose-base.yml -f src/docker/docker-compose-prod.yml exec web python manage.py migrate"
+            cmd: "docker compose --env-file {{ compose_env_file }} -f src/docker/docker-compose-base.yml -f src/docker/docker-compose-prod.yml --project-name kantele exec web python manage.py migrate"
             chdir: "{{ kanteledir }}"
         
          
@@ -49,5 +52,5 @@
         ansible.builtin.cron:
             name: Schedule job to download new FASTA 
             hour: "*/4"
-            job: "cd {{ kanteledir }} && docker-compose --env {{ compose_env_file }} -f src/docker/docker-compose-base.yml -f src/docker/docker-compose-prod.yml exec -T web python manage.py download_latest_fasta "
+            job: "cd {{ kanteledir }} && docker compose --env {{ compose_env_file }} -f src/docker/docker-compose-base.yml -f src/docker/docker-compose-prod.yml --project-name kantele exec -T web python manage.py download_latest_fasta "
 
