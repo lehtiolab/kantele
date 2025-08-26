@@ -650,8 +650,8 @@ def file_uploaded(request):
             if raw_created:
                 rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sfl.pk,
                     dstshare_id=dstshare['pk'], dstpath=analysis.get_public_output_dir())
-            create_job('create_pdc_archive', sfloc_id=rsjob['kwargs']['dstsfloc_id'],
-                    isdir=sf.filetype.is_folder)
+                create_job('create_pdc_archive', sfloc_id=rsjob['kwargs']['dstsfloc_id'],
+                        isdir=sf.filetype.is_folder)
     elif data.get('is_library', False):
         # Library files at this URL arrive in inbox, go to their respective shares
         # These are always fasta files from auto downloads for this view
