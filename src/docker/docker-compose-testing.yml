@@ -216,7 +216,7 @@ services:
             service: storage
         env_file:
             - testing.env
-        command: celery -A kantele worker -Q web_rsync -n web_rsync.%h --concurrency=1
+        command: celery -A kantele worker -Q storage1__web_rsync -n web_rsync.%h --concurrency=1
         volumes:
           # Overwrite dev storage here
             - type: bind

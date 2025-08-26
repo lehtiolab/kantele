@@ -167,7 +167,7 @@ class RsyncFileTransferFromWeb(SingleFileJob):
 
     refname = 'rsync_transfer_fromweb'
     task = tasks.rsync_transfer_file_web
-    queue = settings.QUEUE_WEB_RSYNC
+    queue = False
 
     def getfiles_query(self, **kwargs):
         # purged can be false! E.g in case of there is a corrupt non-checked file
@@ -187,9 +187,11 @@ class RsyncFileTransferFromWeb(SingleFileJob):
     def process(self, **kwargs):
         sfloc = self.getfiles_query(**kwargs).select_related('sfile').get()
         dstpath = os.path.join(sfloc.path, sfloc.sfile.filename)
-        fss = rm.FileserverShare.objects.filter(share=sfloc.servershare).first()
+        fss = rm.FileserverShare.objects.filter(share=sfloc.servershare,
+                server__can_rsync_remote=True).values('path', 'server__name').first()
+        self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_WEB_RSYNC)
         self.run_tasks.append((sfloc.pk, get_host_upload_dst(kwargs['src_path']),
-            fss.path, dstpath, sfloc.servershare.name, sfloc.sfile.filetype.is_folder,
+            fss['path'], dstpath, sfloc.servershare.name, sfloc.sfile.filetype.is_folder,
             sfloc.sfile.filetype.stablefiles))
 
 
