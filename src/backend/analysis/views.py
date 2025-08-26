@@ -433,8 +433,8 @@ def get_base_analyses(request):
                 'nextflowsearch__nfwfversionparamset').filter(query, deleted=False):
                         # nextflowsearch__isnull=False, 
             if hasattr(x, 'nextflowsearch'):
-                txt = (f'{x.get_fullname} - '
-                        f'{x.nextflowsearch.workflow.name, x.nextflowsearch.nfwfversionparamset.update}')
+                txt = (f'{x.get_fullname()} - '
+                        f'{x.nextflowsearch.workflow.name}, {x.nextflowsearch.nfwfversionparamset.update}')
             else:
 
                 txt = x.get_fullname()
