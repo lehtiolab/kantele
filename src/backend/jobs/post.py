@@ -1,6 +1,6 @@
 import requests
 import json
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from celery import states
 
 from django.urls import reverse
@@ -8,15 +8,27 @@ from django.urls import reverse
 from kantele import settings
 
 
-def update_db(url, form=False, json=False, files=False, msg=False):
+
+
+def get_session_cookies():
+    '''Gets CSRF cookie from login view'''
+    session = requests.session()
+    init_resp = session.get(urljoin(settings.KANTELEHOST, reverse('login')))
+    headers = {'X-CSRFToken': session.cookies['csrftoken'], 'Referer': settings.KANTELEHOST}
+    return session, headers
+
+
+def update_db(url, form=False, json=False, files=False, msg=False, session=False, headers=False):
+    if not session:
+        session, headers = get_session_cookies()
     try:
         r = False
         if form:
-            r = requests.post(url=url, data=form)
+            r = session.post(url=url, data=form, headers=headers)
         elif json:
-            r = requests.post(url=url, json=json)
+            r = session.post(url=url, json=json,  headers=headers)
         elif files:
-            r = requests.post(url=url, files=files)
+            r = session.post(url=url, files=files, headers=headers)
         r.raise_for_status()
     except (requests.exceptions.HTTPError,
             requests.exceptions.ConnectionError) as e:

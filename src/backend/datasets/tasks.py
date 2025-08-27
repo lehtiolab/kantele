@@ -8,7 +8,7 @@ from celery import shared_task
 from celery.exceptions import MaxRetriesExceededError
 
 from kantele import settings
-from jobs.post import update_db, taskfail_update_db
+from jobs.post import get_session_cookies, update_db, taskfail_update_db
 from analysis.tasks import create_runname_dirname, prepare_nextflow_run, run_nextflow, register_mzmlfile, process_error_from_nf_log, copy_stage_files
 from rawstatus.tasks import calc_md5, delete_empty_dir
 
@@ -45,8 +45,10 @@ def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profile
     # Technically we can dump straight to infile paths
     token = False
     transfer_url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
+    reg_session, reg_headers = get_session_cookies()
     for raw in raws:
-        regfile = register_mzmlfile(raw[2], raw[3], run_outdir, run['server_id'])
+        regfile = register_mzmlfile(raw[2], raw[3], run_outdir, run['server_id'], reg_session,
+                reg_headers)
     url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
     postdata = {'client_id': settings.APIKEY, 'task': self.request.id}
     update_db(url, json=postdata)

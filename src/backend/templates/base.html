@@ -34,7 +34,10 @@
 		    <a class="navbar-item {% if appname == 'corefac' %}is-active{% endif %}" href="{% url 'corefac:home' %}">CORE FACILITY</a>
 		    <a class="navbar-item {% if appname == 'staffpage' %}is-active{% endif %}" href="{% url 'staffpage:home' %}">ADMIN</a>
 		    {% endif %}
-		    <a class="navbar-item" href="{% url 'logout' %}">LOGOUT {{ user }}</a>
+		    <form method="post" action="{% url 'logout' %}">
+		      {% csrf_token %}
+		    <button class="is-light button mt-1" type="submit" >LOGOUT {{ user }}</button>
+		    </form>
 		  {% endwith %}
 	    </div>
     </div>
