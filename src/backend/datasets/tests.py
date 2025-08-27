@@ -197,6 +197,34 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertFalse(dm.ProjectLog.objects.exists())
 
 
+class FindFilesTest(BaseTest):
+    url = '/datasets/find/files/'
+    maxDiff = None
+
+    def test_find_files(self):
+        tmpraw2 = rm.RawFile.objects.create(name='raw23', producer=self.prod,
+                source_md5='tmpraw23_fakemd5', size=10, date=timezone.now(), claimed=False,
+                usetype=rm.UploadFileType.RAWFILE)
+        tmpsf = rm.StoredFile.objects.create(rawfile=tmpraw2, md5=tmpraw2.source_md5,
+                filename=tmpraw2.name, checked=True, filetype=self.ft)
+        tmpsss = rm.StoredFileLoc.objects.create(sfile=tmpsf, servershare=self.ssinbox,
+                path='', active=True, purged=False)
+        resp = self.cl.get(self.url, data={'q': [self.tmpraw.name[0], self.tmpraw.name[-1]]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertJSONEqual(resp.content.decode('utf-8'),
+                {'newfn_order': [tmpraw2.pk, self.tmpraw.pk],
+                    'newFiles': {f'{x.pk}': {'id': x.pk, 'name': x.name, 
+                        'size': round(x.size / (2**20), 1),
+                        'date': x.date.timestamp() * 1000,
+                        'instrument': x.producer.name, 'checked': False}
+                        for x in [self.tmpraw, tmpraw2]}})
+
+    def test_find_no_files(self):
+        resp = self.cl.get(self.url, data={'q': ['h3289renweq89nd892nwoei']})
+        self.assertEqual(resp.status_code, 200)
+        self.assertJSONEqual(resp.content.decode('utf-8'), {'newfn_order': [], 'newFiles': {}})
+
+
 class UpdateFilesTest(BaseIntegrationTest):
     url = '/datasets/save/files/'
 
