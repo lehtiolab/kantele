@@ -38,9 +38,7 @@
             env_files:
               - '{{ compose_env_file }}'
             build: never
-              # restarted only works when it is running, if down, use "present"
-              # does it remove old container or restart it instead?
-            state: restarted
+            recreate: always
 
       - name: Perform any outstanding migrations
         ansible.builtin.command:
