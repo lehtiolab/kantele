@@ -1,6 +1,6 @@
 set -eo pipefail
 
-DOCKERCMD="docker compose --env-file  src/docker/.compose.testing.env -f src/docker/docker-compose-testing.yml"
+DOCKERCMD="docker compose --env-file  src/docker/.compose.testing.env -f src/docker/docker-compose-testing.yml --project-name kanteletest"
 
 # remove old test results if needed (locally)
 echo Cleaning up

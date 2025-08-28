@@ -285,7 +285,7 @@ def delete_file(self, sharepath, path, fname, sfloc_id, is_dir=False):
     url = urljoin(settings.KANTELEHOST, reverse('jobs:deletefile'))
     postdata = {'sfloc_id': sfloc_id, 'task': self.request.id, 'client_id': settings.APIKEY}
     try:
-        update_db(url, postdata, msg)
+        update_db(url, postdata, msg=msg)
     except RuntimeError:
         try:
             self.retry(countdown=60)

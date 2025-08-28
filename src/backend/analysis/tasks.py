@@ -14,7 +14,7 @@ from django.urls import reverse
 from celery import shared_task, exceptions
 from celery import states as taskstates
 
-from jobs.post import update_db, taskfail_update_db
+from jobs.post import update_db, get_session_cookies, taskfail_update_db
 from kantele import settings
 from rawstatus.tasks import calc_md5
 from analysis.models import UniProtFasta
@@ -175,11 +175,13 @@ def run_nextflow_workflow(self, run, params, stagefiles, profiles, nf_version, s
     outfiles = execute_normal_nf(run, params, rundir, gitwfdir, self.request.id, nf_version, profiles, scratchdir)
 
     # Register output files to web host
+    reg_session, reg_headers = get_session_cookies()
     for ofile in outfiles:
         full_path, fn = os.path.split(ofile)
         path = os.path.relpath(full_path, run['outsharepath'])
         regresp = register_resultfile(fn, path, server_id=run['server_id'],
-                analysis_id=run['analysis_id'], sharepath=run['outsharepath'])
+                analysis_id=run['analysis_id'], sharepath=run['outsharepath'], session=reg_session,
+                headers=reg_headers)
         if not regresp:
             # 500 error, no JSON
             continue
@@ -191,13 +193,13 @@ def run_nextflow_workflow(self, run, params, stagefiles, profiles, nf_version, s
                     f'{regresp["error"]}')
             continue
         checksrvurl = urljoin(settings.KANTELEHOST, reverse('analysis:checkfileupload'))
-        resp = requests.post(checksrvurl, json={'fname': fn, 'client_id': settings.APIKEY})
+        resp = reg_session.get(checksrvurl, json={'fname': fn, 'client_id': settings.APIKEY})
         if resp.status_code == 200:
             # Servable file found, upload also to web server
             # Somewhat complex POST to get JSON and files in same request
             postdata = {'client_id': settings.APIKEY, 'sfid': regresp['sfid'], 'fname': fn,
                     'path': os.path.basename(rundir)}
-            response = requests.post(checksrvurl, files={
+            response = reg_session.put(checksrvurl, headers=reg_headers, files={
                 'ana_file': (fn, open(ofile, 'rb'), 'application/octet-stream'),
                 'json': (None, json.dumps(postdata), 'application/json')})
     reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:analysisdone'))
@@ -224,9 +226,12 @@ def refine_mzmls(self, run, params, mzmls, stagefiles, profiles, nf_version, sta
     for outfn in outfiles:
         path, fn = os.path.split(outfn)
         outfiles_db[fn] = (path, outfn)
+    
+    reg_session, reg_headers = get_session_cookies()
     for non_ref_mzfn in mzmls:
         path, reffn = outfiles_db[non_ref_mzfn['refinedname']]
-        regfile = register_mzmlfile(non_ref_mzfn['refinedpk'], reffn, path, run['server_id'])
+        regfile = register_mzmlfile(non_ref_mzfn['refinedpk'], reffn, path, run['server_id'],
+                reg_session, reg_headers)
     reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:analysisdone'))
     postdata = {'client_id': settings.APIKEY, 'analysis_id': run['analysis_id'],
             'task': self.request.id}
@@ -436,20 +441,9 @@ def report_finished_run_and_cleanup(url, postdata, scratchdir, stagedir, rundir,
         shutil.rmtree(scratchdir)
 
 
-def check_in_transfer_client(task_id, token, filetype):
-    url = urljoin(settings.KANTELEHOST, reverse('files:check_in'))
-    resp = requests.post(url, json={'client_id': settings.APIKEY, 'token': token,
-        'task_id': task_id, 'ftype': filetype})
-    resp.raise_for_status()
-    response = resp.json()
-    if response.get('newtoken', False):
-        return response['newtoken']
-    else:
-        return token
-
-
 def register_resultfile(fname, sflpath, *, sharepath, server_id=False, share_id=False,
-        analysis_id=False, md5sum=False, filetype_id=False, fasta=False, is_library=False):
+        analysis_id=False, md5sum=False, filetype_id=False, fasta=False, is_library=False,
+        session=False, headers=False):
     '''This is for registering output from nextflow runs, automatic downloads
     of fasta files, and possibly more in the future'''
     fullpath = os.path.join(sharepath, sflpath, fname)
@@ -470,7 +464,9 @@ def register_resultfile(fname, sflpath, *, sharepath, server_id=False, share_id=
                 'analysis_id': analysis_id,
                 'is_fasta': fasta,
                 }
-    resp = requests.post(url=reg_url, json=postdata)
+    if not session:
+        session, headers = get_session_cookies()
+    resp = session.post(url=reg_url, json=postdata, headers=headers)
     if resp.status_code != 500:
         rj = resp.json()
     else:
@@ -479,7 +475,7 @@ def register_resultfile(fname, sflpath, *, sharepath, server_id=False, share_id=
     return rj
  
 
-def register_mzmlfile(sflpk, fname, path, server_id):
+def register_mzmlfile(sflpk, fname, path, server_id, session, headers):
     fullpath = os.path.join(path, fname)
     reg_url = urljoin(settings.KANTELEHOST, reverse('files:uploaded_mzml'))
     postdata = {'sflpk': sflpk,
@@ -492,7 +488,7 @@ def register_mzmlfile(sflpk, fname, path, server_id):
                 'path': os.path.relpath(path, settings.NF_RUNDIR),
                 'server_id': server_id,
                 }
-    resp = requests.post(url=reg_url, json=postdata)
+    resp = session.post(url=reg_url, json=postdata, headers=headers)
     if resp.status_code != 500:
         rj = resp.json()
     else:

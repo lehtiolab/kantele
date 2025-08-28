@@ -393,6 +393,13 @@ def get_allstuff():
 
 
 def get_msdataset_files_by_type(alldsfiles, nrrawfiles=False):
+    '''Passed storedfiles, this will return a dict
+    {filetype_name: storedfiles_filtered, so e.g.
+    'mzml': <queryset>,
+    'refined': <queryset>,
+    }
+    Also returned (in a tuple with dict above) is the "last" filetype
+    '''
     dsfiles = {}
     last_filetype = False
     dsmzfiles = alldsfiles.filter(mzmlfile__isnull=False, mzmlfile__refined=False).select_related('mzmlfile__pwiz')
@@ -512,14 +519,17 @@ def get_datasets(request, wfversion_id):
                 am.AnalysisDatasetSetValue.objects.filter(analysis_id=anid,
                     dataset=dset).exclude(field__startswith='__')})
 
-        # Get dataset files
-        dssfiles = rm.StoredFile.objects.select_related('rawfile__producer', 'filetype').filter(
-                rawfile__datasetrawfile__dataset=dset, deleted=False,
-                storedfileloc__active=True, checked=True)
-        dsrawfiles = dssfiles.filter(mzmlfile__isnull=True)
+        # Get dataset files, dsrawfiles can include duplicates as it joins on storedfileloc
+        # table!
+        dsrawfiles = rm.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=dset,
+                storedfileloc__active=True, deleted=False, checked=True, mzmlfile__isnull=True)
+        # For reporting in interface and checking, and using as source for dataset files
+        actual_rawfiles = rm.RawFile.objects.filter(storedfile__in=dsrawfiles)
+        nrrawfiles = actual_rawfiles.count()
+        # This is a bit of a longer way to get the dss files (rawfile__in=RawFile(storedfile__in))
+        # But it avoids getting the above mentioned duplicates
+        dssfiles = rm.StoredFile.objects.filter(rawfile__in=actual_rawfiles, deleted=False)
 
-        # For reporting in interface and checking
-        nrrawfiles = dsrawfiles.count()
         dsregfiles = rm.RawFile.objects.filter(datasetrawfile__dataset=dset)
         if dsregfiles.count() > nrrawfiles:
             response['errmsg'].append(f'Dataset {dsname} contains registered files that dont '
@@ -538,7 +548,7 @@ def get_datasets(request, wfversion_id):
             rawtype = 'placeholder_fake_raw'
         else:
             rawtype = dset_ftype.get().filetype.name
-        is_msdata = dsrawfiles.filter(rawfile__producer__msinstrument__isnull=False).count()
+        is_msdata = dsregfiles.filter(producer__msinstrument__isnull=False).count()
 
         # Get quant data from dataset
         is_isobaric, qtype = False, False
@@ -1452,17 +1462,30 @@ def serve_analysis_file(request, arf_id):
     return resp
 
 
-@require_POST
 def upload_servable_file(request):
-    try:
-        data = json.loads(request.body.decode('utf-8'))
-    except json.decoder.JSONDecodeError:
-        data =  json.loads(request.POST['json'])
-    if 'client_id' not in data or data['client_id'] !=settings.ANALYSISCLIENT_APIKEY:
-        return JsonResponse({'msg': 'Forbidden'}, status=403)
-    elif 'fname' not in data or data['fname'] not in settings.SERVABLE_FILENAMES:
-        return JsonResponse({'msg': 'File is not servable'}, status=406)
-    elif request.FILES:
+    '''
+    View to check if file can be uploaded to webserver REPORTS, to enable this with CSRF
+    middleware we need to do PUT instead of post, or we get the
+    "Cannot access body after reading from datastream" error. To use PUT we need some
+    convoluted shit to get the data AND the files out.
+    '''
+    if request.method == "PUT":
+        # Copied this from https://thihara.github.io/Django-Req-Parsing/
+        # Dont need the try/except there.
+        # The fix is to check for the presence of the _post field which is set
+        # the first time _load_post_and_files is called.
+        # If it's set, the request has to be 'reset' to redo
+        # the query value parsing in POST mode.
+        if hasattr(request, '_post'):
+            del request._post
+            del request._files
+        request.method = "POST"
+        request._load_post_and_files()
+        request.method = "PUT"
+        request.PUT = request.POST
+        data =  json.loads(request.PUT['json'])
+        if 'client_id' not in data or data['client_id'] !=settings.ANALYSISCLIENT_APIKEY:
+            return JsonResponse({'msg': 'Forbidden'}, status=403)
         # store any potential servable file on share on web server
         webshare = rm.ServerShare.objects.filter(function=rm.ShareFunction.REPORTS).first()
         sfloc, _ = rm.StoredFileLoc.objects.get_or_create(sfile_id=data['sfid'], servershare=webshare,
@@ -1484,8 +1507,17 @@ def upload_servable_file(request):
         sfloc.purged = False
         sfloc.save()
         return JsonResponse({})
+
+    elif request.method == 'GET':
+        data = json.loads(request.body.decode('utf-8'))
+        if 'client_id' not in data or data['client_id'] !=settings.ANALYSISCLIENT_APIKEY:
+            return JsonResponse({'msg': 'Forbidden'}, status=403)
+        elif 'fname' not in data or data['fname'] not in settings.SERVABLE_FILENAMES:
+            return JsonResponse({'msg': 'File is not servable'}, status=406)
+        else:
+            return JsonResponse({'msg': 'File can be uploaded and served'}, status=200)
     else:
-        return JsonResponse({'msg': 'File can be uploaded and served'}, status=200)
+        return JsonResponse({'msg': 'Forbidden'}, status=403)
 
 
 @require_GET

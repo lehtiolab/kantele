@@ -62,17 +62,17 @@
       - name: Create user in postgres
         ansible.builtin.command:
             chdir: '{{ kanteledir }}'
-            cmd: docker-compose --env-file .compose.prod.env -f docker-compose-base.yml -f src/docker/docker-compose-prod.yml exec db psql -U postgres -c "CREATE USER {{ kanteledbuser }} WITH PASSWORD '{{ db_pass }}'"
+            cmd: docker compose --env-file .compose.prod.env -f docker-compose-base.yml -f src/docker/docker-compose-prod.yml --project-name kantele exec db psql -U postgres -c "CREATE USER {{ kanteledbuser }} WITH PASSWORD '{{ db_pass }}'"
 
       - name: Create kantele DB in postgres
         ansible.builtin.command:
             chdir: '{{ kanteledir }}'
-            cmd: 'docker-compose --env-file .compose.prod.env -f docker-compose-base.yml -f src/docker/docker-compose-prod.yml exec db createdb -U postgres {{ kanteledb }}'
+            cmd: 'docker compose --env-file .compose.prod.env -f docker-compose-base.yml -f src/docker/docker-compose-prod.yml --project-name kantele exec db createdb -U postgres {{ kanteledb }}'
 
       - name: Restore DB from existing DB
         ansible.builtin.command:
             chdir: '{{ kanteledir }}'
-            cmd: 'docker-compose --env-file .compose.prod.env -f docker-compose-base.yml -f src/docker/docker-compose-prod.yml exec db psql -U {{ kanteledbuser }} -d {{ kanteledb }} -f /pgbackups/{{ sqldump | basename }}'
+            cmd: 'docker compose --env-file .compose.prod.env -f docker-compose-base.yml -f src/docker/docker-compose-prod.yml --project-name kantele exec db psql -U {{ kanteledbuser }} -d {{ kanteledb }} -f /pgbackups/{{ sqldump | basename }}'
 
       - name: Remove running docker containers
         community.docker.docker_compose_v2:

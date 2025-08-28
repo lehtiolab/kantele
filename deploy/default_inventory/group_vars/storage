@@ -1,0 +1,5 @@
+celery_env_template_file: celery_storage_env.j2
+
+tivoli_client_url: "https://aix.software.ibm.com/storage/tivoli-storage-management/maintenance/client/v8r1/Linux/LinuxX86_DEB/BA/v8122/8.1.22.0-TIV-TSMBAC-LinuxX86_DEB.tar"
+
+dsm_dir: "{{ homedir }}/dsmc_conf"

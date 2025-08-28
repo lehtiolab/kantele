@@ -1674,7 +1674,8 @@ def find_files(request):
         subquery |= Q(producer__name__icontains=term)
         query &= subquery
     newfiles = filemodels.RawFile.objects.filter(query).filter(claimed=False,
-            storedfile__checked=True, storedfile__storedfileloc__servershare__function=filemodels.INBOX)
+            storedfile__checked=True,
+            storedfile__storedfileloc__servershare__function=filemodels.ShareFunction.INBOX)
     return JsonResponse({
         'newfn_order': [x.id for x in newfiles.order_by('-date')],
         'newFiles': {x.id:
