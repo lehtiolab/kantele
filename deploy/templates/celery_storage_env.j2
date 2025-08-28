@@ -21,22 +21,8 @@ SECRET_KEY={{ secret_key }}
 APIKEY={{ storage_apikey }}
 
 DSM_DIR="{{ dsm_dir }}"
+
+# for web rsync
 RSYNC_SSHPORT=22
 RSYNC_SSHUSER='{{ web_user }}'
 RSYNC_SSHKEY='{{ rsync_ssh_key_file }}'
-PRIMARY_STORAGE='{{ primary_storagename }}'
-
-SECONDARY_STORAGE_RSYNC_USER='{{ secondary_storage_user }}'
-SECONDARY_STORAGE_RSYNC_KEY='{{ secondary_storage_sshkey }}'
-
-QUEUE_STORAGE="{{ queue_rsyncstorage }}"
-QUEUE_FASTSTORAGE="{{ queue_fastfnop }}"
-QUEUE_WEB_RSYNC ="{{ queue_web_rsync }}"
-QUEUE_FILE_DOWNLOAD="{{ queue_dl }}"
-QUEUE_BACKUP="{{ queue_backup }}"
-QUEUE_SEARCH_INBOX="{{ queue_scan }}"
-
-# FIXME remove
-THERMOREAD_DOCKER="ghcr.io/lehtiolab/kantele_thermoreader"
-THERMOKEY="SampleID"
-BRUKERKEY="Description"
