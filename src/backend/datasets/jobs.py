@@ -155,7 +155,9 @@ class RsyncDatasetServershare(DatasetJob):
         dstpath = os.path.join(dstserver['path'], dst_dss['storage_loc'])
         self.run_tasks.append((src_user, srcserver['server__fqdn'], srcpath, dst_user,
             dstserver['server__fqdn'], dstserver['path'], dst_dss['storage_loc'], rskey,
-            [x['sfile__filename'] for x in srcsfs.values('sfile__filename')], kwargs['dstsfloc_ids']))
+            {x['sfile__filename']: x['sfile__filetype__is_folder'] for x in
+                srcsfs.values('sfile__filename', 'sfile__filetype__is_folder')},
+            kwargs['dstsfloc_ids']))
 
 
 class RemoveDatasetFilesFromServershare(DatasetJob):

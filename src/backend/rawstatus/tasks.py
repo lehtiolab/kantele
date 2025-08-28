@@ -135,24 +135,30 @@ def rsync_files_to_servershares(self, src_user, srcserver_url, srcpath, dst_user
     We dont supply these joined since the dstpath is used to update the
     DB after the rsync
     '''
-    for srcfn in fns:
+    for srcfn, is_folder in fns.items():
         # Dont compress, tests with raw data just make it slower and likely
         # the raw data is already fairly well compressed.
+        if is_folder:
+            # rsync does mkpath, so should NOT do a "double path"
+            # /path/to/sample.d/sample.d/analysis.bin
+            base_dstfpath = os.path.join(dstbasepath, dstpath)
+        else:
+            base_dstfpath = os.path.join(dstbasepath, dstpath, srcfn)
         cmd = ['rsync', '-av', '--mkpath']
         if srcserver_url == dstserver_url:
             # same controller on src and dst -> rsync over mounts
             srcfpath = os.path.join(srcpath, srcfn)
-            dstfpath = os.path.join(dstbasepath, dstpath, srcfn)
+            dstfpath = base_dstfpath
         elif src_user:
             # two different controllers -> rsync over ssh, src is remote, pull from src
             cmd.extend(['-e', f'ssh -l {src_user} -i {rsync_key} -o StrictHostKeyChecking=no'])
             srcfpath = f'{srcserver_url}:{os.path.join(srcpath, srcfn)}'
-            dstfpath = os.path.join(dstbasepath, dstpath, srcfn)
+            dstfpath = base_dstfpath
         elif dst_user:
             # two different controllers -> rsync over ssh, dst is remote, push to dst
             cmd.extend(['-e', f'ssh -l {dst_user} -i {rsync_key} -o StrictHostKeyChecking=no'])
             srcfpath = os.path.join(srcpath, srcfn)
-            dstfpath = f'{dstserver_url}:{os.path.join(dstbasepath, dstpath, srcfn)}'
+            dstfpath = f'{dstserver_url}:{base_dstfpath}'
         else:
             raise RuntimeError('Rsync demanded but neither src not dst user specified')
         cmd.extend([srcfpath, dstfpath])

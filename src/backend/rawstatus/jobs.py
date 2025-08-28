@@ -79,7 +79,8 @@ class RsyncOtherFileServershare(SingleFileJob):
         return self._check_error_either(srcsfl, **kwargs)
 
     def process(self, **kwargs):
-        srcsfl = self.getfiles_query(**kwargs).values('sfile__filename', 'path', 'servershare_id').get()
+        srcsfl = self.getfiles_query(**kwargs).values('sfile__filename', 'path', 'servershare_id',
+                'sfile__filetype__is_folder').get()
         dstshare = rm.ServerShare.objects.values('pk', 'name').get(pk=kwargs['dstshare_id'])
 
         # Check if target sflocs already exist in a nonpurged state in wrong path?
@@ -133,7 +134,8 @@ class RsyncOtherFileServershare(SingleFileJob):
         dstpath = dstsfl.values('path').get()['path']
         self.run_tasks.append((src_user, srcserver['server__fqdn'], srcpath, dst_user,
             dstserver['server__fqdn'], dstserver['path'], dstpath, rskey,
-            [srcsfl['sfile__filename']], [kwargs['dstsfloc_id']]))
+            {srcsfl['sfile__filename']: srcsfl['sfile__filetype__is_folder']},
+            [kwargs['dstsfloc_id']]))
 
 
 class RemoveFilesFromServershare(RemoveDatasetFilesFromServershare):
