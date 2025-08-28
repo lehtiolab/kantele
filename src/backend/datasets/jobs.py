@@ -153,10 +153,15 @@ class RsyncDatasetServershare(DatasetJob):
         # Now run job
         srcpath = os.path.join(srcserver['path'], srcloc_one['path'])
         dstpath = os.path.join(dstserver['path'], dst_dss['storage_loc'])
+        fns = {}
+        for srcsfl in srcsfs.values('sfile__filename', 'sfile__mzmlfile', 'sfile__filetype__is_folder'):
+            if srcsfl['sfile__mzmlfile']:
+                isdir = False
+            else:
+                isdir = srcsfl['sfile__filetype__is_folder']
+            fns[srcsfl['sfile__filename']] = isdir
         self.run_tasks.append((src_user, srcserver['server__fqdn'], srcpath, dst_user,
-            dstserver['server__fqdn'], dstserver['path'], dst_dss['storage_loc'], rskey,
-            {x['sfile__filename']: x['sfile__filetype__is_folder'] for x in
-                srcsfs.values('sfile__filename', 'sfile__filetype__is_folder')},
+            dstserver['server__fqdn'], dstserver['path'], dst_dss['storage_loc'], rskey, fns,
             kwargs['dstsfloc_ids']))
 
 

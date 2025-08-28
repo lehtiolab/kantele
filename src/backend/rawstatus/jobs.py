@@ -80,7 +80,7 @@ class RsyncOtherFileServershare(SingleFileJob):
 
     def process(self, **kwargs):
         srcsfl = self.getfiles_query(**kwargs).values('sfile__filename', 'path', 'servershare_id',
-                'sfile__filetype__is_folder').get()
+                'sfile__filetype__is_folder', 'sfile__mzmlfile').get()
         dstshare = rm.ServerShare.objects.values('pk', 'name').get(pk=kwargs['dstshare_id'])
 
         # Check if target sflocs already exist in a nonpurged state in wrong path?
@@ -132,9 +132,13 @@ class RsyncOtherFileServershare(SingleFileJob):
         # Now run job
         srcpath = os.path.join(srcserver['path'], srcsfl['path'])
         dstpath = dstsfl.values('path').get()['path']
+        if srcsfl['sfile__mzmlfile']:
+            isdir = False
+        else:
+            isdir = srcsfl['sfile__filetype__is_folder']
         self.run_tasks.append((src_user, srcserver['server__fqdn'], srcpath, dst_user,
             dstserver['server__fqdn'], dstserver['path'], dstpath, rskey,
-            {srcsfl['sfile__filename']: srcsfl['sfile__filetype__is_folder']},
+            {srcsfl['sfile__filename']: isdir},
             [kwargs['dstsfloc_id']]))
 
 
