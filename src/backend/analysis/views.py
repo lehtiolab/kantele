@@ -972,15 +972,13 @@ def store_analysis(request):
         if fserver and not (outshare := rm.FileserverShare.objects.filter(
                 server_id=req['analysisserver_id'], share__function=rm.ShareFunction.ANALYSISRESULTS
                 ).values('pk').first()):
-            response_errors.append('Analysis server has results share connected or known')
+            response_errors.append('Analysis server has no results share connected or known')
 
     elif req['upload_external']:
         wftype = am.UserWorkflow.WFTypeChoices.USER
     else:
         # Shouldnt happen but keeps linter happy about init variable
         wftype = False
-    sflocs = rm.StoredFileLoc.objects.filter(sfile_id__in=[int(x) for x in req['infiles'].keys()],
-            servershare__fileservershare__server_id=server_dss_args['fserver_id'])
 
     # In case of errors, do not save anything
     # No storing above this line
@@ -1032,6 +1030,12 @@ def store_analysis(request):
 
     in_components = {k: v for k, v in req['components'].items() if v}
     jobinputs = {'components': wf_components, 'singlefiles': {}, 'multifiles': {}, 'params': {}}
+    # FIXME this and dss can in theory be duplicates, if the analysis server has multiple
+    # storage mounts (not counting the ANALYSISRESULTS mount for e.g. fresh mzML)
+    sflocs = rm.StoredFileLoc.objects.filter(sfile_id__in=[int(x) for x in req['infiles'].keys()],
+            servershare__function=rm.ShareFunction.RAWDATA,
+            servershare__fileservershare__server_id=server_dss_args['fserver_id'])
+
     data_args = {'filesamples': {}, 'platenames': {}, 'filefields': defaultdict(dict),
             **server_dss_args, 'infiles': req['infiles'],
             'sfloc_ids': [x['pk'] for x in sflocs.values('pk')]}
