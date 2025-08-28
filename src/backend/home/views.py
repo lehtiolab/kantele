@@ -278,7 +278,7 @@ def populate_files(dbfns):
         elif arfs := anmodels.AnalysisResultFile.objects.filter(sfile=fn):
             arfs = arfs.values('analysis_id', 'analysis__user__username')
             it['owner'] = arfs.first()['analysis__user__username']
-            it['analyses'].extend([x.analysis_id for x in arfs.values('analysis_id')])
+            it['analyses'].extend([x['analysis_id'] for x in arfs])
         else:
             # Claimed file without datasetrawfile, analysisfile, possibly file is 
             # QC or pending for dataset
