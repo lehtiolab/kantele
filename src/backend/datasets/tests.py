@@ -1330,12 +1330,12 @@ class TestReactivateDataset(BaseTest):
         bupdss = dm.DatasetServer.objects.get(dataset=self.ds, storageshare=self.ssinbox)
         self.assertEqual(bupjob.kwargs['dss_id'], bupdss.pk)
         bupsfl = [self.f3sssinbox.pk, self.tmpsss.pk]
-        self.assertListEqual(bupjob.kwargs['sfloc_ids'], bupsfl)
+        self.assertCountEqual(bupjob.kwargs['sfloc_ids'], bupsfl)
 
         rsjob = next(jobs)
         self.assertEqual(rsjob.funcname, 'rsync_dset_files_to_servershare')
         self.assertEqual(rsjob.kwargs['dss_id'], self.dss.pk)
-        self.assertListEqual(rsjob.kwargs['sfloc_ids'], bupsfl)
+        self.assertCountEqual(rsjob.kwargs['sfloc_ids'], bupsfl)
         dstsfls = [x['pk'] for x in dsfiles.filter(servershare=self.ssnewstore).values('pk')]
         self.assertEqual(sorted(rsjob.kwargs['dstsfloc_ids']), sorted(dstsfls))
 
@@ -1343,7 +1343,7 @@ class TestReactivateDataset(BaseTest):
         self.assertEqual(rmjob.funcname, 'remove_dset_files_servershare')
         dssinbox = dm.DatasetServer.objects.get(dataset=self.ds, storageshare=self.ssinbox)
         self.assertEqual(rmjob.kwargs['dss_id'], dssinbox.pk)
-        self.assertListEqual(rmjob.kwargs['sfloc_ids'], bupsfl)
+        self.assertCountEqual(rmjob.kwargs['sfloc_ids'], bupsfl)
 
         self.ds.deleted = True
         self.ds.save()
