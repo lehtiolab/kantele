@@ -127,7 +127,7 @@ PROCNAMES = {THERMORAW: ['ThermoFisher.Foundation.AcquisitionService.exe'],
 INJ_WAITTIMES = {THERMORAW: os.environ.get('THERMO_WAIT', 15 * 60), BRUKERRAW: os.environ.get('BRUKERWAIT', 60)}
 
 # The thermo reader command
-THERMOREADER_DOCKER = os.environ.get('THERMOREAD_DOCKER', 'ghcr.io/lehtiolab/kantele-thermorawreader')
+THERMOREADER_DOCKER = os.environ.get('THERMOREAD_DOCKER', 'ghcr.io/lehtiolab/kantele_thermoreader')
 THERMO_CLASSIFY_CMD = ['wine', 'ScanHeadsman.exe', '-u', '-d', '0', '-m']
 
 PRODUCER_ADMIN_NAME = os.environ.get('PRODUCER_ADMIN_NAME', 'admin')

@@ -140,7 +140,7 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
                 'sfile__rawfile_id', 'sfile__rawfile__producer__name').get(pk=kwargs['sfloc_id'])
         fss = rm.FileserverShare.objects.values('server__name', 'server__scratchdir', 'path').get(
                 server_id=kwargs['fserver_id'], share_id=sfl['servershare_id'])
-        self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_NXF)
+        self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_QC_NXF)
 
         wf = models.UserWorkflow.objects.filter(wftype=models.UserWorkflow.WFTypeChoices.QC).last()
         nfwf = wf.nfwfversionparamsets.last()
