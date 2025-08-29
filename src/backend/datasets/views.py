@@ -1731,9 +1731,9 @@ def save_or_update_files(data, user_id):
         # First add datasetrawfile - then create job, since waiting-for-files depends on
         # datasetrawfiles at job creation time
         models.DatasetRawFile.objects.bulk_create([
-            models.DatasetRawFile(dataset_id=dset_id, rawfile_id=rfnid)
-            for rfnid in [filemodels.StoredFile.objects.filter(pk__in=added_fnids).values(
-                'rawfile_id')]])
+            models.DatasetRawFile(dataset_id=dset_id, rawfile_id=rfnid['rawfile_id'])
+            for rfnid in filemodels.StoredFile.objects.filter(pk__in=added_fnids
+                ).values('rawfile_id')])
         models.ProjectLog.objects.create(project_id=dset.runname.experiment.project_id,
                 level=models.ProjLogLevels.INFO,
                 message=f'User {user_id} added files {",".join([str(x) for x in added_fnids])} '

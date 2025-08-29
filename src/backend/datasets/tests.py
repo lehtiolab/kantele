@@ -231,13 +231,20 @@ class UpdateFilesTest(BaseIntegrationTest):
 
     def test_add_files(self):
         '''Add files, check if added, also check if the job waits for another job on the dataset'''
+        tmpraw2 = rm.RawFile.objects.create(name='raw2a', producer=self.prod,
+                source_md5='tmpraw23_fakemd5', size=10, date=timezone.now(), claimed=False,
+                usetype=rm.UploadFileType.RAWFILE)
+        tmpsf2 = rm.StoredFile.objects.create(rawfile=tmpraw2, md5=tmpraw2.source_md5,
+                filename=tmpraw2.name, checked=True, filetype=self.ft)
+        tmpsss = rm.StoredFileLoc.objects.create(sfile=tmpsf2, servershare=self.ssinbox,
+                path='', active=True, purged=False)
         self.assertTrue(self.ds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles,
             state=dm.DCStates.OK).exists())
         self.ds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles).update(state=dm.DCStates.NEW)
-        resp = self.post_json({'dataset_id': self.ds.pk, 'added_files': {self.tmpsf.pk: {'id': self.tmpsf.pk}},
+        resp = self.post_json({'dataset_id': self.ds.pk, 'added_files': {self.tmpsf.pk: {'id': self.tmpsf.pk}, tmpsf2.pk: {'id':tmpsf2.pk}},
             'removed_files': {}})
         self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.pk} '
-            f'added files {self.tmpsf.pk} to dataset {self.ds.pk}').exists())
+            f'added files {self.tmpsf.pk},{tmpsf2.pk} to dataset {self.ds.pk}').exists())
         self.assertEqual(resp.status_code, 200)
         newdsr = dm.DatasetRawFile.objects.filter(dataset=self.ds, rawfile=self.tmpraw)
         self.assertEqual(newdsr.count(), 1)
@@ -246,12 +253,11 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.assertEqual(self.tmpsss.path, '')
         self.tmpraw.refresh_from_db()
         self.assertTrue(self.tmpraw.claimed)
-        newsfl = rm.StoredFileLoc.objects.filter(sfile=self.tmpsss.sfile, servershare=self.ssnewstore,
-                path=self.dss.storage_loc, purged=False)
-        self.assertFalse(newsfl.exists())
+        newsfl = rm.StoredFileLoc.objects.filter(sfile__in=[self.tmpsf, tmpsf2],
+                servershare=self.ssnewstore, path=self.dss.storage_loc, purged=False)
+        self.assertEqual(newsfl.count(), 0)
         self.run_job()
-        self.tmpsss.refresh_from_db()
-        self.assertTrue(newsfl.exists())
+        self.assertEqual(newsfl.count(), 2)
         self.assertTrue(os.path.exists(os.path.join(self.newstorctrl.path,  self.dss.storage_loc,
             self.tmpsf.filename)))
         self.assertTrue(os.path.exists(os.path.join(self.inboxctrl.path, self.tmpsf.filename)))
