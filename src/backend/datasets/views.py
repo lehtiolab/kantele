@@ -1667,22 +1667,22 @@ def get_dynamic_emptyparams(category):
 @require_GET
 def find_files(request):
     searchterms = [x for x in request.GET['q'].split(',') if x != '']
-    query = Q(name__icontains=searchterms[0])
-    query |= Q(producer__name__icontains=searchterms[0])
+    query = Q(filename__icontains=searchterms[0])
+    query |= Q(rawfile__producer__name__icontains=searchterms[0])
     for term in searchterms[1:]:
-        subquery = Q(name__icontains=term)
-        subquery |= Q(producer__name__icontains=term)
+        subquery = Q(filename__icontains=term)
+        subquery |= Q(rawfile__producer__name__icontains=term)
         query &= subquery
-    newfiles = filemodels.RawFile.objects.filter(query).filter(claimed=False,
-            storedfile__checked=True,
-            storedfile__storedfileloc__servershare__function=filemodels.ShareFunction.INBOX)
+    newfiles = filemodels.StoredFile.objects.filter(query).filter(rawfile__claimed=False,
+            checked=True, storedfileloc__servershare__function=filemodels.ShareFunction.INBOX
+            ).values('rawfile__date', 'pk', 'filename', 'rawfile__size', 'rawfile__producer__name')
     return JsonResponse({
-        'newfn_order': [x.id for x in newfiles.order_by('-date')],
-        'newFiles': {x.id:
-                         {'id': x.id, 'name': x.name, 
-                          'size': round(x.size / (2**20), 1),
-                          'date': x.date.timestamp() * 1000,
-                          'instrument': x.producer.name, 'checked': False}
+        'newfn_order': [x['pk'] for x in newfiles.order_by('-rawfile__date')],
+        'newFiles': {x['pk']:
+                         {'id': x['pk'], 'name': x['filename'], 
+                          'size': round(x['rawfile__size'] / (2**20), 1),
+                          'date': x['rawfile__date'].timestamp() * 1000,
+                          'instrument': x['rawfile__producer__name'], 'checked': False}
                          for x in newfiles}})
 
 

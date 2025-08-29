@@ -209,11 +209,12 @@ class FindFilesTest(BaseTest):
                 filename=tmpraw2.name, checked=True, filetype=self.ft)
         tmpsss = rm.StoredFileLoc.objects.create(sfile=tmpsf, servershare=self.ssinbox,
                 path='', active=True, purged=False)
+        raw2sf = {tmpraw2.pk: tmpsf.pk, self.tmpraw.pk: self.tmpsf.pk}
         resp = self.cl.get(self.url, data={'q': [self.tmpraw.name[0], self.tmpraw.name[-1]]})
         self.assertEqual(resp.status_code, 200)
         self.assertJSONEqual(resp.content.decode('utf-8'),
-                {'newfn_order': [tmpraw2.pk, self.tmpraw.pk],
-                    'newFiles': {f'{x.pk}': {'id': x.pk, 'name': x.name, 
+                {'newfn_order': [tmpsf.pk, self.tmpsf.pk],
+                    'newFiles': {f'{raw2sf[x.pk]}': {'id': raw2sf[x.pk], 'name': x.name, 
                         'size': round(x.size / (2**20), 1),
                         'date': x.date.timestamp() * 1000,
                         'instrument': x.producer.name, 'checked': False}
