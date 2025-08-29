@@ -51,6 +51,7 @@ services:
             RABBITHOST: mq
             SERVABLE_FILE_PATH: /storage/web
             TMP_UPLOADPATH: /storage/uploads
+            QUEUE_QC_NXF: 'nextflow'
             HOST_UPLOADDIR: /storage/uploads
     
     db: 
