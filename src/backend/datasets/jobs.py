@@ -285,17 +285,21 @@ class DeleteDatasetPDCBackup(DatasetJob):
 
 
 def get_or_create_mzmlentry(sfile, pwiz, refined, servershare_id, path, mzmlfilename):
-    '''This also resets the path of the mzML file in case it's deleted'''
+    '''Called when creating mzML files, will return (sfile, sfloc) tuple. The sfl will
+    be on an analysis output servershare with an analysis runpath.
+    '''
     new_md5 = f'mzml_{sfile.rawfile.source_md5[5:]}'
     mzsf, cr = StoredFile.objects.get_or_create(mzmlfile__pwiz=pwiz, mzmlfile__refined=refined,
             rawfile_id=sfile.rawfile_id, filetype_id=sfile.filetype_id, defaults={'md5': new_md5,
                 'filename': mzmlfilename})
-    sfl, sfl_cr = StoredFileLoc.objects.get_or_create(sfile=mzsf, servershare_id=servershare_id,
+    # Update sfl path if old (inactive) exists, since new job -> new runpath
+    sfl, sfl_cr = StoredFileLoc.objects.update_or_create(sfile=mzsf, servershare_id=servershare_id,
             defaults={'path': path})
     if cr:
         MzmlFile.objects.create(sfile=mzsf, pwiz=pwiz, refined=refined)
     elif not sfl_cr and sfl.active:
-        # Old file exists or is going to be made in a job, skip it
+        # Old file exists or is going to be made in a job, skip it. This will make job error
+        # but it probably should do that, as it may occur when you delete a job
         # FIXME now we really need an on_delete/on_create thing on the job, to reset dst_sflocs
         return False, False
     elif not sfl_cr:
