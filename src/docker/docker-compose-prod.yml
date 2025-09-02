@@ -51,9 +51,9 @@ services:
             options:
                 syslog-address: "${SYSLOG_ADDRESS}"
         volumes:
-          type: bind
-          source: ./rabbitmq-timeout.conf
-          target: /etc/rabbitmq/conf.d/30-timeout.conf
+          - type: bind
+            source: ./rabbitmq-timeout.conf
+            target: /etc/rabbitmq/conf.d/30-timeout.conf
 
 
     jobrunner:
