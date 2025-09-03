@@ -6,6 +6,7 @@ import Inputfield from './Inputfield.svelte';
 import DynamicSelect from '../../datasets/src/DynamicSelect.svelte';
 import Method from './Protocols.svelte';
 import Pipeline from './Pipeline.svelte';
+import * as Plot from '@observablehq/plot';
 
 let notif = {errors: {}, messages: {}, links: {}};
 
@@ -14,11 +15,14 @@ let selectedDisabledPipeline;
 let selectedDisabledMethod = {};
 let protocols = cf_init_data.protocols;
 let pipelines = cf_init_data.pipelines;
+let perProject = cf_init_data.dash.per_proj;
 let showAddPipeField = false;
 let showAddPipeVersionField = false;
 let newPipeName = '';
 let all_enzymes = cf_init_data.enzymes;
+let tabshow = 'dashboard';
 
+let plots
 
 let flattened_protocols;
 $: {
@@ -165,6 +169,82 @@ async function deletePipeline(pvid) {
   selectedPipeline = false;
 }
 
+
+async function fetchData() {
+  return {
+    perProject: [
+    {proj: 'test1', stage: 'Opened', start: new Date('2025-07-01'), end: new Date('2025-07-10')},
+    {proj: 'test1', stage: 'Prep', start: new Date('2025-07-13'), end: new Date('2025-07-15')},
+    {proj: 'test1', stage: 'MS queue', start: new Date('2025-07-15'), end: new Date('2025-07-20')},
+
+    {proj: 'haha', stage: 'Opened', start: new Date('2025-07-02'), end: new Date('2025-07-03')},
+    {proj: 'haha', stage: 'Prep', start: new Date('2025-07-03'), end: new Date('2025-07-05')},
+    {proj: 'haha', stage: 'MS queue', start: new Date('2025-07-05'), end: new Date('2025-07-20')},
+  ]
+}
+}
+
+
+async function replot() {
+
+  let individual_proj_plot;
+
+  perProject = perProject.map(x => Object.assign(x, {start: new Date(x.start), end: new Date(x.end)}))
+//  const x  = await fetchData();
+  //perProject = x.perProject;
+  //console.log(perProject);
+
+  try {
+    individual_proj_plot = 
+      Plot.plot({
+          marginLeft: 130,
+          axis: null,
+          color: {
+                 legend: true,
+                  opacity: 0.3,
+              },
+          x: {
+                axis: "top",
+                grid: true,
+              },
+          marks: [
+                Plot.barX(perProject, {
+                        x1: "start",
+                        x2: "end",
+                        y: "dset",
+                        fill: "stage",
+                  opacity: 0.3,
+                        //sort: {y: "x1"}
+                      }),
+                Plot.text(perProject, {
+                  filter: (d) => d.first,
+                        x: "start",
+                        y: "dset",
+                        text: "proj",
+                        textAnchor: "end",
+                        dx: -3
+                      })
+              ]
+      })
+
+
+  } catch (error) {
+    console.log(error);
+    showError(`Some error occurred: ${error}`);
+  }
+
+  if (individual_proj_plot) {
+    console.log('add to plots');
+    plots?.append(individual_proj_plot);
+  }
+}
+
+async function openDash() {
+  tabshow = 'dashboard';
+  console.log('ja');
+  await replot();
+  console.log('ja');
+}
 </script>
 
 <style>
@@ -202,7 +282,19 @@ async function deletePipeline(pvid) {
 {/if}
 </div>
 
+<div class="tabs is-toggle is-centered is-small">
+	<ul>
+    <li class={tabshow === 'admin' ? 'is-active': ''}><a on:click={e => tabshow = 'admin'}>
+        <span>Admin</span>
+    </li>
+    <li class={tabshow === 'dashboard' ? 'is-active': ''}><a on:click={openDash}>
+        <span>Dashboard</span>
+    </li>
+	</ul>
+</div>
+
 <div class="content">
+  {#if tabshow === 'admin'}
   <div class="columns">
     <div class="column">
       <div class="box has-background-info-light">
@@ -283,5 +375,17 @@ async function deletePipeline(pvid) {
     </div>
 
   </div>
+  {:else if tabshow === 'dashboard'}
+
+<div class="box" bind:this={plots} id="plots">
+  <h4 class="title is-4">Projects</h4>
+</div>
+  <div class="columns">
+    <div class="column">
+    </div>
+    <div class="column">
+    </div>
+  </div>
+  {/if}
 
 </div>
