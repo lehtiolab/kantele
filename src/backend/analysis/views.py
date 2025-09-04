@@ -11,6 +11,7 @@ from django.http import (HttpResponseForbidden, HttpResponse, JsonResponse,
         HttpResponseNotFound)
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import render
 from django.db.models import Q, Count
 
@@ -1551,7 +1552,9 @@ def write_analysis_log(logline, analysis_id):
     analysis.save()
 
 
-# FIXME need auth on this view
+# Have csrf exempt as this view is called by nextflow which cannot
+# login and get a csrf cookie
+@csrf_exempt
 def nextflow_analysis_log(request):
     req = json.loads(request.body.decode('utf-8'))
     if 'runName' not in req or not req['runName']:
