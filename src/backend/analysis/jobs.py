@@ -19,11 +19,12 @@ class DownloadFastaFromRepos(BaseJob):
     that we havent downloaded  yet. If so, queue tasks'''
     refname = 'download_fasta_repos'
     task = tasks.check_ensembl_uniprot_fasta_download
-    queue = settings.QUEUE_FILE_DOWNLOAD
     
     def process(self, **kwargs):
         # get controller
-        fss = rm.FileserverShare.objects.filter(share__function=rm.ShareFunction.INBOX, server__can_rsync_remote=True).values('path', 'share_id').first()
+        fss = rm.FileserverShare.objects.filter(share__function=rm.ShareFunction.INBOX,
+                server__can_rsync_remote=True).values('path', 'share_id', 'server__name').first()
+        self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_STORAGE)
         ft = rm.StoredFileType.objects.values('pk').get(name=settings.DBFA_FT_NAME)
         self.run_tasks.append((kwargs['db'], kwargs['version'], kwargs['organism'], 
             kwargs.get('dbtype'), fss['share_id'], fss['path'], settings.LIBRARY_FILE_PATH_INBOX,
