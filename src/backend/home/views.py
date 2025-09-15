@@ -689,10 +689,31 @@ def refresh_job(request, job_id):
 
 
 @login_required
+def refresh_project(request, proj_id):
+    dbproject = dsmodels.Project.objects.filter(pk=proj_id)
+    projdict, _order = populate_proj(dbproject, request.user)
+    return JsonResponse(projdict[proj_id])
+
+
+@login_required
+def refresh_dataset(request, dset_id):
+    dbdset = dsmodels.Dataset.objects.filter(pk=dset_id)
+    dsetdict = populate_dset([dset_id], dbdset, request.user)
+    return JsonResponse(dsetdict[dset_id])
+
+
+@login_required
 def refresh_analysis(request, anid):
     ana = anmodels.Analysis.objects.filter(pk=anid)
     ana_out, _order = populate_analysis(ana, request.user)
     return JsonResponse(ana_out[anid])
+
+
+@login_required
+def refresh_file(request, fn_id):
+    dbfns = filemodels.StoredFile.objects.filter(pk=fn_id)
+    fns_out = populate_files(dbfns)
+    return JsonResponse(fns_out['items'][fn_id])
 
 
 @login_required
@@ -761,6 +782,8 @@ def get_file_info(request, file_id):
         elif hasattr(sfile.rawfile.producer, 'msinstrument') and not is_mzml:
             mzmls = sfile.rawfile.storedfile_set.filter(mzmlfile__isnull=False)
             anjobs = filemodels.FileJob.objects.filter(rawfile__storedfile__in=mzmls, job__nextflowsearch__isnull=False)
+        else:
+            anjobs = []
         info['analyses'].extend([x.job.nextflowsearch.analysis_id for x in anjobs])
     if hasattr(sfile, 'analysisresultfile') and hasattr(sfile.analysisresultfile.analysis, 'nextflowsearch'):
         info['analyses'].append(sfile.analysisresultfile.analysis.nextflowsearch.id)

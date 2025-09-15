@@ -759,7 +759,7 @@ def populate_proj(dbprojs, user, showjobs=True, include_db_entry=False):
             'details': False,
             'selected': False,
             'lastactive': datetime.strftime(proj.greatdate, '%Y-%m-%d %H:%M') if proj.greatdate else '-',
-            'actions': ['new dataset'],
+            'actions': ['new dataset', 'close'],
         }
     return projs, order
 

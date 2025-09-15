@@ -6,11 +6,12 @@ import Table from './Table.svelte'
 import Tabs from './Tabs.svelte'
 import Details from './FileDetails.svelte'
 import { flashtime } from '../../util.js'
+import { treatItems } from './util.js'
 
+let files;
 let selectedFiles = []
 let notif = {errors: {}, messages: {}};
 let detailsVisible = false;
-let treatItems;
 
 const tablefields = [
   {id: 'jobstate', name: '__hourglass-half', type: 'state', multi: true, links: 'job_ids', linkroute: '#/jobs'},
@@ -44,16 +45,46 @@ async function getFileDetails(fnId) {
     `;
 }
 
-
-function reactivateFiles() {
-  const callback = (file) => {file.deleted = false; }
-  treatItems('files/undelete/', 'file','reactivating', callback, selectedFiles);
+function updateNotif() {
+  // This does not work if we import it from e.g. util.js, svelte wont update the components
+  // showing the notifications
+  Object.entries(notif.errors)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg));
+  Object.entries(notif.messages)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg));
+  notif = notif;
 }
 
 
-function archiveFiles() {
-  const callback = (file) => {file.deleted = true; }
-  treatItems('files/archive/', 'file','archiving', callback, selectedFiles);
+async function refreshFile(fnid) {
+  const resp = await getJSON(`/refresh/file/${fnid}`);
+  if (!resp.ok) {
+    const msg = `Something went wrong trying to refresh file ${fnid}: ${resp.error}`;
+    notif.errors[msg] = 1;
+     setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg);
+   } else {
+     files[fnid] = Object.assign(files[fnid], resp);
+   }
+  files = files;
+}
+
+async function reactivateFiles() {
+  for (let fnid of selectedFiles) {
+    await treatItems('files/undelete/', 'file','reactivating', fnid, notif);
+    refreshFile(fnid);
+  }
+  updateNotif();
+}
+
+
+async function archiveFiles() {
+  for (let fnid of selectedFiles) {
+    await treatItems('files/archive/', 'file','archiving', fnid, notif);
+    refreshFile(fnid);
+  }
+  updateNotif();
 }
 
 
@@ -72,7 +103,7 @@ function purgeFiles() {
 <a class="button is-small" title="PERMANENTLY delete files from active and cold storage (admins only)" disabled>Purge files</a>
 {/if}
   
-<Table tab="Files" bind:treatItems={treatItems} bind:notif={notif} bind:selected={selectedFiles} fetchUrl="/show/files" findUrl="/find/files" getdetails={getFileDetails} fields={tablefields} inactive={['deleted']} on:detailview={showDetails} />
+<Table tab="Files" bind:items={files} bind:notif={notif} bind:selected={selectedFiles} fetchUrl="/show/files" findUrl="/find/files" getdetails={getFileDetails} fields={tablefields} inactive={['deleted']} on:detailview={showDetails} />
 
 {#if detailsVisible}
 <Details closeWindow={() => {detailsVisible = false}} fnIds={detailsVisible} />

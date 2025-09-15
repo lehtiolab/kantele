@@ -6,10 +6,10 @@ import Table from './Table.svelte'
 import Tabs from './Tabs.svelte'
 import Details from './AnalysisDetails.svelte'
 import { flashtime } from '../../util.js'
+import { treatItems } from './util.js'
 
 let selectedAnalyses = [];
 let notif = {errors: {}, messages: {}}
-let treatItems;
 let detailsVisible = false;
 let analyses;
 
@@ -34,25 +34,37 @@ function editViewAnalysis(anid) {
 } 
 
 
-function stopJob(anid) {
-  const callback = (analysis) => {refreshAnalysis(analysis.id)};
-  treatItems('/analysis/stop/', 'job for analysis', 'stopping', callback, [anid]);
+function updateNotif() {
+  // This does not work if we import it from e.g. util.js, svelte wont update the components
+  // showing the notifications
+  Object.entries(notif.errors)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg));
+  Object.entries(notif.messages)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg));
+  notif = notif;
 }
 
-function startJob(anid) {
-  const callback = (analysis) => {refreshAnalysis(analysis.id)};
-  treatItems('/analysis/start/', 'job for analysis', 'starting', callback, [anid]);
+async function stopJob(anid) {
+  await treatItems('/analysis/stop/', 'job for analysis', 'stopping', anid, notif);
+  refreshAnalysis(anid);
+  updateNotif();
 }
 
-function doAction(action, anid) {
-  const actionmap = {
-    edit: editViewAnalysis,
-    view: editViewAnalysis,
-    'stop job': stopJob,
-    'run job': startJob,
-  }
-  actionmap[action](anid);
+async function startJob(anid) {
+  await treatItems('/analysis/start/', 'job for analysis', 'starting', anid, notif);
+  refreshAnalysis(anid);
+  updateNotif();
 }
+
+const actionmap = {
+  edit: editViewAnalysis,
+  view: editViewAnalysis,
+  'stop job': stopJob,
+  'run job': startJob,
+}
+
 
 async function refreshAnalysis(nfsid) {
   const resp = await getJSON(`/refresh/analysis/${nfsid}`);
@@ -86,20 +98,29 @@ async function getAnalysisDetails(anaId) {
   `;
 }
 
-function deleteAnalyses() {
-  const callback = (analysis) => {analysis.deleted = true};
-  treatItems('/analysis/delete/', 'analysis', 'deleting', callback, selectedAnalyses);
+async function deleteAnalyses() {
+  for (let anid of selectedAnalyses) {
+    await treatItems('/analysis/delete/', 'analysis', 'deleting', anid, notif);
+    refreshAnalysis(anid);
+  }
+  updateNotif()
 }
 
-function unDeleteAnalyses() {
-  const callback = (analysis) => {analysis.deleted = false};
-  treatItems('/analysis/undelete/', 'analysis', 'undeleting', callback, selectedAnalyses);
+async function unDeleteAnalyses() {
+  for (let anid of selectedAnalyses) {
+    await treatItems('/analysis/undelete/', 'analysis', 'undeleting', anid, notif);
+    refreshAnalysis(anid);
+  }
+  updateNotif()
 }
 
 
-function purgeAnalyses() {
-  const callback = (analysis) => {analysis.deleted = true};
-  treatItems('/analysis/purge/', 'analysis', 'purging', callback, selectedAnalyses);
+async function purgeAnalyses() {
+  for (let anid of selectedAnalyses) {
+    await treatItems('/analysis/purge/', 'analysis', 'purging', anid, notif);
+    refreshAnalysis(anid);
+  }
+  updateNotif()
 }
 </script>
 
@@ -116,7 +137,19 @@ function purgeAnalyses() {
 <a class="button is-small" disabled>Purge analyses</a>
 {/if}
 
-<Table tab="Analyses" bind:items={analyses} bind:treatItems={treatItems} bind:notif={notif} bind:selected={selectedAnalyses} fetchUrl="/show/analyses" findUrl="/find/analyses" on:detailview={showDetails} getdetails={getAnalysisDetails} fixedbuttons={fixedbuttons} fields={tablefields} inactive={['deleted', 'purged']} on:rowAction={e => doAction(e.detail.action, e.detail.id)} />
+<Table tab="Analyses"
+ bind:items={analyses}
+ bind:notif={notif}
+ bind:selected={selectedAnalyses}
+ fetchUrl="/show/analyses"
+ findUrl="/find/analyses"
+ on:detailview={showDetails}
+ getdetails={getAnalysisDetails}
+ fixedbuttons={fixedbuttons}
+ fields={tablefields}
+ inactive={['deleted', 'purged']}
+ on:rowAction={e => actionmap[e.detail.action](e.detail.id)}
+ />
  
 {#if detailsVisible}
 <Details closeWindow={() => {detailsVisible = false}} anaIds={detailsVisible} />

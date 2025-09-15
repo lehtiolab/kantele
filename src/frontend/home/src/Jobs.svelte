@@ -5,10 +5,10 @@ import { getJSON } from '../../datasets/src/funcJSON.js'
 import { flashtime } from '../../util.js'
 import Table from './Table.svelte'
 import Tabs from './Tabs.svelte'
+import { treatItems } from './util.js'
 
 let selectedjobs = [];
 let notif = {errors: {}, messages: {}};
-let treatItems;
 let jobs;
 
 const tablefields = [
@@ -27,35 +27,36 @@ const fixedbuttons = [
 ]
 
 
-function retryJob(jobid) {
-  const callback = (job) => {refreshJob(job.id)};
-  treatItems('/jobs/retry/', 'job', 'retrying', callback, [jobid]);
+async function retryJob(jobid) {
+  await treatItems('/jobs/retry/', 'job', 'retrying', jobid, notif);
+  refreshJob(jobid);
+  updateNotif();
 }
 
-function pauseJob(jobid) {
-  const callback = (job) => {refreshJob(job.id)};
-  treatItems('/jobs/pause/', 'job', 'pausing', callback, [jobid]);
+async function pauseJob(jobid) {
+  await treatItems('/jobs/pause/', 'job', 'pausing', jobid, notif);
+  refreshJob(jobid);
+  updateNotif();
 }
 
-function resumeJob(jobid) {
-  const callback = (job) => {refreshJob(job.id)};
-  treatItems('/jobs/resume/', 'job', 'resuming', callback, [jobid]);
+async function resumeJob(jobid) {
+  await treatItems('/jobs/resume/', 'job', 'resuming', jobid, notif);
+  refreshJob(jobid);
+  updateNotif();
 }
 
-function deleteJob(jobid) {
-  const callback = (job) => {refreshJob(job.id)};
-  treatItems('/jobs/delete/', 'job', 'deleting', callback, [jobid]);
+async function deleteJob(jobid) {
+  await treatItems('/jobs/delete/', 'job', 'deleting', jobid, notif);
+  refreshJob(jobid);
+  updateNotif();
 }
 
-function jobAction(action, jobid) {
-  const actionmap = {
-    retry: retryJob,
-    'force retry': retryJob,
-    pause: pauseJob,
-    resume: resumeJob,
-    delete: deleteJob,
-  }
-  actionmap[action](jobid);
+const actionmap = {
+  retry: retryJob,
+  'force retry': retryJob,
+  pause: pauseJob,
+  resume: resumeJob,
+  delete: deleteJob,
 }
 
 async function refreshJob(jobid) {
@@ -67,7 +68,21 @@ async function refreshJob(jobid) {
    } else {
      jobs[jobid] = Object.assign(jobs[jobid], resp);
    }
+  jobs = jobs;
 }
+
+function updateNotif() {
+  // This does not work if we import it from e.g. util.js, svelte wont update the components
+  // showing the notifications
+  Object.entries(notif.errors)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg));
+  Object.entries(notif.messages)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg));
+  notif = notif;
+}
+
 
 async function getJobDetails(jobId) {
        const resp = await getJSON(`/show/job/${jobId}`);
@@ -86,4 +101,15 @@ async function getJobDetails(jobId) {
 
 <Tabs tabshow="Jobs" notif={notif} />
 
-<Table tab="Jobs" bind:items={jobs} bind:treatItems={treatItems} bind:notif={notif} bind:selected={selectedjobs} fetchUrl="/show/jobs" findUrl="find/jobs" getdetails={getJobDetails} fixedbuttons={fixedbuttons} fields={tablefields} inactive={['canceled']} on:rowAction={e => jobAction(e.detail.action, e.detail.id)} />
+<Table tab="Jobs"
+  bind:items={jobs}
+  bind:notif={notif}
+  bind:selected={selectedjobs}
+  fetchUrl="/show/jobs"
+  findUrl="find/jobs"
+  getdetails={getJobDetails}
+  fixedbuttons={fixedbuttons}
+  fields={tablefields}
+  inactive={['canceled']}
+  on:rowAction={e => actionmap[e.detail.action](e.detail.id)}
+  />

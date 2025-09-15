@@ -18,27 +18,6 @@ export let findUrl;
 export let notif;
 export let tab;
 
-export let treatItems = async function(url, thing, operationmsg, callback, itemids) {
-  if (!itemids) {
-    const itemids = selected;
-  }
-  for (let itemid of itemids) {
-	  const resp = await postJSON(url, {item_id: itemid});
-    if (!resp.ok) {
-      const msg = `Something went wrong ${operationmsg} ${thing} with id ${itemid}: ${resp.error}`;
-      notif.errors[msg] = 1;
-      setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg);
-    } else {
-      const msg = `${thing} with id ${itemid} queued for ${operationmsg}`;
-      notif.messages[msg] = 1;
-      setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg);
-      if (callback) {
-        callback(items[itemid]);
-      }
-      items = items; //update items, callback doesnt actually do that since it assigns to variable
-    }
-  }
-}
 
 export let addItem = function(item) {
   items[item.id] = item;
