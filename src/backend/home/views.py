@@ -127,8 +127,10 @@ def dataset_query_creator(searchterms):
 def find_datasets(request):
     """Loop through comma-separated q-param in GET, do a lot of OR queries on
     datasets to find matches. String GET-derived q-params by AND."""
-    searchterms = [x for x in request.GET['q'].split(',') if x != '']
-    dbdsets = dataset_query_creator(searchterms)
+    if searchterms := [x for x in request.GET['q'].split(',') if x != '']:
+        dbdsets = dataset_query_creator(searchterms)
+    else:
+        dbdsets = dsmodels.Dataset.objects.none()
     if request.GET.get('deleted', 'false') == 'false':
         dbdsets = dbdsets.filter(deleted=False)
     dsids = [x['pk'] for x in dbdsets.values('pk')]
@@ -182,13 +184,11 @@ def show_projects(request):
     if 'ids' in request.GET:
         pids = request.GET['ids'].split(',')
         dbprojects = dsmodels.Project.objects.filter(pk__in=pids)
-    elif request.GET.get('userproj') in ['true', 'True', True]:
-        # all active projects
-        dsos = dsmodels.DatasetOwner.objects.filter(user=request.user).select_related('dataset__runname__experiment')
-        dbprojects = dsmodels.Project.objects.filter(pk__in={x.dataset.runname.experiment.project_id for x in dsos})
+    elif userq := request.GET.get('q'):
+        dbprojects = find_projects(userq)
     else:
         # all active projects
-        dbprojects = dsmodels.Project.objects.all()
+        dbprojects = dsmodels.Project.objects.filter(active=True)
     items, order = populate_proj(dbprojects, request.user)
     return JsonResponse({'items': items, 'order': order})
 
@@ -213,21 +213,23 @@ def show_datasets(request):
 def find_files(request):
     """Loop through comma-separated q-param in GET, do a lot of OR queries on
     datasets to find matches. String GET-derived q-params by AND."""
-    searchterms = [x for x in request.GET['q'].split(',') if x != '']
-    query = Q(filename__icontains=searchterms[0])
-    query |= Q(rawfile__name__icontains=searchterms[0])
-    query |= Q(rawfile__producer__name__icontains=searchterms[0])
-    query |= Q(storedfileloc__path__icontains=searchterms[0])
-    for term in searchterms[1:]:
-        subquery = Q(filename__icontains=term)
-        subquery |= Q(rawfile__name__icontains=term)
-        subquery |= Q(rawfile__producer__name__icontains=term)
-        subquery |= Q(storedfileloc__path__icontains=term)
-        query &= subquery
-    dbfns = filemodels.StoredFile.objects.filter(query)
+    if searchterms := [x for x in request.GET['q'].split(',') if x != '']:
+        query = Q(filename__icontains=searchterms[0])
+        query |= Q(rawfile__name__icontains=searchterms[0])
+        query |= Q(rawfile__producer__name__icontains=searchterms[0])
+        query |= Q(storedfileloc__path__icontains=searchterms[0])
+        for term in searchterms[1:]:
+            subquery = Q(filename__icontains=term)
+            subquery |= Q(rawfile__name__icontains=term)
+            subquery |= Q(rawfile__producer__name__icontains=term)
+            subquery |= Q(storedfileloc__path__icontains=term)
+            query &= subquery
+        dbfns = filemodels.StoredFile.objects.filter(query)
+    else:
+        dbfns = filemodels.StoredFile.objects.none()
     if request.GET['deleted'] == 'false':
         dbfns = dbfns.filter(deleted=False)
-    return populate_files(dbfns)
+    return JsonResponse(populate_files(dbfns))
 
 
 @login_required
@@ -240,7 +242,7 @@ def show_files(request):
         # last week files 
         # FIXME this is a very slow query
         dbfns = filemodels.StoredFile.objects.filter(regdate__gt=datetime.today() - timedelta(7), deleted=False)
-    return populate_files(dbfns)
+    return JsonResponse(populate_files(dbfns))
 
 
 def getxbytes(bytes, op=50):
@@ -315,7 +317,7 @@ def populate_files(dbfns):
                 it['smallstatus'].append({'text': 'dataset pending', 'state': 'active'})
         popfiles[fn.id] = it
     order = [x['id'] for x in sorted(popfiles.values(), key=lambda x: x['date'], reverse=True)]
-    return JsonResponse({'items': popfiles, 'order': order})
+    return {'items': popfiles, 'order': order}
 
 
 
