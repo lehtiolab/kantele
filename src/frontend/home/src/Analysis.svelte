@@ -148,6 +148,7 @@ async function purgeAnalyses() {
  fixedbuttons={fixedbuttons}
  fields={tablefields}
  inactive={['deleted', 'purged']}
+ allowedActions={Object.keys(actionmap)}
  on:rowAction={e => actionmap[e.detail.action](e.detail.id)}
  />
  

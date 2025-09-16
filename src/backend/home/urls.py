@@ -10,7 +10,6 @@ urlpatterns = [
     path('show/jobs/', views.show_jobs, name="showjobs"),
     path('show/files/', views.show_files, name="showfiles"),
     path('find/datasets/', views.find_datasets, name="finddatasets"),
-    path('find/projects/', views.find_projects, name="findprojects"),
     path('find/analyses/', views.find_analysis, name="findanalyses"),
     path('find/files/', views.find_files, name="findfiles"),
     path('show/dataset/<int:dataset_id>', views.get_dset_info, name="dsinfo"),

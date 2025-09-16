@@ -111,5 +111,6 @@ async function getJobDetails(jobId) {
   fixedbuttons={fixedbuttons}
   fields={tablefields}
   inactive={['canceled']}
+  allowedActions={Object.keys(actionmap)}
   on:rowAction={e => actionmap[e.detail.action](e.detail.id)}
   />

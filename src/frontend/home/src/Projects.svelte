@@ -1,6 +1,5 @@
 <script>
 
-import {querystring, push} from 'svelte-spa-router';
 import { getJSON, postJSON } from '../../datasets/src/funcJSON.js'
 import Table from './Table.svelte'
 import Tabs from './Tabs.svelte'
@@ -231,12 +230,15 @@ async function mergeProjects() {
   bind:notif={notif}
   bind:selected={selectedProjs}
   fetchUrl="/show/projects"
-  findUrl="/find/projects"
+  findUrl="/show/projects"
+  defaultQ="active:true"
+  show_deleted_or_q="type:cf, type:local, from:2025, to:20250701, active:true, active:false"
   getdetails={getProjDetails}
   fixedbuttons={fixedbuttons}
   fields={tablefields}
   inactive={inactive}
   on:detailview={showDetails}
+  allowedActions={Object.keys(actionmap)}
   on:rowAction={e => doAction(e.detail.action, e.detail.id)}
   />
 

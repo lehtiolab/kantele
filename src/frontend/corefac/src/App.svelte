@@ -1,11 +1,17 @@
 <script>
 
+import { querystring, push } from 'svelte-spa-router';
+import { onMount } from 'svelte';
 import { flashtime, statecolors, helptexts } from '../../util.js'
-import { postJSON } from '../../datasets/src/funcJSON.js'
+import { postJSON, getJSON, parseResponse } from '../../datasets/src/funcJSON.js'
+import { closeProject } from '../../home/src/util.js'
 import Inputfield from './Inputfield.svelte';
 import DynamicSelect from '../../datasets/src/DynamicSelect.svelte';
 import Method from './Protocols.svelte';
 import Pipeline from './Pipeline.svelte';
+import Table from '../../home/src/Table.svelte';
+
+
 import * as Plot from '@observablehq/plot';
 
 let notif = {errors: {}, messages: {}, links: {}};
@@ -15,14 +21,67 @@ let selectedDisabledPipeline;
 let selectedDisabledMethod = {};
 let protocols = cf_init_data.protocols;
 let pipelines = cf_init_data.pipelines;
-let perProject = cf_init_data.dash.per_proj;
 let showAddPipeField = false;
 let showAddPipeVersionField = false;
 let newPipeName = '';
 let all_enzymes = cf_init_data.enzymes;
-let tabshow = 'dashboard';
+let tabshow;
 
-let plots
+// Proj table
+// let
+let loadedProjects = {};
+$: { Object.keys(loadedProjects).length ? replot() : false ;
+}
+let selectedProjs = false;
+//let notif = {errors: {}, messages: {}};
+let addItem;
+const inactive = ['inactive'];
+const fixedbuttons = [
+]
+function showDetails(event) {
+  detailsVisible = event.detail.ids;
+}
+
+const actionmap = {
+  close: closeProject,
+}
+async function doAction(action, projid) {
+  await actionmap[action](projid, loadedProjects, notif);
+  loadedProjects = loadedProjects;
+  updateNotif();
+}
+
+function updateNotif() {
+  Object.entries(notif.errors)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg));
+  Object.entries(notif.messages)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg));
+  notif = notif;
+}
+
+async function getProjDetails(projid) {
+	const resp = await getJSON(`/show/project/${projid}`);
+  return `
+    <p><span class="has-text-weight-bold">Storage amount:</span> ${resp.stored_total_xbytes}</p>
+    <p><span class="has-text-weight-bold">Owners:</span> ${resp.owners.join(', ')}</p>
+    <hr>
+    ${Object.entries(resp.nrstoredfiles).map(x => {return `<div>${x[1]} stored files of type ${x[0]}</div>`;}).join('')}
+    <div>Instrument(s) used: <b>${resp.instruments.join(', ')}</b></div>
+    `;
+}
+const tablefields = [
+  {id: 'name', name: 'Name', type: 'str', multi: false},
+  {id: 'ptype', name: 'Type', type: 'str', multi: false},
+  {id: 'start', name: 'Registered', type: 'str', multi: false},
+  {id: 'lastactive', name: 'Last active', type: 'str', multi: false},
+  {id: 'actions', name: '', type: 'button', multi: true, confirm: ['close']},
+];
+
+
+
+let plots;
 
 let flattened_protocols;
 $: {
@@ -170,29 +229,19 @@ async function deletePipeline(pvid) {
 }
 
 
-async function fetchData() {
-  return {
-    perProject: [
-    {proj: 'test1', stage: 'Opened', start: new Date('2025-07-01'), end: new Date('2025-07-10')},
-    {proj: 'test1', stage: 'Prep', start: new Date('2025-07-13'), end: new Date('2025-07-15')},
-    {proj: 'test1', stage: 'MS queue', start: new Date('2025-07-15'), end: new Date('2025-07-20')},
-
-    {proj: 'haha', stage: 'Opened', start: new Date('2025-07-02'), end: new Date('2025-07-03')},
-    {proj: 'haha', stage: 'Prep', start: new Date('2025-07-03'), end: new Date('2025-07-05')},
-    {proj: 'haha', stage: 'MS queue', start: new Date('2025-07-05'), end: new Date('2025-07-20')},
-  ]
-}
-}
-
-
 async function replot() {
-
   let individual_proj_plot;
+  const url = 'dashboard/projects/'
+  const active_projid = Object.entries(loadedProjects)
+    .filter(kv => !kv[1].inactive)
+    .map(kv => kv[0]);
+  const resp  = await postJSON(url, {proj_ids: active_projid});
+  if (!resp.ok) {
+    showError(resp.error);
+    return;
+  }
 
-  perProject = perProject.map(x => Object.assign(x, {start: new Date(x.start), end: new Date(x.end)}))
-//  const x  = await fetchData();
-  //perProject = x.perProject;
-  //console.log(perProject);
+  let perProject = resp.per_proj.map(x => Object.assign(x, {start: new Date(x.start), end: new Date(x.end)}))
 
   try {
     individual_proj_plot = 
@@ -234,16 +283,18 @@ async function replot() {
   }
 
   if (individual_proj_plot) {
-    console.log('add to plots');
+    plots?.firstChild?.remove();
     plots?.append(individual_proj_plot);
   }
 }
 
+onMount(async() => {
+  push(`#/?tab=dash&q=type:cf,active:yes`);
+  tabshow = 'dashboard';
+})
+
 async function openDash() {
   tabshow = 'dashboard';
-  console.log('ja');
-  await replot();
-  console.log('ja');
 }
 </script>
 
@@ -380,6 +431,24 @@ async function openDash() {
 <div class="box" bind:this={plots} id="plots">
   <h4 class="title is-4">Projects</h4>
 </div>
+
+<Table tab="Projects" bind:addItem={addItem}
+  bind:notif={notif}
+  bind:selected={selectedProjs}
+  bind:items={loadedProjects}
+  fetchUrl="/show/projects"
+  findUrl="/show/projects"
+  show_deleted_or_q="cf:true/false, from:yyyymmdd, to:, active:true/false"
+  defaultQ="type:cf active:true"
+  getdetails={getProjDetails}
+  fixedbuttons={fixedbuttons}
+  fields={tablefields}
+  inactive={inactive}
+  on:detailview={showDetails}
+  allowedActions={Object.keys(actionmap)}
+  on:rowAction={e => doAction(e.detail.action, e.detail.id)}
+  />
+
   <div class="columns">
     <div class="column">
     </div>

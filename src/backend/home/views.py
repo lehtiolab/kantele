@@ -44,28 +44,52 @@ def home(request):
     return render(request, 'home/home.html', context)
 
 
-@login_required
-@require_GET
-def find_projects(request):
-    searchterms = [x for x in request.GET['q'].split(',') if x != '']
-    dsquery = Q(runname__name__icontains=searchterms[0])
-    dsquery |= Q(runname__experiment__name__icontains=searchterms[0])
-    dsquery |= Q(runname__experiment__project__name__icontains=searchterms[0])
-    query = Q(name__icontains=searchterms[0])
-    for term in searchterms[1:]:
-        dssubquery = Q(runname__name__icontains=term)
-        dssubquery |= Q(runname__experiment__name__icontains=term)
-        dssubquery |= Q(runname__experiment__project__name__icontains=term)
-        subquery = Q(name__icontains=term)
-        query &= subquery
-        dsquery &= dssubquery
-    dbdsets = dsmodels.Dataset.objects.filter(dsquery).select_related('runname__experiment__project').values('runname__experiment__project').distinct()
-    query |= Q(pk__in=dbdsets)
-    dbprojects = dsmodels.Project.objects.filter(query)
-    if request.GET.get('deleted') in ['false', 'False', False]:
-        dbprojects = dbprojects.filter(active=True)
-    items, order = populate_proj(dbprojects, request.user)
-    return JsonResponse({'items': items, 'order': order})
+def find_projects(userquery):
+    searchterms = []
+    query = Q()
+    for q in [x for x in userquery.split(',') if x != '']:
+        match q.split(':'):
+            case ['from', date] | ['to', date]:
+                match len(date):
+                    case 4:
+                        dt = datetime.strptime(date, '%Y')
+                    case 6:
+                        dt = datetime.strptime(date, '%Y%m')
+                    case 8:
+                        dt = datetime.strptime(date, '%Y%m%d')
+                    case _:
+                        dt = False
+                if dt:
+                    match q.split(':')[0]:
+                        case 'from':
+                            query &= Q(registered__gte=dt)
+                        case 'to':
+                            query &= Q(registered__lte=dt)
+            case ['type', projtype]:
+                ptypename = {'cf': settings.CF_PTYPE_NAME}.get(projtype) or projtype
+                query &= Q(ptype__name__iexact=ptypename)
+            case ['name', name]:
+                query &= Q(name=name)
+            case ['active', yesno]:
+                query &= Q(active={'yes': True, 'true': True, 'no': False, 'false': False}[yesno])
+            case _:
+                searchterms.append(q)
+
+    if searchterms:
+        dsquery = Q(runname__name__icontains=searchterms[0])
+        dsquery |= Q(runname__experiment__name__icontains=searchterms[0])
+        dsquery |= Q(runname__experiment__project__name__icontains=searchterms[0])
+        query = Q(name__icontains=searchterms[0])
+        for term in searchterms[1:]:
+            dssubquery = Q(runname__name__icontains=term)
+            dssubquery |= Q(runname__experiment__name__icontains=term)
+            dssubquery |= Q(runname__experiment__project__name__icontains=term)
+            subquery = Q(name__icontains=term)
+            query &= subquery
+            dsquery &= dssubquery
+        dbdsets = dsmodels.Dataset.objects.filter(dsquery).select_related('runname__experiment__project').values('runname__experiment__project').distinct()
+        query |= Q(pk__in=dbdsets)
+    return dsmodels.Project.objects.filter(query)
 
 
 def dataset_query_creator(searchterms):

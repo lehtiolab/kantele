@@ -55,6 +55,17 @@ def corefac_home(request):
         if pv['locked']:
             pipelines[pv['pk']]['timestamp'] = datetime.strftime(pv['timestamp'], '%Y-%m-%d %H:%M')
 
+        context = {'ctx': {'protocols': protos, 'pipelines': pipelines,
+            'enzymes': [x for x in enzymes.values()],
+            }}
+    return render(request, 'corefac/corefac.html', context)
+
+
+def get_pipeline_step_name(stepvals):
+    return f'{stepvals["step__paramopt__param__title"]} - {stepvals["step__paramopt__value"]} - {stepvals["step__doi"]} - {stepvals["step__version"]}'
+
+
+def get_project_plotdata(request):
     class Stages(StrEnum):
         OPENED = 'Opened'
         SAMPLES = 'Samples arrived'
@@ -63,32 +74,29 @@ def corefac_home(request):
         MS = 'Acquisition'
         SEARCH = 'Search'
 
+    data = json.loads(request.body.decode('utf-8'))
 
     perprojects = []
     datefmt = '%Y-%m-%dT%H:%M:%S'
     today = datetime.strftime(datetime.now(), datefmt)
-    for dp in dm.Dataset.objects.filter(runname__experiment__project__ptype__name='Core facility',
-            runname__experiment__project__registered__gt=datetime(2024,1,1)).exclude(runname__experiment__project__active=False).values('pk', 'locked',
-                    'runname__experiment__project__registered', 'runname__experiment__project__name',
-                    'runname__experiment__project_id'):
-
-
+    for dp in dm.Dataset.objects.filter(runname__experiment__project_id__in=data['proj_ids']
+            ).values('pk', 'locked', 'runname__experiment__project__registered',
+                    'runname__experiment__project__name', 'runname__experiment__project_id'):
         if anas := am.Analysis.objects.filter(datasetanalysis__dataset_id=dp['pk']).values('date',
                 'pk').order_by('date'):
             start = datetime.strftime(anas.first()['date'], datefmt)
-            jobs = jm.Job.objects.filter(nextflowsearch__analysis_id__in=[x['pk'] for x in anas]
-                    ).values('state', 'pk', 'timestamp').order_by('timestamp')
-            lastjob = jobs.last()
-            arfs = am.AnalysisResultFile.objects.filter(analysis__nextflowsearch__job_id=lastjob['pk'])
-            if lastjob['state'] == jj.Jobstates.DONE and arfs:
-                end = datetime.strftime(arfs.values('sfile__regdate').first()['sfile__regdate'], datefmt)
-            elif lastjob['state'] in jj.JOBSTATES_DONE:
-                # Canceled or done but no files (can be a refine job also)
-                end = datetime.strftime(lastjob['timestamp'], datefmt)
-            else:
-                end = today
-            perprojects.append({'proj': dp['runname__experiment__project__name'], 'dset': dp['pk'],
-                'stage': Stages.SEARCH, 'start': start, 'end': end})
+            if jobs := jm.Job.objects.filter(nextflowsearch__analysis_id__in=[x['pk'] for x in anas]):
+                lastjob = jobs.values('state', 'pk', 'timestamp').order_by('timestamp').last()
+                arfs = am.AnalysisResultFile.objects.filter(analysis__nextflowsearch__job_id=lastjob['pk'])
+                if lastjob['state'] == jj.Jobstates.DONE and arfs:
+                    end = datetime.strftime(arfs.values('sfile__regdate').first()['sfile__regdate'], datefmt)
+                elif lastjob['state'] in jj.JOBSTATES_DONE:
+                    # Canceled or done but no files (can be a refine job also)
+                    end = datetime.strftime(lastjob['timestamp'], datefmt)
+                else:
+                    end = today
+                perprojects.append({'proj': dp['runname__experiment__project__name'], 'dset': dp['pk'],
+                    'stage': Stages.SEARCH, 'start': start, 'end': end})
 
         # Raws can come way before project opening, so lets start with them
         firstfile_date = False
@@ -162,16 +170,8 @@ def corefac_home(request):
             perprojects.append(openpp)
 
         [x.update({'stage': str(x['stage'])}) for x in perprojects]
-        context = {'ctx': {'protocols': protos, 'pipelines': pipelines,
-            'enzymes': [x for x in enzymes.values()],
-            'dash': {'per_proj': perprojects},
-            }}
-    return render(request, 'corefac/corefac.html', context)
 
-
-def get_pipeline_step_name(stepvals):
-    return f'{stepvals["step__paramopt__param__title"]} - {stepvals["step__paramopt__value"]} - {stepvals["step__doi"]} - {stepvals["step__version"]}'
-
+    return JsonResponse({'per_proj': perprojects})
 
 @staff_member_required
 @login_required
@@ -462,4 +462,3 @@ def delete_sampleprep_pipeline(request):
     else:
         pipeline.delete()
     return JsonResponse({})
-
