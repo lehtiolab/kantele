@@ -1,12 +1,12 @@
 <script>
 
-import {querystring, push} from 'svelte-spa-router';
 import { getJSON, postJSON } from '../../datasets/src/funcJSON.js'
 import Table from './Table.svelte'
 import Tabs from './Tabs.svelte'
 import Details from './ProjectDetails.svelte'
 import DynamicSelect from '../../datasets/src/DynamicSelect.svelte'
 import { flashtime } from '../../util.js'
+import { closeProject, treatItems } from './util.js'
 
 const inactive = ['inactive'];
 let table;
@@ -14,7 +14,6 @@ let table;
 let selectedProjs = []
 let notif = {errors: {}, messages: {}};
 let detailsVisible = false;
-let treatItems;
 let addItem;
 let purgeConfirm;
 let creatingNewProject = false;
@@ -25,6 +24,7 @@ let newproj_piname;
 let newproj_newpiname = '';
 let newproj_pi_id;
 let newproj_extref;
+let projects;
 $: newProjIsExternal = Boolean(newproj_ptype_id !== local_ptype_id);
 
 
@@ -36,22 +36,27 @@ const tablefields = [
   {id: 'ptype', name: 'Type', type: 'str', multi: false},
   {id: 'start', name: 'Registered', type: 'str', multi: false},
   {id: 'lastactive', name: 'Last active', type: 'str', multi: false},
-  {id: 'actions', name: '', type: 'button', multi: true},
+  {id: 'actions', name: '', type: 'button', multi: true, confirm: ['close']},
 ];
 
 const fixedbuttons = [
 ]
 
 
-function newDataset(projid) {
+export function newDataset(projid, _projs, _notif) {
   window.open(`/datasets/new/${projid}/`, '_blank');
 } 
 
-function doAction(action, projid) {
-  const actionmap = {
-    'new dataset': newDataset,
-  }
-  actionmap[action](projid);
+
+const actionmap = {
+  'new dataset': newDataset,
+  'close': closeProject,
+}
+async function doAction(action, projid) {
+  await actionmap[action](projid, projects, notif);
+  // Update notifs
+  projects = projects;
+  updateNotif();
 }
 
 function showDetails(event) {
@@ -75,19 +80,36 @@ async function getProjDetails(projid) {
     `;
 }
 
-function archiveProject() {
-  const callback = (proj) => {proj.inactive = true; }
-  treatItems('datasets/archive/project/', 'project', 'archiving', callback, selectedProjs);
+
+function updateNotif() {
+  Object.entries(notif.errors)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg));
+  Object.entries(notif.messages)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg));
+  notif = notif;
 }
 
-function reactivateProject() {
-  const callback = (proj) => {proj.inactive = false; }
-  treatItems('datasets/undelete/project/', 'project','reactivating', callback, selectedProjs);
+
+async function archiveProject() {
+  for (let projid of selectedProjs) {
+    await closeProject(projid, projects, notif);
+  }
+  updateNotif();
+  projects = projects;
 }
 
-function purgeProject() {
-  const callback = (proj) => {proj.inactive = true; }
-  treatItems('datasets/purge/project/', 'project', 'purging', callback, selectedProjs);
+//function reactivateProject() {
+//  treatItems('datasets/undelete/project/', 'project','reactivating', projid, notif);
+//}
+
+async function purgeProject() {
+  for (let projid of selectedProjs) {
+    await treatItems('datasets/purge/project/', 'project', 'purging', projid, notif);
+  }
+  updateNotif();
+  projects = projects;
 }
 
 function cancelNewProject() {
@@ -131,7 +153,7 @@ async function mergeProjects() {
     notif.errors[msg] = 1;
     setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg);
   } else {
-    items[fnid].filename = newname;
+    projects[fnid].filename = newname;
     const msg = `Queued file for renaming to ${newname}`;
     notif.messages[msg] = 1;
     setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg);
@@ -145,7 +167,6 @@ async function mergeProjects() {
 <a class="button is-small" title="New project" on:click={e => creatingNewProject = true}>New project</a>
 {#if selectedProjs.length}
 <a class="button is-small" title="Move projects to cold storage (delete)" on:click={archiveProject}>Close project(s)</a>
-<a class="button is-small" title="Move projects to active storage (undelete)" on:click={reactivateProject}>Reopen project(s)</a>
   {#if purgeConfirm}
   <a class="button is-small is-danger is-light" title="PERMANENTLY delete projects from active and cold storage" on:click={purgeProject}>Are you sure? Purge projects</a>
   {:else}
@@ -158,7 +179,6 @@ async function mergeProjects() {
   {/if}
 {:else}
 <a class="button is-small" title="Move projects to cold storage (delete)" disabled>Close project(s)</a>
-<a class="button is-small" title="Move projects to active storage (undelete)" disabled>Reopen project(s)</a>
 <a class="button is-small" title="PERMANENTLY delete projects from active and cold storage" disabled>Purge projects</a>
 <a class="button is-small" title="Merge projects to single (earliest) project" disabled>Merge projects</a>
 {/if}
@@ -204,17 +224,21 @@ async function mergeProjects() {
 </div>
 {/if}
 
-<Table tab="Projects" bind:addItem={addItem}
-  bind:treatItems={treatItems}
+<Table tab="Projects"
+  bind:items={projects}
+  bind:addItem={addItem}
   bind:notif={notif}
   bind:selected={selectedProjs}
   fetchUrl="/show/projects"
-  findUrl="/find/projects"
+  findUrl="/show/projects"
+  defaultQ="active:true"
+  show_deleted_or_q="type:cf, type:local, from:2025, to:20250701, active:true, active:false"
   getdetails={getProjDetails}
   fixedbuttons={fixedbuttons}
   fields={tablefields}
   inactive={inactive}
   on:detailview={showDetails}
+  allowedActions={Object.keys(actionmap)}
   on:rowAction={e => doAction(e.detail.action, e.detail.id)}
   />
 

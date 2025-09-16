@@ -44,28 +44,52 @@ def home(request):
     return render(request, 'home/home.html', context)
 
 
-@login_required
-@require_GET
-def find_projects(request):
-    searchterms = [x for x in request.GET['q'].split(',') if x != '']
-    dsquery = Q(runname__name__icontains=searchterms[0])
-    dsquery |= Q(runname__experiment__name__icontains=searchterms[0])
-    dsquery |= Q(runname__experiment__project__name__icontains=searchterms[0])
-    query = Q(name__icontains=searchterms[0])
-    for term in searchterms[1:]:
-        dssubquery = Q(runname__name__icontains=term)
-        dssubquery |= Q(runname__experiment__name__icontains=term)
-        dssubquery |= Q(runname__experiment__project__name__icontains=term)
-        subquery = Q(name__icontains=term)
-        query &= subquery
-        dsquery &= dssubquery
-    dbdsets = dsmodels.Dataset.objects.filter(dsquery).select_related('runname__experiment__project').values('runname__experiment__project').distinct()
-    query |= Q(pk__in=dbdsets)
-    dbprojects = dsmodels.Project.objects.filter(query)
-    if request.GET.get('deleted') in ['false', 'False', False]:
-        dbprojects = dbprojects.filter(active=True)
-    items, order = populate_proj(dbprojects, request.user)
-    return JsonResponse({'items': items, 'order': order})
+def find_projects(userquery):
+    searchterms = []
+    query = Q()
+    for q in [x for x in userquery.split(',') if x != '']:
+        match q.split(':'):
+            case ['from', date] | ['to', date]:
+                match len(date):
+                    case 4:
+                        dt = datetime.strptime(date, '%Y')
+                    case 6:
+                        dt = datetime.strptime(date, '%Y%m')
+                    case 8:
+                        dt = datetime.strptime(date, '%Y%m%d')
+                    case _:
+                        dt = False
+                if dt:
+                    match q.split(':')[0]:
+                        case 'from':
+                            query &= Q(registered__gte=dt)
+                        case 'to':
+                            query &= Q(registered__lte=dt)
+            case ['type', projtype]:
+                ptypename = {'cf': settings.CF_PTYPE_NAME}.get(projtype) or projtype
+                query &= Q(ptype__name__iexact=ptypename)
+            case ['name', name]:
+                query &= Q(name=name)
+            case ['active', yesno]:
+                query &= Q(active={'yes': True, 'true': True, 'no': False, 'false': False}[yesno])
+            case _:
+                searchterms.append(q)
+
+    if searchterms:
+        dsquery = Q(runname__name__icontains=searchterms[0])
+        dsquery |= Q(runname__experiment__name__icontains=searchterms[0])
+        dsquery |= Q(runname__experiment__project__name__icontains=searchterms[0])
+        query = Q(name__icontains=searchterms[0])
+        for term in searchterms[1:]:
+            dssubquery = Q(runname__name__icontains=term)
+            dssubquery |= Q(runname__experiment__name__icontains=term)
+            dssubquery |= Q(runname__experiment__project__name__icontains=term)
+            subquery = Q(name__icontains=term)
+            query &= subquery
+            dsquery &= dssubquery
+        dbdsets = dsmodels.Dataset.objects.filter(dsquery).select_related('runname__experiment__project').values('runname__experiment__project').distinct()
+        query |= Q(pk__in=dbdsets)
+    return dsmodels.Project.objects.filter(query)
 
 
 def dataset_query_creator(searchterms):
@@ -103,8 +127,10 @@ def dataset_query_creator(searchterms):
 def find_datasets(request):
     """Loop through comma-separated q-param in GET, do a lot of OR queries on
     datasets to find matches. String GET-derived q-params by AND."""
-    searchterms = [x for x in request.GET['q'].split(',') if x != '']
-    dbdsets = dataset_query_creator(searchterms)
+    if searchterms := [x for x in request.GET['q'].split(',') if x != '']:
+        dbdsets = dataset_query_creator(searchterms)
+    else:
+        dbdsets = dsmodels.Dataset.objects.none()
     if request.GET.get('deleted', 'false') == 'false':
         dbdsets = dbdsets.filter(deleted=False)
     dsids = [x['pk'] for x in dbdsets.values('pk')]
@@ -158,13 +184,11 @@ def show_projects(request):
     if 'ids' in request.GET:
         pids = request.GET['ids'].split(',')
         dbprojects = dsmodels.Project.objects.filter(pk__in=pids)
-    elif request.GET.get('userproj') in ['true', 'True', True]:
-        # all active projects
-        dsos = dsmodels.DatasetOwner.objects.filter(user=request.user).select_related('dataset__runname__experiment')
-        dbprojects = dsmodels.Project.objects.filter(pk__in={x.dataset.runname.experiment.project_id for x in dsos})
+    elif userq := request.GET.get('q'):
+        dbprojects = find_projects(userq)
     else:
         # all active projects
-        dbprojects = dsmodels.Project.objects.all()
+        dbprojects = dsmodels.Project.objects.filter(active=True)
     items, order = populate_proj(dbprojects, request.user)
     return JsonResponse({'items': items, 'order': order})
 
@@ -189,21 +213,23 @@ def show_datasets(request):
 def find_files(request):
     """Loop through comma-separated q-param in GET, do a lot of OR queries on
     datasets to find matches. String GET-derived q-params by AND."""
-    searchterms = [x for x in request.GET['q'].split(',') if x != '']
-    query = Q(filename__icontains=searchterms[0])
-    query |= Q(rawfile__name__icontains=searchterms[0])
-    query |= Q(rawfile__producer__name__icontains=searchterms[0])
-    query |= Q(storedfileloc__path__icontains=searchterms[0])
-    for term in searchterms[1:]:
-        subquery = Q(filename__icontains=term)
-        subquery |= Q(rawfile__name__icontains=term)
-        subquery |= Q(rawfile__producer__name__icontains=term)
-        subquery |= Q(storedfileloc__path__icontains=term)
-        query &= subquery
-    dbfns = filemodels.StoredFile.objects.filter(query)
+    if searchterms := [x for x in request.GET['q'].split(',') if x != '']:
+        query = Q(filename__icontains=searchterms[0])
+        query |= Q(rawfile__name__icontains=searchterms[0])
+        query |= Q(rawfile__producer__name__icontains=searchterms[0])
+        query |= Q(storedfileloc__path__icontains=searchterms[0])
+        for term in searchterms[1:]:
+            subquery = Q(filename__icontains=term)
+            subquery |= Q(rawfile__name__icontains=term)
+            subquery |= Q(rawfile__producer__name__icontains=term)
+            subquery |= Q(storedfileloc__path__icontains=term)
+            query &= subquery
+        dbfns = filemodels.StoredFile.objects.filter(query)
+    else:
+        dbfns = filemodels.StoredFile.objects.none()
     if request.GET['deleted'] == 'false':
         dbfns = dbfns.filter(deleted=False)
-    return populate_files(dbfns)
+    return JsonResponse(populate_files(dbfns))
 
 
 @login_required
@@ -216,7 +242,7 @@ def show_files(request):
         # last week files 
         # FIXME this is a very slow query
         dbfns = filemodels.StoredFile.objects.filter(regdate__gt=datetime.today() - timedelta(7), deleted=False)
-    return populate_files(dbfns)
+    return JsonResponse(populate_files(dbfns))
 
 
 def getxbytes(bytes, op=50):
@@ -291,7 +317,7 @@ def populate_files(dbfns):
                 it['smallstatus'].append({'text': 'dataset pending', 'state': 'active'})
         popfiles[fn.id] = it
     order = [x['id'] for x in sorted(popfiles.values(), key=lambda x: x['date'], reverse=True)]
-    return JsonResponse({'items': popfiles, 'order': order})
+    return {'items': popfiles, 'order': order}
 
 
 
@@ -689,10 +715,31 @@ def refresh_job(request, job_id):
 
 
 @login_required
+def refresh_project(request, proj_id):
+    dbproject = dsmodels.Project.objects.filter(pk=proj_id)
+    projdict, _order = populate_proj(dbproject, request.user)
+    return JsonResponse(projdict[proj_id])
+
+
+@login_required
+def refresh_dataset(request, dset_id):
+    dbdset = dsmodels.Dataset.objects.filter(pk=dset_id)
+    dsetdict = populate_dset([dset_id], dbdset, request.user)
+    return JsonResponse(dsetdict[dset_id])
+
+
+@login_required
 def refresh_analysis(request, anid):
     ana = anmodels.Analysis.objects.filter(pk=anid)
     ana_out, _order = populate_analysis(ana, request.user)
     return JsonResponse(ana_out[anid])
+
+
+@login_required
+def refresh_file(request, fn_id):
+    dbfns = filemodels.StoredFile.objects.filter(pk=fn_id)
+    fns_out = populate_files(dbfns)
+    return JsonResponse(fns_out['items'][fn_id])
 
 
 @login_required
@@ -761,6 +808,8 @@ def get_file_info(request, file_id):
         elif hasattr(sfile.rawfile.producer, 'msinstrument') and not is_mzml:
             mzmls = sfile.rawfile.storedfile_set.filter(mzmlfile__isnull=False)
             anjobs = filemodels.FileJob.objects.filter(rawfile__storedfile__in=mzmls, job__nextflowsearch__isnull=False)
+        else:
+            anjobs = []
         info['analyses'].extend([x.job.nextflowsearch.analysis_id for x in anjobs])
     if hasattr(sfile, 'analysisresultfile') and hasattr(sfile.analysisresultfile.analysis, 'nextflowsearch'):
         info['analyses'].append(sfile.analysisresultfile.analysis.nextflowsearch.id)

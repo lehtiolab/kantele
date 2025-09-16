@@ -7,13 +7,15 @@ import Table from './Table.svelte'
 import Tabs from './Tabs.svelte'
 import Details from './DatasetDetails.svelte'
 import { flashtime } from '../../util.js'
+import { treatItems } from './util.js'
+
+let dsets; // bind to fetched in table
 
 const inactive = ['deleted'];
 let importVisible = false;
 let selectedDsets = []
 let notif = {errors: {}, messages: {}};
 let detailsVisible = false;
-let treatItems;
 let purgeConfirm = false;
 
 const tablefields = [
@@ -56,23 +58,54 @@ async function getDsetDetails(dsetId) {
     `;
 }
 
-async function analyzeDatasets() {
+function analyzeDatasets() {
   window.open(`/analysis/new?dsids=${selectedDsets.join(',')}`, '_blank');
 }
 
-function archiveDataset() {
-  const callback = (dset) => {dset.deleted = true; }
-  treatItems('datasets/archive/dataset/', 'dataset', 'archiving', callback, selectedDsets);
+async function archiveDataset() {
+  for (let dsid of selectedDsets) {
+    await treatItems('datasets/archive/dataset/', 'dataset', 'archiving', dsid, notif);
+    refreshDataset(dsid);
+  }
+  dsets = dsets;
+  updateNotif();
 }
 
-function purgeDatasets() {
-  const callback = (dset) => {dset.deleted = true; }
-  treatItems('datasets/purge/dataset/', 'dataset', 'reactivating', callback, selectedDsets);
+
+async function refreshDataset(dsid) {
+  const resp = await getJSON(`/refresh/dataset/${dsid}`);
+  if (!resp.ok) {
+    const msg = `Something went wrong trying to refresh dataset ${dsid}: ${resp.error}`;
+    notif.errors[msg] = 1;
+  } else {
+    dsets[dsid] = Object.assign(dsets[dsid], resp);
+  }
+}
+
+
+async function purgeDatasets() {
+  for (let dsid of selectedDsets) {
+    await treatItems('datasets/purge/dataset/', 'dataset', 'reactivating', dsid, notif);
+    refreshDataset(dsid);
+  }
+  dsets = dsets;
+  updateNotif();
 }
 
 function setConfirm() {
   purgeConfirm = true;
   setTimeout(() => { purgeConfirm = false} , flashtime);
+}
+
+
+function updateNotif() {
+  Object.entries(notif.errors)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg));
+  Object.entries(notif.messages)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg));
+  notif = notif;
 }
 
 </script>
@@ -97,7 +130,7 @@ function setConfirm() {
 {/if}
 
 
-<Table tab="Datasets" bind:treatItems={treatItems} bind:notif={notif} bind:selected={selectedDsets} fetchUrl="/show/datasets" findUrl="/find/datasets" getdetails={getDsetDetails} fixedbuttons={fixedbuttons} fields={tablefields} inactive={inactive} on:detailview={showDetails} />
+<Table tab="Datasets" bind:items={dsets} bind:notif={notif} bind:selected={selectedDsets} fetchUrl="/show/datasets" findUrl="/find/datasets" getdetails={getDsetDetails} fixedbuttons={fixedbuttons} fields={tablefields} inactive={inactive} on:detailview={showDetails} />
 
 {#if importVisible}
 <ImportExternal toggleWindow={e => importVisible = importVisible === false} />

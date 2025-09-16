@@ -23,4 +23,6 @@ urlpatterns = [
     path('sampleprep/pipeline/disable/', views.disable_sampleprep_pipeline),
     path('sampleprep/pipeline/enable/', views.enable_sampleprep_pipeline),
     path('sampleprep/pipeline/delete/', views.delete_sampleprep_pipeline),
+
+    path('dashboard/projects/', views.get_project_plotdata),
 ]

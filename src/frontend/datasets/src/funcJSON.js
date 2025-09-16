@@ -1,4 +1,4 @@
-async function parseResponse(response) {
+export async function parseResponse(response) {
   let jsonresp;
   try {
     jsonresp = await response.json();

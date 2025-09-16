@@ -85,8 +85,9 @@ LC_DTYPE_IDS = [int(x) for x in os.environ.get('LC_DTYPE_ID', '-1').split(',')]
 # QC files storage
 QC_STORAGE_DIR = 'Instrument QC'
 
-# local datasets 
+# Project types
 LOCAL_PTYPE_ID = int(os.environ.get('LOCAL_PTYPE_ID', -1))
+CF_PTYPE_NAME = os.environ.get('CF_PTYPE_NAME', 'Core facility')
 
 # Allowed characters for runs, project, experiment names
 # formatted for use in regexp 

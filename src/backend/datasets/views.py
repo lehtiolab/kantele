@@ -759,7 +759,7 @@ def populate_proj(dbprojs, user, showjobs=True, include_db_entry=False):
             'details': False,
             'selected': False,
             'lastactive': datetime.strftime(proj.greatdate, '%Y-%m-%d %H:%M') if proj.greatdate else '-',
-            'actions': ['new dataset'],
+            'actions': ['new dataset', 'close'],
         }
     return projs, order
 
@@ -905,6 +905,7 @@ def save_new_dataset(data, project, experiment, runname, user_id):
 
 
 @login_required
+@require_POST
 def move_project_cold(request):
     '''Closes project:
         - Set to not active in DB
@@ -1229,6 +1230,8 @@ def archive_and_delete_dataset(dset):
                 create_job_without_check('remove_dset_files_servershare', **rmjobkw)
                 rmsfl.update(active=False)
                 create_job('delete_empty_directory', **rmdirkw)
+            filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=dset).update(
+                    deleted=True)
 
         dset.deleted, dset.purged = True, False
         dset.save()

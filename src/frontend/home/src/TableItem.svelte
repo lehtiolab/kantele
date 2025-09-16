@@ -10,6 +10,7 @@ export let rowid;
 export let help = '';
 export let icon;
 export let inactive;
+export let allowedActions = [];
 
 let confirmReady = false;
 let color = statecolors[field.id];
@@ -45,7 +46,7 @@ function setConfirm() {
   <span class={`icon is-small ${color[value]}`}><i class="fa fa-square"></i></span>
 </a>
 
-{:else if field.type === 'button'}
+{:else if field.type === 'button' && allowedActions.indexOf(value) > -1}
 
   {#if field.confirm && field.confirm.indexOf(value) > -1 && !confirmReady}
   <button on:click={setConfirm} class="button is-small">{value}</button>
@@ -58,7 +59,7 @@ function setConfirm() {
 {:else if field.type === 'smallcoloured'}
 <div class={`is-size-7 ${color[value.state]}`}>{value.text}</div>
 
-{:else}
+{:else if field.type !== 'button'}
   {#if inactive}
   <del>{value}</del>
   {:else}
