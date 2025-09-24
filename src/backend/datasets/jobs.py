@@ -62,10 +62,10 @@ class RsyncDatasetServershare(DatasetJob):
         which means we cannot check for database fields reflecting an immediate current state (e.g. purged sfl)
         '''
         dst_dss = DatasetServer.objects.values('storage_loc_ui').get(pk=kwargs['dss_id'])
-        srcsfl = self.getfiles_query(**kwargs).values('sfile__filename')
+        srcsfl = self.oncreate_getfiles_query(**kwargs).values('sfile__filename')
         if StoredFileLoc.objects.filter(sfile__filename__in=[x['sfile__filename'] for x in srcsfl],
                 path=dst_dss['storage_loc_ui'], servershare_id=kwargs['dstshare_id'], active=True).exists():
-            return ('There is already a file existing with the same name as a the target file'
+            return ('There is already a file existing with the same name as a target file'
                     f' in path {dst_dss["storage_loc_ui"]}')
         return self._check_error_either(srcsfl, dst_dss['storage_loc_ui'], **kwargs)
 

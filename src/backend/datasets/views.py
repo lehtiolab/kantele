@@ -591,21 +591,21 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
 
     # Create rsync jobs to new storage shares if needed
     if rsync_jobs:
+        # get original alldss_q, since it has been changed above
         pre_alldss = alldss_q.filter(pk__in=pre_alldss_pks)
         rsync_dss = pre_alldss.filter(storageshare__fileservershare__server__can_rsync_remote=True)
         if rsync_dss.exists():
             # we have a dss local on an rsync server
             srcdss = rsync_dss.first()
+            src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(servershare=srcdss.storageshare,
+                sfile__rawfile__datasetrawfile__dataset=dset).values('pk')]
             for dstshare in rsync_jobs:
-                src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
-                    servershare=srcdss.storageshare,
-                    sfile__rawfile__datasetrawfile__dataset=dset).values('pk')]
                 dstdss = dss_shares[dstshare]
                 # Rsync but since this is a new(ly activated) dss, also set its storage_loc
                 dstdss.storage_loc = dstdss.storage_loc_ui
                 dstdss.save()
-                create_job('rsync_dset_files_to_servershare', dss_id=dstdss.pk, sfloc_ids=src_sfloc_ids,
-                        dstshare_id=dstshare.pk)
+                create_job('rsync_dset_files_to_servershare', dss_id=dstdss.pk,
+                        sfloc_ids=src_sfloc_ids, dstshare_id=dstshare.pk)
 
         elif pre_alldss.exists():
             # there is a live dss somewhere, get it onto an rsync source first
@@ -614,8 +614,6 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
                 servershare=pre_alldss.first().storageshare,
                     sfile__rawfile__datasetrawfile__dataset=dset).values('pk')]
             share_ids_dss_map = {x.storageshare_id: x.pk for x in alldss_q}
-            rsync_server = filemodels.FileServer.objects.filter(can_rsync_remote=True
-                    ).values('pk').first()
             dstshare_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
                     [x.pk for x in rsync_jobs], rsync_server['pk'])
             for dstshare_id in dstshare_classes['rsync_sourcable']:
@@ -628,7 +626,7 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
                 dstshare = filemodels.ServerShare.objects.filter(function=filemodels.ShareFunction.INBOX
                         ).values('pk').first()
                 src_sflids_for_remote = []
-                for sflpk in rsjob['kwargs']['dstsfloc_ids']:
+                for sflpk in src_sfloc_ids:
                     inboxjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflpk,
                             dstshare_id=dstshare['pk'], dstpath=filemodels.ServerShare.get_inbox_path(
                                 dset_id=dset.pk))
@@ -640,17 +638,6 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
             # This should not happen! dset.deleted should have been set, show error to user
             return JsonResponse({'error': 'Dataset is not set to deleted but has no storage. - '
                         'This should not happen, please inform admin (copy paste this message)!'})
-
-
-        # Filter on storage_shares to avoid those which have been deleted from
-        srcdss = get_source_dss_for_transfers(alldss_q.filter(storageshare_id__in=share_ids))
-        for dstshare in rsync_jobs:
-            src_sfloc_ids = [x['pk'] for x in filemodels.StoredFileLoc.objects.filter(
-                servershare=srcdss.storageshare,
-                sfile__rawfile__datasetrawfile__dataset=dset).values('pk')]
-            dstdss = dss_shares[dstshare]
-            create_job('rsync_dset_files_to_servershare', dss_id=dstdss.pk, sfloc_ids=src_sfloc_ids,
-                    dstshare_id=dstshare.pk)
 
     # delete files from disabled shares:
     for rmdss in alldss_q.exclude(storageshare_id__in=share_ids):

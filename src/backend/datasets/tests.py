@@ -1310,13 +1310,9 @@ class TestReactivateDataset(BaseTest):
         self.ds.save()
         self.dss.active = False
         self.dss.save()
-        self.tmpsss.active = False
-        self.tmpsss.save()
-        tmpsss = rm.StoredFileLoc.objects.create(sfile=self.tmpsf, servershare=self.ssnewstore,
-                path='', active=True, purged=False)
         dsfiles = rm.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=self.ds)
         dsfiles.filter(sfile__mzmlfile__isnull=False).delete()
-        dsfiles.update(active=False)
+        dsfiles.update(active=False, purged=True)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'dataset_id': self.ds.pk, 'storage_shares': [self.ssnewstore.pk]})
         self.assertEqual(resp.status_code, 500)
@@ -1331,6 +1327,7 @@ class TestReactivateDataset(BaseTest):
                 f'User {self.user.pk} reactivated dataset {self.ds.pk}')
 
         jobs = jm.Job.objects.all()
+        self.assertEqual(jobs.count(), 3)
         jobs = jm.Job.objects.all().iterator()
         bupjob = next(jobs)
         self.assertEqual(bupjob.funcname, 'reactivate_dataset')
@@ -1358,8 +1355,6 @@ class TestReactivateDataset(BaseTest):
         self.dss.save()
         self.tmpsss.active = False
         self.tmpsss.save()
-        tmpsss.active = False
-        tmpsss.save()
         rm.PDCBackedupFile.objects.filter(storedfile=self.f3sf).delete()
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'dataset_id': self.ds.pk, 'storage_shares': [self.ssnewstore.pk]})
