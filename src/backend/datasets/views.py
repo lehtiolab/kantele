@@ -1212,13 +1212,14 @@ def archive_and_delete_dataset(dset):
                     return {'state': 'error', 'error': f'{joberror} -- {bup_msg}'}
                 rmdirjobs.append(rmdirkw)
             # Errors checked for all dss, now queue jobs
-            alldss.update(active=False)
             for rmjobkw, rmsfl, rmdirkw in zip(rmjobs, rmsfls, rmdirjobs):
                 create_job_without_check('remove_dset_files_servershare', **rmjobkw)
                 rmsfl.update(active=False)
                 create_job('delete_empty_directory', **rmdirkw)
             filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=dset).update(
                     deleted=True)
+        # Empty no-file-yet dsets also have dss, set all to non-active
+        alldss.update(active=False)
 
         dset.deleted, dset.purged = True, False
         dset.save()
@@ -1249,6 +1250,11 @@ def reactivate_dataset(dset, share_ids, project, experiment, dtype, prefrac, hrr
             dset.deleted, dset.purged, dset.runname.experiment.project.active = False, False, True
             dset.save()
             dset.runname.experiment.project.save()
+            if upd_stor_err := update_storage_shares(share_ids, project, experiment, dset,
+                    dtype, prefrac, hrrange, user_id):
+                msg = json.loads(upd_stor_err.content)['error']
+                return {'state': 'error', 'error': 'Error trying to update storage for reactivating '
+                        f'dataset, please contact admin. Error msg: {msg}'}
             return {'state': 'ok', 'error': 'Empty dataset (contains no files) re-activated'}
         elif storestate == 'cold':
             dset.deleted, dset.purged, dset.runname.experiment.project.active = False, False, True
