@@ -149,8 +149,8 @@ def dataset_files(request, dataset_id=False):
         if penfileq := jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare',
                 kwargs__dss_id__in=[x['pk'] for x in dss_ids], state=jj.Jobstates.HOLD):
             pending_sfl_ids = [x for y in penfileq for x in y.kwargs['sfloc_ids']]
-            pending_files = [(x['pk'], x['name']) for x in filemodels.StoredFile.objects.filter(
-                storedfileloc__in=pending_sfl_ids).values('name', 'pk')]
+            pending_files = [(x['pk'], x['filename']) for x in filemodels.StoredFile.objects.filter(
+                storedfileloc__in=pending_sfl_ids).values('filename', 'pk')]
         else:
             pending_files = []
         response_json.update({
