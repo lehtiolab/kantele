@@ -1030,16 +1030,17 @@ def store_analysis(request):
         api_token = False
 
     in_components = {k: v for k, v in req['components'].items() if v}
+    data_args = {'filesamples': {}, 'platenames': {}, 'filefields': defaultdict(dict),
+            **server_dss_args}
     jobinputs = {'components': wf_components, 'singlefiles': {}, 'multifiles': {}, 'params': {}}
     # FIXME this and dss can in theory be duplicates, if the analysis server has multiple
     # storage mounts (not counting the ANALYSISRESULTS mount for e.g. fresh mzML)
-    sflocs = rm.StoredFileLoc.objects.filter(sfile_id__in=[int(x) for x in req['infiles'].keys()],
-            servershare__function=rm.ShareFunction.RAWDATA,
-            servershare__fileservershare__server_id=server_dss_args['fserver_id'])
-
-    data_args = {'filesamples': {}, 'platenames': {}, 'filefields': defaultdict(dict),
-            **server_dss_args, 'infiles': req['infiles'],
-            'sfloc_ids': [x['pk'] for x in sflocs.values('pk')]}
+    if not req['upload_external']:
+        sflocs = rm.StoredFileLoc.objects.filter(sfile_id__in=[int(x) for x in req['infiles'].keys()],
+                servershare__function=rm.ShareFunction.RAWDATA,
+                servershare__fileservershare__server_id=server_dss_args['fserver_id'])
+        data_args.update({'infiles': req['infiles'],
+            'sfloc_ids': [x['pk'] for x in sflocs.values('pk')]})
 
     # Input file definition
     if 'INPUTDEF' in wf_components:
