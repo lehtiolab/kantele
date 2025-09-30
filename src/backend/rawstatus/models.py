@@ -74,7 +74,8 @@ class FileServer(models.Model):
     # Is this an analysis server? In that case we specify 
     is_analysis = models.BooleanField(default=False)
     # Scratchdir is for nxf TMPDIR, and stageing (and can be blank for analysis servers too)
-    scratchdir = models.TextField(help_text='For nextflow TMPDIR and stage if needed. Can be blank even for analysis servers')
+    scratchdir = models.TextField(blank=True,
+            help_text='For nextflow TMPDIR and stage if needed. Can be blank even for analysis servers')
     can_rsync_remote = models.BooleanField(default=False, help_text='Does the server have rsync private keys for other servers (aka is some kind of controller)')
     can_backup = models.BooleanField(default=False)
     # username/keyfilename are for access TO this server 
