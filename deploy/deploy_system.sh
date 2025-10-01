@@ -12,15 +12,16 @@ then
     exit 1
 fi
 
+source .ansible-env
+
 echo Preparing ssh-agent with key
 eval $(ssh-agent)
-ssh-add
+ssh-add "${LOCAL_SSH_KEY}"
+ssh-add "${HPC_SSH_KEY}"
 
 python3 -m venv .venv-ansible
 source .venv-ansible/bin/activate
 pip install "ansible >2.9"
-
-source .ansible-env
 
 echo Stopping storage workers
 ansible-playbook -i default_inventory -i "${INVENTORY_PATH}" --extra-vars "storage_connect_user=${STORAGE_USER} onlystop=true" storage_deploy.yml -K
@@ -36,3 +37,6 @@ ansible-playbook -i default_inventory -i "${INVENTORY_PATH}" --extra-vars "stora
 
 echo Updating analysis code
 ansible-playbook -i default_inventory -i "${INVENTORY_PATH}" --extra-vars "analysis_connect_user=${ANALYSIS_USER}" analysis_deploy.yml -K
+
+echo Update HPC analysis code
+ansible-playbook -i default_inventory -i "${INVENTORY_PATH}" --extra-vars "analysis_connect_user=${HPC_USER}" hpc_analysis_deploy.yml -K

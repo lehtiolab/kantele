@@ -1,0 +1,8 @@
+export INVENTORY_PATH=/path/to/ansible/inventory
+
+export STORAGE_USER=firstname.lastname
+export ANALYSIS_USER=firstname
+export WEB_USER=username
+export LOCAL_SSH_KEY=/home/username/.ssh/id_rsa
+export HPC_SSH_KEY=/home/username/.ssh/hpc_id_rsa
+

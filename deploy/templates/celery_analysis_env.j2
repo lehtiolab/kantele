@@ -1,5 +1,5 @@
 CELERYD_NODES="analysisworker qcworker fastfnop"
-CELERY_BIN="{{ kanteledir }}/venv/bin/celery"
+CELERY_BIN="{{ kantelevenv }}/bin/celery"
 CELERYD_MULTI="multi"
 CELERY_APP="kantele"
 CELERYD_OPTS="-c:analysisworker 3 -c:qcworker 2 -c:fastfnop 1 -Q:analysisworker '{{ inventory_hostname }}__{{ analysis_queue }}' -Q:qcworker '{{ inventory_hostname }}__{{ qc_queue }}' -Q:fastfnop '{{ inventory_hostname }}__{{ queue_fastfnop }}' --statedb={{ kantelelogdir }}/%n%I.state"
@@ -16,8 +16,7 @@ RABBIT_VHOST={{ mq_vhost }}
 RABBITPASS={{ amqppass }}
 RABBITUSER={{ rabbituser }}
 
-# For NF
-TMPDIR={{ scratch_dir }}
+TMPDIR={{ scratch_dir if scratch_dir is defined else '/tmp' }}
 
 CELERY_PREFETCH=1
 SECRET_KEY={{ secret_key }}

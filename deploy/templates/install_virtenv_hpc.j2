@@ -1,0 +1,9 @@
+# Our HPC needs module loading, so cannot install virtenvs or you will have python3.6 or something
+
+{{ python_module_loader_cmd }}
+python3 -m venv {{ kantelevenv }}
+source "{{ kantelevenv }}/bin/activate"
+
+# Avoid building psycopg2 from source on HPC, we dont use it anyway in celery tasks
+sed 's/psycopg2/psycopg2-binary/' "{{ kanteledir }}/src/backend/requirements.txt" > "{{ kanteledir }}/hpc_pip_req.txt"
+pip3 install -r "{{ kanteledir }}/hpc_pip_req.txt"
