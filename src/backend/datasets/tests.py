@@ -20,6 +20,22 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
 
     def test_new_dset(self):
         resp = self.post_json(data={'dataset_id': False, 'project_id': self.p1.pk,
+            'experiment_id': self.exp1.pk, 'runname': self.run1.name, 'secclass': 1,
+            'datatype_id': self.dtype.pk, 'prefrac_id': False,
+            'externalcontact': self.contact.email,
+            'storage_shares': [self.ssnewstore.pk]})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'There already exists a run name by that name for '
+                'this experiment! Reload the page if it is not in the dropdown.')
+        resp = self.post_json(data={'dataset_id': False, 'project_id': self.p1.pk,
+            'newexperimentname': self.exp1.name, 'runname': self.run1.name, 'secclass': 1,
+            'datatype_id': self.dtype.pk, 'prefrac_id': False,
+            'externalcontact': self.contact.email,
+            'storage_shares': [self.ssnewstore.pk]})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'There already exists an experiment by that name for '
+                'this project! Reload the page if it is not in the dropdown.')
+        resp = self.post_json(data={'dataset_id': False, 'project_id': self.p1.pk,
             'experiment_id': self.exp1.pk, 'runname': 'newrunname', 'secclass': 1,
             'datatype_id': self.dtype.pk, 'prefrac_id': False,
             'externalcontact': self.contact.email,

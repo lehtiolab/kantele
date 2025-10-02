@@ -1477,20 +1477,31 @@ def save_dataset(request):
             return JsonResponse({'error': f'Project {data["project_id"]} is not active'}, status=403)
         if data['datatype_id'] in settings.LC_DTYPE_IDS:
             experiment, _ = models.Experiment.objects.get_or_create(project=project, name=settings.LCEXPNAME)
-            runname = models.RunName.objects.create(name=data['runname'], experiment=experiment)
+            try:
+                runname = models.RunName.objects.create(name=data['runname'], experiment=experiment)
+            except IntegrityError:
+                return JsonResponse({'error': 'There already exists a run name by that '
+                    'name for this experiment! Reload the page if it is not in the dropdown.'}, status=403)
         else:
             if 'newexperimentname' in data and data['newexperimentname']:
-                experiment = models.Experiment.objects.create(name=data['newexperimentname'],
-                        project=project)
-
+                try:
+                    experiment = models.Experiment.objects.create(name=data['newexperimentname'],
+                            project=project)
+                except IntegrityError:
+                    return JsonResponse({'error': 'There already exists an experiment by that '
+                        'name for this project! Reload the page if it is not in the dropdown.'}, status=403)
             elif 'experiment_id' in data:
                 try:
                     experiment = models.Experiment.objects.get(pk=data['experiment_id'])
                 except (models.Experiment.DoesNotExist, ValueError):
-                    return JsonResponse({'error': f'Experiment ID not found!'}, status=404)
+                    return JsonResponse({'error': 'Experiment ID not found!'}, status=404)
             else:
-                return JsonResponse({'error': f'You  must fill in an experiment'}, status=400)
-            runname = models.RunName.objects.create(name=data['runname'], experiment=experiment)
+                return JsonResponse({'error': 'You  must fill in an experiment'}, status=400)
+            try:
+                runname = models.RunName.objects.create(name=data['runname'], experiment=experiment)
+            except IntegrityError:
+                return JsonResponse({'error': 'There already exists a run name by that '
+                    'name for this experiment! Reload the page if it is not in the dropdown.'}, status=403)
         # Have runname/exp/project, now save rest of dataset:
         try:
             dset = save_new_dataset(data, project, experiment, runname, request.user.id)
