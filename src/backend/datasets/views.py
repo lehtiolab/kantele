@@ -521,7 +521,10 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
         ## FIXME check, rsync job already checks this errors? Maybe same for the rename job
         # or maybe do so that is done! Centralize -> less code, and it is checked on job creation
         # anyway so we can do it here.
-        if models.DatasetServer.objects.exclude(dataset=dset).filter(storageshare=share,
+        if not is_new_storloc and dsshare_q.exists():
+            # DSS already exists and does not change
+            pass
+        elif models.DatasetServer.objects.exclude(dataset=dset).filter(storageshare=share,
                 storage_loc_ui=new_storage_loc).exists():
             return JsonResponse({'error': 'There is already another dataset with that exact storage'
                 f' location: {new_storage_loc}'}, status=403)
@@ -594,6 +597,8 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
         # get original alldss_q, since it has been changed above
         pre_alldss = alldss_q.filter(pk__in=pre_alldss_pks)
         rsync_dss = pre_alldss.filter(storageshare__fileservershare__server__can_rsync_remote=True)
+        models.ProjectLog.objects.create(project=project, level=models.ProjLogLevels.INFO,
+                message=f'User {user_id} transferred dataset {dset.pk} to {share.name}({share.pk})')
         if rsync_dss.exists():
             # we have a dss local on an rsync server
             srcdss = rsync_dss.first()

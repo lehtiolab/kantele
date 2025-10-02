@@ -196,6 +196,33 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertIn('There is already a file with that exact path', resp.json()['error'])
         self.assertFalse(dm.ProjectLog.objects.exists())
 
+    def test_change_storage_servers(self):
+        newdss = dm.DatasetServer.objects.filter(storageshare=self.analocalstor, dataset=self.ds)
+        newsfl = rm.StoredFileLoc.objects.filter(sfile=self.f3sf, servershare=self.analocalstor)
+        self.assertFalse(newdss.exists())
+        self.assertFalse(newsfl.exists())
+        resp = self.post_json(data={'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
+            'runname': self.run1.name, 'datatype_id': self.dtype.pk, 'prefrac_id': False,
+            'experiment_id': self.exp1.pk, 'storage_shares': [self.ssnewstore.pk, self.analocalstor.pk],
+            'secclass': 1, 'externalcontact': self.contact.email})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(newdss.exists())
+        newdss = newdss.get()
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.pk} transferred dataset '
+                f'{self.ds.pk} to {self.analocalstor.name}({self.analocalstor.pk})').exists())
+
+        # execute dataset move on disk, should not move the added files on tmp (nor update their DB)
+        mvjob = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare').last()
+        self.assertEqual(mvjob.state, Jobstates.PENDING)
+        self.assertTrue(newsfl.exists())
+        f3_newdsspath = os.path.join(self.oldstorctrl.path, newdss.storage_loc, self.f3sf.filename)
+        self.assertFalse(os.path.exists(f3_newdsspath))
+        self.run_job()
+        mvjob.refresh_from_db()
+        self.assertEqual(mvjob.state, Jobstates.PROCESSING)
+        # a new file should now exist in dset folder
+        self.assertTrue(os.path.exists(f3_newdsspath))
+
 
 class FindFilesTest(BaseTest):
     url = '/datasets/find/files/'
