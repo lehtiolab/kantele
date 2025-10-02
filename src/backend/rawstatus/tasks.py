@@ -418,7 +418,7 @@ def pdc_archive(self, md5, yearmonth, sharepath, filepath, fn_id, isdir):
     try:
         subprocess.check_call(cmd, env=env)
     except subprocess.CalledProcessError as CPE:
-        if CPE.returncode != 8:
+        if CPE.returncode == 8:
             # exit code 8 is "there are warnings but no problems"
             taskfail_update_db(self.request.id, msg='There was a problem archiving the file '
                     f'{fileloc} - exit code was {CPE.returncode}')
@@ -469,7 +469,7 @@ def pdc_restore(self, sharepath, filepath, pdcpath, sfloc_id, isdir):
         # exit code 4 is output when file already exist (we have replace=no)
         if CPE.returncode == 4:
             print('File already exists on local server, skipping retrieval')
-        elif CPE.returncode != 8:
+        elif CPE.returncode == 8:
             # exit code 8 is "there are warnings but no problems"
             print(f'Warning retrieving with DSMC client, exit code 8, for file {fileloc}. '
                     'No error, so continuing')
