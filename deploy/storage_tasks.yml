@@ -21,18 +21,15 @@
     group: '{{ kantelegroup }}'
     mode: '700'
 
-- name: Deploy passwordless SSH key for rsyncing backups from from web server
+- name: Deploy passwordless SSH keys for rsyncing backups from from web server, and transfer rsync keys for remote systems
   become: yes
-  become_user: '{{ kanteleuser }}'
   ansible.builtin.copy:
-    src: "{{ item.0 }}"
-    dest: "{{ item.1 }}"
+    src: "{{ item.src }}"
+    dest: "{{ item.dst }}"
     owner: "{{ kanteleuser }}"
     group: "{{ kanteleuser }}"
     mode: '400'
-  loop:
-    - [files/ssh_key_rsync.secret, "{{ rsync_ssh_key_file }}"]
-    - [files/mslab, "{{ secondary_storage_sshkey }}"]
+  loop: rsync_keys_storage
 
 - name: Get tivoli backup client from IBM
   become: yes

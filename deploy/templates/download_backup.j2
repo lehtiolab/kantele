@@ -21,13 +21,13 @@ find ./ -name "pgbackup_*.sql" -mtime +30 -delete
 find ./ -name "tmp_pgbackup_*" -delete
 
 # Do the postgres dump
-ssh -o StrictHostKeyChecking=no -i {{ rsync_ssh_key_file }} {{ web_user }}@{{ kantele_host }} "cd kantele && docker compose --env-file {{ compose_env_file }} -f src/docker/docker-compose-base.yml -f src/docker/docker-compose-prod.yml --project-name kantele exec -T db pg_dump -U {{ kanteledbuser }} -d {{ kanteledb }} -f '{{ container_backuppath }}/pgbackup.sql'"
+ssh -o StrictHostKeyChecking=no -i {{ web_dl_rsync_ssh_key_file }} {{ web_user }}@{{ kantele_host }} "cd kantele && docker compose --env-file {{ compose_env_file }} -f src/docker/docker-compose-base.yml -f src/docker/docker-compose-prod.yml --project-name kantele exec -T db pg_dump -U {{ kanteledbuser }} -d {{ kanteledb }} -f '{{ container_backuppath }}/pgbackup.sql'"
 
 # Add a line with MD5 to the dump
-ssh -o StrictHostKeyChecking=no -i "{{ rsync_ssh_key_file }}" "{{ web_user }}@{{ kantele_host }}" "cat <(echo -- MD5SUM-backup \$(md5sum '{{ host_pgbackup_path }}/pgbackup.sql')) '{{ host_pgbackup_path }}/pgbackup.sql' > '{{ host_pgbackup_path }}/md5_pgbackup.sql'"
+ssh -o StrictHostKeyChecking=no -i "{{ web_dl_rsync_ssh_key_file }}" "{{ web_user }}@{{ kantele_host }}" "cat <(echo -- MD5SUM-backup \$(md5sum '{{ host_pgbackup_path }}/pgbackup.sql')) '{{ host_pgbackup_path }}/pgbackup.sql' > '{{ host_pgbackup_path }}/md5_pgbackup.sql'"
 
 # transfer to storage
-rsync -avz -e 'ssh -i "{{ rsync_ssh_key_file }}" -o StrictHostKeyChecking=no' "{{ web_user}}@{{ kantele_host }}:{{ host_pgbackup_path }}/md5_pgbackup.sql" "{{ storage_backup_path }}/$tmpfile"
+rsync -avz -e 'ssh -i "{{ web_dl_rsync_ssh_key_file }}" -o StrictHostKeyChecking=no' "{{ web_user}}@{{ kantele_host }}:{{ host_pgbackup_path }}/md5_pgbackup.sql" "{{ storage_backup_path }}/$tmpfile"
 
 # Verify MD5 and finalize
 mdexpect=$(head -n1 "$tmpfile" | cut -f3 -d' ')
