@@ -124,20 +124,21 @@ class BaseJob:
             if extra_sfl_q.distinct('sfile').count() < len(all_exfiles_sfpk):
                 raise RuntimeError('Not all parameter files could be found on disk, make sure they exist')
             # Make rsync jobs for those extrafiles which there is no sfl in the servershare we want:
-            sfl = self.getfiles_query(**kwargs).values('servershare_id', 'servershare__function').first()
+            sfl = self.oncreate_getfiles_query(**kwargs).values('servershare_id', 'servershare__function').first()
             newjobs = []
+            # Loop over files not already in servershare
             for extra_sf in StoredFile.objects.filter(
                     pk__in=set(all_exfiles_sfpk).difference([x['sfile_id'] for x in 
                         extra_sfl_q.filter(servershare_id=sfl['servershare_id']).values('sfile_id')])):
-                extra_sfls_q = extra_sf.storedfileloc_set.filter(active=True)
-                if rs_extra_sfl := extra_sfls_q.filter(
-                        servershare__fileservershare__server__can_rsync_remote=True):
+                extra_sf_sfl_q = extra_sf.storedfileloc_set.filter(active=True)
+                if rs_extra_sfl := extra_sf_sfl_q.filter(servershare__fileservershare__server__can_rsync_remote=True):
                     # either the extra sfl is on an rsync-capable server:
-                    extra_sfl = rs_extra_sfl.values('pk', 'servershare__function', 'path').get()
+                    # .first() since it can be on multiple mounts on that server
+                    extra_sfl = rs_extra_sfl.values('pk', 'servershare__function', 'path').first()
                 elif ServerShare.objects.filter(pk=sfl['servershare_id'],
                         fileservershare__server__can_rsync_remote=True):
                     # or the target server is rsync capable
-                    extra_sfl = extra_sfls_q.values('pk', 'servershare__function', 'path').first()
+                    extra_sfl = extra_sf_sfl_q.values('pk', 'servershare__function', 'path').first()
                 else:
                     raise RuntimeError('Could not find a source file to upload to analysis server for '
                         f'{extra_sf.filename}')
