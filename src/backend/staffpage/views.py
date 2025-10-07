@@ -64,7 +64,7 @@ def retrieve_backup_to_ana_or_rsyncstor(sfid):
     errmsg = False
     bup_sfl = rm.StoredFileLoc.objects.filter(sfile_id=sfid,
             servershare__fileservershare__server__can_backup=True)
-    if ana_sfl := bup_sfl.filter(servershare__fileservershare__server__is_analysis=True):
+    if ana_sfl := bup_sfl.filter(servershare__fileservershare__server__analysisserverprofile__isnull=False):
         # retrieve straight to analysis share
         bupjob = create_job('restore_from_pdc_archive', sfloc_id=ana_sfl.get().pk)
         ana_sfl.update(active=True)
@@ -83,9 +83,9 @@ def rsync_qc_to_analysis(sfl_q):
     returns either sfl, server_id, False
     or False, False 'error message'
     '''
-    fss_q = rm.FileserverShare.objects.filter(server__is_analysis=True, server__active=True,
-            share__function=rm.ShareFunction.RAWDATA)
-    if ana_sfl := sfl_q.filter(servershare__fileservershare__server__is_analysis=True,
+    fss_q = rm.FileserverShare.objects.filter(server__analysisserverprofile__isnull=False,
+            server__active=True, share__function=rm.ShareFunction.RAWDATA)
+    if ana_sfl := sfl_q.filter(servershare__fileservershare__server__analysisserverprofile__isnull=False,
             servershare__fileservershare__server__active=True):
         sfloc = ana_sfl.get()
         fss = fss_q.filter(share_id=sfloc.servershare_id).values('server_id').first()

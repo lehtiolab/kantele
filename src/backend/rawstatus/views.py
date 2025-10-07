@@ -487,7 +487,8 @@ def classified_rawfile_treatment(request):
         sfloc.sfile.rawfile.save()
         # Rsync file to analysis server
         fss = FileserverShare.objects.filter(share__function=ShareFunction.RAWDATA,
-                server__active=True, server__is_analysis=True).values('share_id', 'server_id').first()
+                server__active=True, server__analysisserverprofile__isnull=False
+                ).values('share_id', 'server_id').first()
         qc_mvjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sfloc.pk,
                 dstshare_id=fss['share_id'],
                 dstpath=os.path.join(settings.QC_STORAGE_DIR, sfloc.sfile.rawfile.producer.name))

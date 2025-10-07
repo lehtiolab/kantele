@@ -662,7 +662,7 @@ def get_datasets(request, wfversion_id):
         max_sec = max(x['secclass'] for x in dsetinfo.values())
         response.update({'dsets': dsetinfo, 'field_order': field_order, 
             'servers': [{'id': x['server_id'], 'name': x['server__name']} for x in
-                rm.FileserverShare.objects.filter(server__is_analysis=True,
+                rm.FileserverShare.objects.filter(server__analysisserverprofile__isnull=False,
                 share__max_security__gte=max_sec).values('server_id', 'server__name').distinct('server_id')],
             })
         return JsonResponse(response)
@@ -955,7 +955,8 @@ def store_analysis(request):
 
     dss = dm.DatasetServer.objects.filter(dataset_id__in=dsids,
             storageshare__fileservershare__server_id=req['analysisserver_id'],
-            storageshare__fileservershare__server__is_analysis=True).distinct('dataset')
+            storageshare__fileservershare__server__analysisserverprofile__isnull=False
+            ).distinct('dataset')
     server_dss_args = {}
     if req['wfid']:
         wftype = am.UserWorkflow.objects.get(pk=req['wfid']).wftype
@@ -963,7 +964,8 @@ def store_analysis(request):
                 set(x['dataset_id'] for x in dss.values('dataset_id'))):
             response_errors.append(f'Dataset {missing_dsid} does not have its files available '
                     'to the selected analysis server')
-        if fserver := rm.FileServer.objects.filter(pk=req['analysisserver_id'], is_analysis=True):
+        if fserver := rm.FileServer.objects.filter(pk=req['analysisserver_id'],
+                analysisserverprofile__isnull=False):
             server_dss_args.update({'fserver_id': fserver.values('pk').get()['pk'],
                 'dss_ids': [x['pk'] for x in dss.values('pk')],
                 })

@@ -100,8 +100,7 @@ class AnalysisPageTest(BaseIntegrationTest):
 
         # Web server for reports
         webserver = rm.FileServer.objects.create(name='web', uri='kantele.test',
-                fqdn='web', can_rsync_remote=False, is_analysis=False, rsyncusername='',
-                rsynckeyfile='')
+                fqdn='web', can_rsync_remote=False, rsyncusername='', rsynckeyfile='')
         self.webshare = rm.FileserverShare.objects.create(server=webserver,
                 share=self.ssweb, path=os.path.join(self.rootdir, 'web'))
 

@@ -86,6 +86,17 @@ class FileServer(models.Model):
         return self.name
 
 
+class AnalysisServerProfile(models.Model):
+    server = models.OneToOneField(FileServer, on_delete=models.CASCADE)
+    nfprofiles = models.JSONField(default=list)
+    scratchdir = models.TextField(blank=True,
+            help_text='For nextflow TMPDIR and stage if needed. Can be blank if not needed')
+    queue_name = models.TextField(unique=True)
+
+    def __str__(self):
+        return self.server.name
+
+
 class ShareFunction(models.IntegerChoices):
     '''Server share functions are not unique, multiple shares can be an inbox,
     raw storage (e.g. on remote analysis server)

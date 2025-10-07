@@ -76,10 +76,10 @@ class RefineMzmls(DatasetJob):
         # otherwise we cannot register!
 
         dss = dm.DatasetServer.objects.values('storage_loc').get(pk=kwargs['dss_id'])
-        anaserver = rm.FileServer.objects.get(pk=kwargs['server_id'])
-        self.queue = self.get_server_based_queue(anaserver.name, settings.QUEUE_NXF)
-        sharemap = {fss['share_id']: fss['path'] for fss in
-                anaserver.fileservershare_set.values('share_id', 'path')}
+        anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['server_id'])
+        self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_NXF)
+        sharemap = {fss['share_id']: fss['path'] for fss in rm.FileserverShare.objects.filter(
+            server_id=kwargs['server_id']).values('share_id', 'path')}
 
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
         analysis.nextflowsearch.token = f'nf-{uuid4()}'
@@ -87,8 +87,8 @@ class RefineMzmls(DatasetJob):
         nfwf = models.NextflowWfVersionParamset.objects.get(pk=kwargs['wfv_id'])
 
         dbfn = rm.StoredFileLoc.objects.filter(sfile_id=kwargs['dbfn_id'],
-                servershare__fileservershare__server=anaserver).values('servershare_id', 'path',
-                        'sfile__filename').first()
+                servershare__fileservershare__server_id=kwargs['server_id']).values(
+                        'servershare_id', 'path', 'sfile__filename').first()
         
         stagefiles = {'--tdb': [(os.path.join(sharemap[dbfn['servershare_id']], dbfn['path']),
             dbfn['sfile__filename'])]}
@@ -115,13 +115,9 @@ class RefineMzmls(DatasetJob):
                'repo': nfwf.nfworkflow.repo,
                'runname':  analysis.get_run_base_dir(),
                'outsharepath': outsharepath,
-               'server_id': anaserver.pk,
+               'server_id': anaserver.server_id,
                }
-        if not len(nfwf.profiles):
-            profiles = ['standard', 'docker', 'lehtio']
-        else:
-            profiles = nfwf.profiles
-        self.run_tasks.append((run, params, mzmls, stagefiles, ','.join(profiles), nfwf.nfversion,
+        self.run_tasks.append((run, params, mzmls, stagefiles, ','.join(anaserver.nfprofiles), nfwf.nfversion,
             anaserver.scratchdir))
         # TODO replace this for general logging anyway, not necessary to keep queueing in analysis log
         analysis.log = ['[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S'))]
@@ -139,13 +135,14 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
         sfl = rm.StoredFileLoc.objects.values('servershare_id', 'path', 'sfile__filename',
                 'sfile__rawfile_id', 'sfile__rawfile__producer__name').get(pk=kwargs['sfloc_id'])
-        fss = rm.FileserverShare.objects.values('server__name', 'server__scratchdir', 'path').get(
-                server_id=kwargs['fserver_id'], share_id=sfl['servershare_id'])
-        self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_QC_NXF)
+        anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['fserver_id'])
+        self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_QC_NXF)
 
         wf = models.UserWorkflow.objects.filter(wftype=models.UserWorkflow.WFTypeChoices.QC).last()
         nfwf = wf.nfwfversionparamsets.last()
         params = kwargs.get('params', [])
+        fss = rm.FileserverShare.objects.values('path').get(
+                server_id=kwargs['fserver_id'], share_id=sfl['servershare_id'])
         stagefiles = {'--raw': [(os.path.join(fss['path'], sfl['path']), sfl['sfile__filename'])]}
         timestamp = datetime.strftime(analysis.date, '%Y%m%d_%H.%M')
         models.NextflowSearch.objects.update_or_create(defaults={'nfwfversionparamset_id': nfwf.id, 
@@ -164,7 +161,7 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
             params.extend(['--trackedpeptides', ';'.join([f'{pep}_{ch}'
                 for _, pep, ch in kwargs['trackpeptides']])])
 
-        self.run_tasks.append((run, params, stagefiles, ','.join(nfwf.profiles), nfwf.nfversion, fss['server__scratchdir']))
+        self.run_tasks.append((run, params, stagefiles, ','.join(anaserver.nfprofiles), nfwf.nfversion, anaserver.scratchdir))
         analysis.log.append('[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S')))
         analysis.save()
 
@@ -257,11 +254,11 @@ class RunNextflowWorkflow(MultiDatasetJob):
         analysis = models.Analysis.objects.select_related('user', 'nextflowsearch__workflow').get(pk=kwargs['analysis_id'])
         nfwf = models.NextflowWfVersionParamset.objects.select_related('nfworkflow').get(
             pk=kwargs['wfv_id'])
-        fserver = rm.FileServer.objects.get(pk=kwargs['fserver_id'])
-        self.queue = self.get_server_based_queue(fserver.name, settings.QUEUE_NXF)
-        sharemap = {fss['share_id']: fss['path'] for fss in
-                fserver.fileservershare_set.values('share_id', 'path')}
-        if not (outshare := fserver.fileservershare_set.filter(
+        anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['fserver_id'])
+        self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_NXF)
+        sharemap = {fss['share_id']: fss['path'] for fss in rm.FileserverShare.objects.filter(
+            server_id=kwargs['fserver_id']).values('share_id', 'path')}
+        if not (outshare := rm.FileserverShare.objects.filter(server_id=kwargs['fserver_id'],
                 share__function=rm.ShareFunction.ANALYSISRESULTS).values('share_id').first()):
             raise RuntimeError('Analysis server has no defined results share connected or known')
         stagefiles = {}
@@ -343,7 +340,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
                'outsharepath': sharemap[outshare['share_id']],
                'infiles': [],
                'old_infiles': False,
-               'server_id': fserver.pk,
+               'server_id': anaserver.server_id,
                'components': kwargs['inputs']['components'],
                }
         
@@ -395,16 +392,12 @@ class RunNextflowWorkflow(MultiDatasetJob):
                 # Only mzmldef input if not doing a rerun
                 run['infiles'] = infiles
 
-        if not len(nfwf.profiles):
-            profiles = ['standard', 'docker', 'lehtio']
-        else:
-            profiles = nfwf.profiles
         params = [str(x) for x in kwargs['inputs']['params']]
         # Runname defined when run executed (FIXME can be removed, no reason to not do that here)
         # RunID is probably only used in a couple of pipelines but it's nice to use "our" analysis ID here
         # and needs to be coupled here, cannot have user make it
         params.extend(['--name', 'RUNNAME__PLACEHOLDER', '--runid', f'run_{analysis.pk}'])
-        self.run_tasks.append((run, params, stagefiles, ','.join(profiles), nfwf.nfversion, fserver.scratchdir))
+        self.run_tasks.append((run, params, stagefiles, ','.join(anaserver.nfprofiles), nfwf.nfversion, anaserver.scratchdir))
 
         analysis.log.append('[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S')))
         analysis.save()

@@ -995,15 +995,15 @@ def create_mzmls(request):
     # Get all sfl which are on a share attached to analysis server
     rawsfl = filemodels.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=dset,
             active=True, sfile__mzmlfile__isnull=True,
-            servershare__fileservershare__server__is_analysis=True, servershare__active=True,
-            servershare__fileservershare__server__active=True)
+            servershare__fileservershare__server__analysisserverprofile__isnull=False,
+            servershare__active=True, servershare__fileservershare__server__active=True)
     if rawsfl.count() != num_rawfns:
         return JsonResponse({'error': 'This dataset does not have (all) its raw files on a server '
             'with analysis capability, please make sure it is correctly stored'}, status=403)
     # Select possible servers
     source_ssid = rawsfl.values('servershare_id').first()['servershare_id']
     anaserver_q = filemodels.FileServer.objects.filter(fileservershare__share_id=source_ssid,
-            is_analysis=True)
+            analysisserverprofile__isnull=False)
     if not (analocalshare_q := filemodels.FileserverShare.objects.filter(server__in=anaserver_q,
             share__function=filemodels.ShareFunction.ANALYSISRESULTS)):
         return JsonResponse({'error': 'Analysis server does not have an output share configured'},
@@ -1115,8 +1115,8 @@ def refine_mzmls(request):
     # Check if we have files on a server with analysis
     mzmlsfl = filemodels.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=dset,
             active=True, sfile__mzmlfile__isnull=False,
-            servershare__fileservershare__server__is_analysis=True, servershare__active=True,
-            servershare__fileservershare__server__active=True)
+            servershare__fileservershare__server__analysisserverprofile__isnull=False,
+            servershare__active=True, servershare__fileservershare__server__active=True)
     # FIXME check if already exist refined files (active=True, same pipeline)
     if not mzmlsfl.count():
         return JsonResponse({'error': 'This dataset does not have its input mzML files on a server '
@@ -1136,7 +1136,7 @@ def refine_mzmls(request):
     # Pick one but any servershare which is reachable on an analysis server:
     srcdss = dsmodels.DatasetServer.objects.filter(dataset=dset,
             storageshare_id__in=mzmlsfl.values('servershare_id')).values('pk', 'storageshare_id').first()
-    if not (anaserver_q := filemodels.FileServer.objects.filter(is_analysis=True,
+    if not (anaserver_q := filemodels.FileServer.objects.filter(analysisserverprofile__isnull=False,
             fileservershare__share_id=srcdss['storageshare_id']).values('pk')):
         return JsonResponse({'error': 'Cannot find an analysis server that has access'
             'to this dataset'}, status=403)
