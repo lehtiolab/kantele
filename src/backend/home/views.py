@@ -1003,9 +1003,9 @@ def create_mzmls(request):
     # Select possible servers
     source_ssid = rawsfl.values('servershare_id').first()['servershare_id']
     anaserver_q = filemodels.FileServer.objects.filter(fileservershare__share_id=source_ssid,
-            analysisserverprofile__isnull=False)
+            active=True, analysisserverprofile__isnull=False)
     if not (analocalshare_q := filemodels.FileserverShare.objects.filter(server__in=anaserver_q,
-            share__function=filemodels.ShareFunction.ANALYSISRESULTS)):
+            share__active=True, share__function=filemodels.ShareFunction.ANALYSISRESULTS)):
         return JsonResponse({'error': 'Analysis server does not have an output share configured'},
             status=403)
 
@@ -1137,11 +1137,11 @@ def refine_mzmls(request):
     srcdss = dsmodels.DatasetServer.objects.filter(dataset=dset,
             storageshare_id__in=mzmlsfl.values('servershare_id')).values('pk', 'storageshare_id').first()
     if not (anaserver_q := filemodels.FileServer.objects.filter(analysisserverprofile__isnull=False,
-            fileservershare__share_id=srcdss['storageshare_id']).values('pk')):
+            active=True, fileservershare__share_id=srcdss['storageshare_id']).values('pk')):
         return JsonResponse({'error': 'Cannot find an analysis server that has access'
             'to this dataset'}, status=403)
     if anafss_q := filemodels.FileserverShare.objects.filter(server_id__in=[x['pk'] for x in anaserver_q],
-            share__function=filemodels.ShareFunction.ANALYSISRESULTS):
+            share__active=True, share__function=filemodels.ShareFunction.ANALYSISRESULTS):
         anaserver_id = anafss_q.values('server_id').first()['server_id']
     else:
         return RuntimeError('Analysis server seems to not have the output share connected')

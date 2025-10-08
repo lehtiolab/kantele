@@ -487,7 +487,7 @@ def classified_rawfile_treatment(request):
         sfloc.sfile.rawfile.save()
         # Rsync file to analysis server
         fss = FileserverShare.objects.filter(share__function=ShareFunction.RAWDATA,
-                server__active=True, server__analysisserverprofile__isnull=False
+                share__active=True, server__active=True, server__analysisserverprofile__isnull=False
                 ).values('share_id', 'server_id').first()
         qc_mvjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sfloc.pk,
                 dstshare_id=fss['share_id'],
@@ -579,8 +579,12 @@ def file_uploaded(request):
 
     if server_id := data.get('server_id', False):
         sfl_sharepath = data['sharepath']
-        fss = FileserverShare.objects.values('share__name', 'share_id').get(
-                server_id=server_id, path=sfl_sharepath)
+        try:
+            fss = FileserverShare.objects.values('share__name', 'share_id').get(
+                share__active=True, server__active=True, server_id=server_id, path=sfl_sharepath)
+        except FileserverShare.DoesNotExist:
+            return JsonResponse({'error': 'Cannot find active server to upload to by that server ID'},
+                    status=400)
         share_name, share_id = fss['share__name'], fss['share_id']
     elif share_id := data.get('share_id', False):
         share_name = ServerShare.objects.values('name').get(pk=share_id)['name']
@@ -1110,16 +1114,20 @@ def restore_file_from_cold(request):
     elif hasattr(sfile, 'mzmlfile'):
         return JsonResponse({'error': 'mzML derived files are not archived, please regenerate it from RAW data'}, status=403)
     # File is set to deleted, purged = False, False in the post-job-view
-    sfloc_q = sfile.storedfileloc_set.filter(servershare__fileservershare__server__can_backup=True)
+    sfloc_q = sfile.storedfileloc_set.filter(servershare__fileservershare__server__can_backup=True,
+            servershare__active=True, servershare__fileservershare__server__active=True)
     if sfl_bup_q := sfloc_q.filter(servershare_id__in=data['share_ids']):
         # determine where to back up to, preferably a place the user wants to
         sfl_bup = sfl_bup_q.first()
     elif sfl_inbox_q := sfloc_q.filter(servershare__function=ShareFunction.INBOX):
         # if that is not avail, pick inbox
         sfl_bup = sfl_inbox_q.first()
-    else:
+    elif sfloc_q.exists():
         # Otherwise take first historical available share
         sfl_bup = sfloc_q.first()
+    else:
+        return JsonResponse({'error': 'There is no copy of a file on a storage server with backup '
+            'function, or maybe the servers are not correctly registered'}, status=400)
     # Now restore, then distribute to other dst shares
     create_job('restore_from_pdc_archive', sfloc_id=sfl_bup.pk)
     sfl_bup.active = True
@@ -1156,12 +1164,13 @@ def archive_file(request):
         return JsonResponse({'error': 'File is already archived'}, status=403)
     elif hasattr(sfile, 'mzmlfile'):
         return JsonResponse({'error': 'Derived mzML files are not archived, they can be regenerated from RAW data'}, status=403)
-    if sfl_q_bup := sfloc_q.filter(servershare__fileservershare__server__can_backup=True):
+    if sfl_q_bup := sfloc_q.filter(servershare__fileservershare__server__can_backup=True,
+            servershare__active=True, servershare__fileservershare__server__active=True):
         sflocid = sfl_q_bup.values('pk').first()['pk']
         create_job('create_pdc_archive', sfloc_id=sflocid, isdir=sfile.filetype.is_folder)
     else:
         sflocid = sfloc_q.values('pk').first()['pk']
-        sfloc_inbox = StoredFileLoc.objects.filter(sfile=sfile,
+        sfloc_inbox = StoredFileLoc.objects.filter(sfile=sfile, servershare__active=True,
                 servershare__function=ShareFunction.INBOX)
         rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflocid,
                 dstsfloc_id=sfloc_inbox.first().pk)

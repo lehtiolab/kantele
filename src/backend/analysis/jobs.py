@@ -23,6 +23,7 @@ class DownloadFastaFromRepos(BaseJob):
     def process(self, **kwargs):
         # get controller
         fss = rm.FileserverShare.objects.filter(share__function=rm.ShareFunction.INBOX,
+                server__active=True, share__active=True,
                 server__can_rsync_remote=True).values('path', 'share_id', 'server__name').first()
         self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_STORAGE)
         ft = rm.StoredFileType.objects.values('pk').get(name=settings.DBFA_FT_NAME)
@@ -46,6 +47,7 @@ class RefineMzmls(DatasetJob):
         dst_sfls = []
         dss = dm.DatasetServer.objects.values('storageshare_id').get(pk=kwargs['dss_id'])
         analocalshare = rm.FileserverShare.objects.filter(server_id=kwargs['anaserver_id'],
+                share__active=True,
                 share__function=rm.ShareFunction.ANALYSISRESULTS).values('share_id', 'path').first()
         anasrcshareonserver = rm.FileserverShare.objects.filter(server_id=kwargs['anaserver_id'],
                 share_id=dss['storageshare_id']).values('path').first()
@@ -79,6 +81,7 @@ class RefineMzmls(DatasetJob):
         anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['server_id'])
         self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_NXF)
         sharemap = {fss['share_id']: fss['path'] for fss in rm.FileserverShare.objects.filter(
+            server__active=True, share__active=True,
             server_id=kwargs['server_id']).values('share_id', 'path')}
 
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
@@ -87,6 +90,7 @@ class RefineMzmls(DatasetJob):
         nfwf = models.NextflowWfVersionParamset.objects.get(pk=kwargs['wfv_id'])
 
         dbfn = rm.StoredFileLoc.objects.filter(sfile_id=kwargs['dbfn_id'],
+                servershare__active=True,
                 servershare__fileservershare__server_id=kwargs['server_id']).values(
                         'servershare_id', 'path', 'sfile__filename').first()
         
@@ -141,7 +145,7 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
         wf = models.UserWorkflow.objects.filter(wftype=models.UserWorkflow.WFTypeChoices.QC).last()
         nfwf = wf.nfwfversionparamsets.last()
         params = kwargs.get('params', [])
-        fss = rm.FileserverShare.objects.values('path').get(
+        fss = rm.FileserverShare.objects.values('path').get(server__active=True, share__active=True,
                 server_id=kwargs['fserver_id'], share_id=sfl['servershare_id'])
         stagefiles = {'--raw': [(os.path.join(fss['path'], sfl['path']), sfl['sfile__filename'])]}
         timestamp = datetime.strftime(analysis.date, '%Y%m%d_%H.%M')
@@ -254,19 +258,23 @@ class RunNextflowWorkflow(MultiDatasetJob):
         analysis = models.Analysis.objects.select_related('user', 'nextflowsearch__workflow').get(pk=kwargs['analysis_id'])
         nfwf = models.NextflowWfVersionParamset.objects.select_related('nfworkflow').get(
             pk=kwargs['wfv_id'])
-        anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['fserver_id'])
+        try:
+            anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['fserver_id'],
+                    server__active=True)
+        except rm.AnalysisServerProfile.DoesNotExist:
+            raise RuntimeError('Server specified no longer exists or active')
         self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_NXF)
         sharemap = {fss['share_id']: fss['path'] for fss in rm.FileserverShare.objects.filter(
-            server_id=kwargs['fserver_id']).values('share_id', 'path')}
+            share__active=True, server_id=kwargs['fserver_id']).values('share_id', 'path')}
         if not (outshare := rm.FileserverShare.objects.filter(server_id=kwargs['fserver_id'],
-                share__function=rm.ShareFunction.ANALYSISRESULTS).values('share_id').first()):
+                share__active=True, share__function=rm.ShareFunction.ANALYSISRESULTS
+                ).values('share_id').first()):
             raise RuntimeError('Analysis server has no defined results share connected or known')
         stagefiles = {}
         for flag, sfid in kwargs['inputs']['singlefiles'].items():
-            sfl_q = rm.StoredFileLoc.objects.filter(sfile_id=sfid,
+            sfl_q = rm.StoredFileLoc.objects.filter(sfile_id=sfid, servershare__active=True,
                     servershare__fileservershare__server_id=kwargs['fserver_id'], active=True).values(
                             'servershare_id', 'path', 'sfile__filename')
-            #.select_related('servershare', 'sfile').get(pk=sfloc_id)
             if sfl_q.exists():
                 sfl = sfl_q.first()
                 stagefiles[flag] = [(os.path.join(sharemap[sfl['servershare_id']], sfl['path']),
@@ -276,7 +284,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
         for flag, sfids in kwargs['inputs']['multifiles'].items():
             stagefiles[flag] = []
             for sfid in sfids:
-                if sfl_q := rm.StoredFileLoc.objects.filter(sfile_id=sfid,
+                if sfl_q := rm.StoredFileLoc.objects.filter(sfile_id=sfid, servershare__active=True,
                         servershare__fileservershare__server_id=kwargs['fserver_id'],
                         active=True).values('servershare_id', 'path', 'sfile__filename'):
                     sfl = sfl_q.first()

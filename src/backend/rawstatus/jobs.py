@@ -79,9 +79,16 @@ class RsyncOtherFileServershare(SingleFileJob):
         return self._check_error_either(srcsfl, **kwargs)
 
     def process(self, **kwargs):
-        srcsfl = self.getfiles_query(**kwargs).values('sfile__filename', 'path', 'servershare_id',
+        try:
+            srcsfl = self.getfiles_query(**kwargs).values('sfile__filename', 'path', 'servershare_id',
                 'sfile__filetype__is_folder', 'sfile__mzmlfile').get()
-        dstshare = rm.ServerShare.objects.values('pk', 'name').get(pk=kwargs['dstshare_id'])
+        except rm.StoredFileLoc.DoesNotExist:
+            raise RuntimeError('Cannot find source file, maybe the storage share has been deactivated?')
+        try:
+            dstshare = rm.ServerShare.objects.values('pk', 'name').get(pk=kwargs['dstshare_id'], active=True)
+        except rm.ServerShare.DoesNotExist:
+            raise RuntimeError('Cannot find specified destination share with ID '
+                    f'{kwargs["dstshare_id"]}, maybe it is not configured correctly')
 
         # Check if target sflocs already exist in a nonpurged state in wrong path?
         dstsfl = rm.StoredFileLoc.objects.filter(pk=kwargs['dstsfloc_id'])
@@ -93,43 +100,11 @@ class RsyncOtherFileServershare(SingleFileJob):
             # skip FIXME is this ok? please document why
             return
 
-        # Select file servers to rsync from/to - FIXME share code!
-        servers = rm.FileserverShare.objects.filter(share_id__in=[srcsfl['servershare_id'],
-                kwargs['dstshare_id']])
-        rsync_server_q = servers.filter(server__can_rsync_remote=True)
-        if singleserver := rm.FileServer.objects.filter(fileservershare__share=kwargs['dstshare_id']
-                ).filter(fileservershare__share=srcsfl['servershare_id'], can_rsync_remote=True):
-            # Try to get both shares from same server, rsync can skip SSH then
-            srcserver = rm.FileserverShare.objects.filter(server__in=singleserver,
-                    share=srcsfl['servershare_id']
-                    ).values('server__fqdn', 'server__name', 'path').first()
-            dstserver = rm.FileserverShare.objects.filter(server__in=singleserver,
-                    share=kwargs['dstshare_id']
-                    ).values('server__fqdn', 'server__name', 'path').first()
-            src_user = dst_user = rskey = False
-            rsyncservername = srcserver['server__name']
-        elif rsync_server_q.filter(share_id=srcsfl['servershare_id']).exists():
-            # rsyncing server has src file, push to remote
-            srcserver = rsync_server_q.filter(share_id=srcsfl['servershare_id']).values(
-                    'server__fqdn', 'path', 'server__name').first()
-            dstserver = servers.filter(share_id=kwargs['dstshare_id']).values('server__fqdn'
-                    , 'path', 'server__rsynckeyfile', 'server__rsyncusername', 'pk').first()
-            rsyncservername = srcserver['server__name']
-            dst_user, rskey = dstserver['server__rsyncusername'], dstserver['server__rsynckeyfile']
-            src_user = False
-        elif rsync_server_q.filter(share_id=kwargs['dstshare_id']).exists():
-            # rsyncing server is the dst, pull from remote
-            dstserver = rsync_server_q.values('server__fqdn', 'path', 'server__name', 'pk').first()
-            srcserver = servers.filter(share_id=srcsfl['servershare_id']).values('server__fqdn',
-                    'path', 'server__rsynckeyfile', 'server__rsyncusername').first()
-            rsyncservername = dstserver['server__name']
-            src_user, rskey = srcserver['server__rsyncusername'], srcserver['server__rsynckeyfile']
-            dst_user = False
-        else:
-            # FIXME error needs finding in error check already
-            raise RuntimeError('Could not get file share on any rsync capable controller server')
-        self.queue = self.get_server_based_queue(rsyncservername, settings.QUEUE_STORAGE)
+        # Select file servers to rsync from/to
+        srcserver, dstserver, rsyncservername, src_user, dst_user, rskey = self._select_rsync_server(srcsfl['servershare_id'], kwargs['dstshare_id'])
+
         # Now run job
+        self.queue = self.get_server_based_queue(rsyncservername, settings.QUEUE_STORAGE)
         srcpath = os.path.join(srcserver['path'], srcsfl['path'])
         dstpath = dstsfl.values('path').get()['path']
         if srcsfl['sfile__mzmlfile']:

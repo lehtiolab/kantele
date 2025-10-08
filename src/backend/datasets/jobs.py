@@ -30,8 +30,8 @@ class RenameDatasetStorageLoc(DatasetJob):
                     'contact admin to make sure files are consolicated before renaming path')
 
         srcloc = srcloc.get()
-        fss = FileserverShare.objects.filter(share=srcloc['servershare__pk']).values(
-                'server__name', 'path').first()
+        fss = FileserverShare.objects.filter(share=srcloc['servershare__pk'], server__active=True
+                ).values('server__name', 'path').first()
         self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_STORAGE)
         self.run_tasks = [(fss['path'], srcloc['path'], kwargs['newpath'], 
             [x['pk'] for x in srcsfs.values('pk')], kwargs['dss_id'])]
@@ -92,7 +92,16 @@ class RsyncDatasetServershare(DatasetJob):
         return self._check_error_either(srcsfl, dst_dss['storage_loc'], **kwargs)
 
     def process(self, **kwargs):
-        srcsfs = self.getfiles_query(**kwargs)
+        try:
+            srcsfs = self.getfiles_query(**kwargs)
+        except rm.StoredFileLoc.DoesNotExist:
+            raise RuntimeError('Cannot find source files, maybe the storage share has been deactivated?')
+        try:
+            dstshare = ServerShare.objects.values('pk', 'name').get(pk=kwargs['dstshare_id'], active=True)
+        except rm.ServerShare.DoesNotExist:
+            raise RuntimeError('Cannot find specified destination share with ID '
+                    f'{kwargs["dstshare_id"]}, maybe it is not configured correctly')
+
         srcvals = ['path', 'servershare_id']
         srcloc = srcsfs.distinct(*srcvals)
 
@@ -115,42 +124,10 @@ class RsyncDatasetServershare(DatasetJob):
 
         # Select file servers to rsync from/to
         srcloc_one = srcloc.values(*srcvals).get()
-        servers = FileserverShare.objects.filter(share_id__in=[srcloc_one['servershare_id'],
-                kwargs['dstshare_id']])
-        rsync_server_q = servers.filter(server__can_rsync_remote=True)
-        if singleserver := FileServer.objects.filter(fileservershare__share=kwargs['dstshare_id']
-                ).filter(fileservershare__share=srcloc_one['servershare_id']):
-            # Try to get both shares from same server? (Rsync can skip SSH then)
-            srcserver = FileserverShare.objects.filter(server_id__in=singleserver,
-                    share=srcloc_one['servershare_id']
-                    ).values('server__fqdn', 'server__name', 'path').first()
-            dstserver = FileserverShare.objects.filter(server_id__in=singleserver,
-                    share=kwargs['dstshare_id']
-                    ).values('server__fqdn', 'server__name', 'path').first()
-            src_user = dst_user = rskey = False
-            rsyncservername = srcserver['server__name']
-        elif rsync_server_q.filter(share_id=srcloc_one['servershare_id']).exists():
-            # rsyncing server has src file, push to remote
-            srcserver = rsync_server_q.filter(share_id=srcloc_one['servershare_id']).values(
-                    'server__fqdn', 'path', 'server__name').first()
-            dstserver = servers.filter(share_id=kwargs['dstshare_id']).values('server__fqdn'
-                    , 'path', 'server__rsynckeyfile', 'server__rsyncusername', 'pk').first()
-            rsyncservername = srcserver['server__name']
-            dst_user, rskey = dstserver['server__rsyncusername'], dstserver['server__rsynckeyfile']
-            src_user = False
-        elif rsync_server_q.filter(share_id=kwargs['dstshare_id']).exists():
-            # rsyncing server is the dst, pull from remote
-            dstserver = rsync_server_q.values('server__fqdn', 'path', 'server__name', 'pk').first()
-            srcserver = servers.filter(share_id=srcloc_one['servershare_id']).values('server__fqdn',
-                    'path', 'server__rsynckeyfile', 'server__rsyncusername').first()
-            rsyncservername = dstserver['server__name']
-            src_user, rskey = srcserver['server__rsyncusername'], srcserver['server__rsynckeyfile']
-            dst_user = False
-        else:
-            # FIXME error needs finding in error check already
-            raise RuntimeError('Could not get file share on any rsync capable controller server')
-        self.queue = self.get_server_based_queue(rsyncservername, settings.QUEUE_STORAGE)
+        srcserver, dstserver, rsyncservername, src_user, dst_user, rskey = self._select_rsync_server(srcloc_one['servershare_id'], kwargs['dstshare_id'])
+
         # Now run job
+        self.queue = self.get_server_based_queue(rsyncservername, settings.QUEUE_STORAGE)
         srcpath = os.path.join(srcserver['path'], srcloc_one['path'])
         dstpath = os.path.join(dstserver['path'], dst_dss['storage_loc'])
         fns = {}
@@ -195,8 +172,8 @@ class RemoveDatasetFilesFromServershare(DatasetJob):
         fields = ['servershare__name', 'path', 'sfile__filename', 'pk', 'sfile__mzmlfile',
                 'sfile__filetype__is_folder', 'servershare__pk']
         for sfl in srcsfs.values(*fields):
-            fss = FileserverShare.objects.filter(share=sfl['servershare__pk']).values(
-                    'server__name', 'path').first()
+            fss = FileserverShare.objects.filter(share=sfl['servershare__pk'], server__active=True,
+                    share__active=True).values('server__name', 'path').first()
             queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_FASTSTORAGE)
             if sfl['sfile__mzmlfile'] is not None:
                 is_folder = False
@@ -221,9 +198,11 @@ class ConvertDatasetMzml(DatasetJob):
         dst_sfls = []
         dss = DatasetServer.objects.values('storageshare_id', 'dataset_id').get(
                 pk=kwargs['dss_id'])
-        analocalshare = FileserverShare.objects.filter(share__function=rm.ShareFunction.ANALYSISRESULTS,
+        analocalshare = FileserverShare.objects.filter(share__active=True, server__active=True,
+                share__function=rm.ShareFunction.ANALYSISRESULTS,
                 server_id=kwargs['server_id']).values('share_id', 'path').first()
         anasrcshareonserver = FileserverShare.objects.filter(server_id=kwargs['server_id'],
+                server__active=True, share__active=True,
                 share_id=dss['storageshare_id']).values('path').first()
 
         runpath = f'{dss["dataset_id"]}_convert_mzml_{kwargs["timestamp"]}'
@@ -240,10 +219,15 @@ class ConvertDatasetMzml(DatasetJob):
 
     def process(self, **kwargs):
         dss = DatasetServer.objects.values('storage_loc').get(pk=kwargs['dss_id'])
-        anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['server_id'])
+        try:
+            anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['server_id'],
+                server__active=True)
+        except rm.AnalysisServerProfile.DoesNotExist:
+            raise RuntimeError('Processing server requested does not exist or is not active or is '
+                    'not capable of analysis')
         self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_NXF)
         sharemap = {fss['share_id']: fss['path'] for fss in rm.FileserverShare.objects.filter(
-            server_id=kwargs['server_id']).values('share_id', 'path')}
+            share__active=True, server_id=kwargs['server_id']).values('share_id', 'path')}
         pwiz = Proteowizard.objects.get(pk=kwargs['pwiz_id'])
         nf_raws = []
         srcpath = os.path.join(kwargs['srcsharepath'], dss['storage_loc'])
