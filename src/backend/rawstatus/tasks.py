@@ -420,6 +420,9 @@ def pdc_archive(self, md5, yearmonth, sharepath, filepath, fn_id, isdir):
     except subprocess.CalledProcessError as CPE:
         if CPE.returncode == 8:
             # exit code 8 is "there are warnings but no problems"
+            print(f'Warning retrieving with DSMC client, exit code 8, for file {fileloc}. '
+                    'No error, so continuing')
+        else:
             taskfail_update_db(self.request.id, msg='There was a problem archiving the file '
                     f'{fileloc} - exit code was {CPE.returncode}')
             raise
