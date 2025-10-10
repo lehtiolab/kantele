@@ -93,15 +93,14 @@ class AnalysisPageTest(BaseIntegrationTest):
         am.PsetFileParam.objects.create(pset=self.pset, param=self.pfn2, allow_resultfiles=True)
 
         self.nfwf = am.NextflowWfVersionParamset.objects.create(update='an update', commit='abc123',
-                filename='main.nf', profiles=[], nfworkflow=self.nfw, paramset=self.pset, nfversion='22', active=True)
+                filename='main.nf', nfworkflow=self.nfw, paramset=self.pset, nfversion='22', active=True)
         self.wftype = am.UserWorkflow.WFTypeChoices.STD
         self.wf = am.UserWorkflow.objects.create(name='testwf', wftype=self.wftype, public=True)
         self.wf.nfwfversionparamsets.add(self.nfwf)
 
         # Web server for reports
         webserver = rm.FileServer.objects.create(name='web', uri='kantele.test',
-                fqdn='web', can_rsync_remote=False, is_analysis=False, rsyncusername='',
-                rsynckeyfile='')
+                fqdn='web', can_rsync_remote=False, rsyncusername='', rsynckeyfile='')
         self.webshare = rm.FileserverShare.objects.create(server=webserver,
                 share=self.ssweb, path=os.path.join(self.rootdir, 'web'))
 

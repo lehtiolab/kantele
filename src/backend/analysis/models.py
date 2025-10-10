@@ -75,7 +75,6 @@ class NextflowWfVersionParamset(models.Model):
     # NB commit cannot be unique, in case of multiple paramsets
     commit = models.CharField(max_length=50)
     filename = models.TextField()
-    profiles = models.JSONField(default=list)
     nfworkflow = models.ForeignKey(NextflowWorkflowRepo, on_delete=models.CASCADE)
     paramset = models.ForeignKey(ParameterSet, on_delete=models.CASCADE)
     date = models.DateTimeField(auto_now=True)
@@ -335,7 +334,6 @@ class Proteowizard(models.Model):
     version_description = models.TextField()
     container_version = models.TextField() # chambm/i-agree-blabla:3.0.1234
     date_added = models.DateTimeField(auto_now_add=True)
-    is_docker = models.BooleanField(default=False)
     nf_version = models.ForeignKey(NextflowWfVersionParamset, on_delete=models.CASCADE)
     active = models.BooleanField(default=True)
 

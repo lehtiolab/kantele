@@ -39,6 +39,20 @@ def show_staffpage(request):
     else:
         last_tps = False
 
+    # Populate servers
+    servers = {x.pk: {f: getattr(x, f) for f in ['pk', 'name', 'uri', 'fqdn', 'active',
+        'can_backup', 'can_rsync_remote', 'rsyncusername', 'rsynckeyfile']}
+        for x in rm.FileServer.objects.all()}
+    [servers[x].update({'show_analysis_profile': False, 'mounted': []}) for x in servers.keys()]
+    for asp in rm.AnalysisServerProfile.objects.all():
+        servers[asp.server_id].update({'queue_name': asp.queue_name, 'scratchdir': asp.scratchdir,
+            'nfprofiles': json.dumps(asp.nfprofiles), 'show_analysis_profile': True})
+    for fss in rm.FileserverShare.objects.all():
+        servers[fss.server_id]['mounted'].append({'share': fss.share.pk, 'path': fss.path})
+
+    # Populate shares
+    shares = [{f: getattr(x, f) for f in ['pk', 'name', 'max_security', 'description', 'active',
+        'function', 'maxdays_data']} for x in rm.ServerShare.objects.all()]
     context = {'qc_instruments': {x['producer__pk']: x['producer__name'] for x in 
         rm.MSInstrument.objects.filter(producer__internal=True, active=True).values(
             'producer__pk', 'producer__name')},
@@ -46,7 +60,9 @@ def show_staffpage(request):
             'date': datetime.strftime(tps['date'], '%a %b %d %Y'), 'name': tps['name'],
             'active': tps['active'], 'peptides': set_peps[tps['pk']]} for tps in
             dam.TrackedPeptideSet.objects.values('pk', 'date', 'name', 'frozen', 'active')},
-        'selected_pepset': last_tps,
+        'selected_pepset': last_tps, 'sharefuns': [(x, x.label) for x in rm.ShareFunction],
+        'secclass': [[x, x.label] for x in rm.DataSecurityClass],
+        'servers': [x for x in servers.values()], 'shares': shares,
         }
     return render(request, 'staffpage/staffpage.html', context)
 
@@ -64,7 +80,7 @@ def retrieve_backup_to_ana_or_rsyncstor(sfid):
     errmsg = False
     bup_sfl = rm.StoredFileLoc.objects.filter(sfile_id=sfid,
             servershare__fileservershare__server__can_backup=True)
-    if ana_sfl := bup_sfl.filter(servershare__fileservershare__server__is_analysis=True):
+    if ana_sfl := bup_sfl.filter(servershare__fileservershare__server__analysisserverprofile__isnull=False):
         # retrieve straight to analysis share
         bupjob = create_job('restore_from_pdc_archive', sfloc_id=ana_sfl.get().pk)
         ana_sfl.update(active=True)
@@ -83,9 +99,9 @@ def rsync_qc_to_analysis(sfl_q):
     returns either sfl, server_id, False
     or False, False 'error message'
     '''
-    fss_q = rm.FileserverShare.objects.filter(server__is_analysis=True, server__active=True,
-            share__function=rm.ShareFunction.RAWDATA)
-    if ana_sfl := sfl_q.filter(servershare__fileservershare__server__is_analysis=True,
+    fss_q = rm.FileserverShare.objects.filter(server__analysisserverprofile__isnull=False,
+            server__active=True, share__function=rm.ShareFunction.RAWDATA)
+    if ana_sfl := sfl_q.filter(servershare__fileservershare__server__analysisserverprofile__isnull=False,
             servershare__fileservershare__server__active=True):
         sfloc = ana_sfl.get()
         fss = fss_q.filter(share_id=sfloc.servershare_id).values('server_id').first()
@@ -375,3 +391,85 @@ def delete_tracked_peptide_set(request):
             'frozen, not possible to delete'}, status=403)
     return JsonResponse({'state': 'ok'})
 
+
+@staff_member_required
+@require_POST
+def save_server(request):
+    data = json.loads(request.body.decode('utf-8'))
+    try:
+        data['show_analysis_profile']
+        data['pk']
+    except KeyError:
+        return JsonResponse({'state': 'error', 'msg': 'Invalid params passed'}, status=400)
+    if data['show_analysis_profile']:
+        try:
+            # nfprofiles is passed as a string from the form, '["profile1", "profile2", ...]'
+            data['nfprofiles'] = json.loads(data['nfprofiles'])
+            data['queue_name']
+        except json.decoder.JSONDecodeError:
+            return JsonResponse({'state': 'error', 'msg': 'Not valid JSON for nextflow profiles'},
+                    status=400)
+        except KeyError:
+            return JsonResponse({'state': 'error', 'msg': 'Need to enter analysis server information'},
+                    status=400)
+    
+    if data['pk']:
+        # Deactivation does not save other attributes
+        if not (fs := rm.FileServer.objects.filter(pk=data['pk'])):
+            return JsonResponse({'state': 'error', 'msg': 'No server for that query exists'}, status=404)
+        if not data['active'] and fs.filter(active=False):
+            return JsonResponse({'state': 'error', 'msg': f'Cannot update deactivated server'}, status=403)
+        if not data['active'] and fs.filter(active=True):
+            fs.update(active=data['active'])
+            return JsonResponse({'state': 'ok', 'msg': f'Deactivated server with ID {data["pk"]}'})
+        else:
+            fs.update(**{f: data[f] for f in ['name', 'uri', 'fqdn', 'active', 'can_backup',
+                'can_rsync_remote', 'rsyncusername', 'rsynckeyfile']})
+            fs = fs.get()
+    else:
+        fs = rm.FileServer.objects.create(**{f: data[f] for f in ['name', 'uri', 'fqdn', 'active',
+            'can_backup', 'can_rsync_remote', 'rsyncusername', 'rsynckeyfile']})
+
+    for share_id, path in data['mounted']:
+        rm.FileserverShare.objects.update_or_create(server=fs, share_id=share_id,
+                defaults={'path': path})
+    rm.FileserverShare.objects.filter(server=fs).exclude(
+            share_id__in=[x[0] for x in data['mounted']]).delete()
+
+    if data['show_analysis_profile']:
+        rm.AnalysisServerProfile.objects.update_or_create(server=fs, defaults={
+            f: data[f] for f in ['nfprofiles', 'scratchdir', 'queue_name']})
+    else:
+        rm.AnalysisServerProfile.objects.filter(server=fs).delete()
+    return JsonResponse({'state': 'ok', 'msg': f'Saved server {fs.name} with ID {fs.pk}'})
+
+
+@staff_member_required
+@require_POST
+def save_share(request):
+    data = json.loads(request.body.decode('utf-8'))
+    try:
+        data['pk']
+    except KeyError:
+        return JsonResponse({'state': 'error', 'msg': 'Invalid params passed'}, status=400)
+    if data['pk']:
+        # Deactivation does not save other attributes
+        if not (ss := rm.ServerShare.objects.filter(pk=data['pk'])):
+            return JsonResponse({'state': 'error', 'msg': 'No share for that query exists'}, status=404)
+        if not data['active'] and ss.filter(active=True):
+            ss.update(active=False)
+            return JsonResponse({'state': 'ok', 'msg': f'Deactivated share with ID {data["pk"]}'})
+        elif not data['active'] and ss.filter(active=False):
+            return JsonResponse({'state': 'error', 'msg': f'Cannot update deactivated share'})
+        else:
+            ss, _ = rm.ServerShare.objects.update_or_create(pk=data['pk'], defaults={f: data[f]
+                for f in ['name', 'max_security', 'description', 'active', 'function',
+                    'maxdays_data']})
+            new = ''
+
+    else:
+        # new 
+        ss  = rm.ServerShare.objects.create(**{f: data[f] for f in
+            ['name', 'max_security', 'description', 'active', 'function', 'maxdays_data']})
+        new = 'new '
+    return JsonResponse({'state': 'ok', 'msg': f'Saved {new}share {data["name"]} with ID {ss.pk}'})

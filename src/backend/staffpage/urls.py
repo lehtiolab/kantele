@@ -12,5 +12,7 @@ urlpatterns = [
     path('qc/newfile/', views.new_qcfile),
     path('qc/trackpeptides/save/', views.save_tracked_peptides),
     path('qc/trackpeptides/delete/', views.delete_tracked_peptide_set),
+    path('servers/save/', views.save_server),
+    path('shares/save/', views.save_share),
     ]
 

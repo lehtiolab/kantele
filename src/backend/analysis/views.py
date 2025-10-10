@@ -662,8 +662,9 @@ def get_datasets(request, wfversion_id):
         max_sec = max(x['secclass'] for x in dsetinfo.values())
         response.update({'dsets': dsetinfo, 'field_order': field_order, 
             'servers': [{'id': x['server_id'], 'name': x['server__name']} for x in
-                rm.FileserverShare.objects.filter(server__is_analysis=True,
-                share__max_security__gte=max_sec).values('server_id', 'server__name').distinct('server_id')],
+                rm.FileserverShare.objects.filter(server__analysisserverprofile__isnull=False,
+                server__active=True, share__active=True, share__max_security__gte=max_sec
+                ).values('server_id', 'server__name').distinct('server_id')],
             })
         return JsonResponse(response)
 
@@ -955,7 +956,8 @@ def store_analysis(request):
 
     dss = dm.DatasetServer.objects.filter(dataset_id__in=dsids,
             storageshare__fileservershare__server_id=req['analysisserver_id'],
-            storageshare__fileservershare__server__is_analysis=True).distinct('dataset')
+            storageshare__fileservershare__server__analysisserverprofile__isnull=False
+            ).distinct('dataset')
     server_dss_args = {}
     if req['wfid']:
         wftype = am.UserWorkflow.objects.get(pk=req['wfid']).wftype
@@ -963,16 +965,17 @@ def store_analysis(request):
                 set(x['dataset_id'] for x in dss.values('dataset_id'))):
             response_errors.append(f'Dataset {missing_dsid} does not have its files available '
                     'to the selected analysis server')
-        if fserver := rm.FileServer.objects.filter(pk=req['analysisserver_id'], is_analysis=True):
+        if fserver := rm.FileServer.objects.filter(pk=req['analysisserver_id'], active=True,
+                analysisserverprofile__isnull=False):
             server_dss_args.update({'fserver_id': fserver.values('pk').get()['pk'],
                 'dss_ids': [x['pk'] for x in dss.values('pk')],
                 })
         else:
-            response_errors.append('You must select a server with analysis capacity, '
+            response_errors.append('You must select an active server with analysis capacity, '
                     'maybe the infrastructure has changed, please reload the analysis')
-        if fserver and not (outshare := rm.FileserverShare.objects.filter(
+        if fserver and not rm.FileserverShare.objects.filter(server__active=True, share__active=True,
                 server_id=req['analysisserver_id'], share__function=rm.ShareFunction.ANALYSISRESULTS
-                ).values('pk').first()):
+                ).values('pk').first():
             response_errors.append('Analysis server has no results share connected or known')
 
     elif req['upload_external']:
@@ -1037,7 +1040,7 @@ def store_analysis(request):
     # storage mounts (not counting the ANALYSISRESULTS mount for e.g. fresh mzML)
     if not req['upload_external']:
         sflocs = rm.StoredFileLoc.objects.filter(sfile_id__in=[int(x) for x in req['infiles'].keys()],
-                servershare__function=rm.ShareFunction.RAWDATA,
+                servershare__function=rm.ShareFunction.RAWDATA, servershare__active=True,
                 servershare__fileservershare__server_id=server_dss_args['fserver_id'])
         data_args.update({'infiles': req['infiles'],
             'sfloc_ids': [x['pk'] for x in sflocs.values('pk')]})

@@ -153,8 +153,7 @@ class TestCreateMzmls(MzmlTests):
         newstorage is here not attached to storagecontroller,
         so need to push files first to inbox
         '''
-        self.anaserver.is_analysis = False
-        self.anaserver.save()
+        self.anaprofile.delete()
         self.newstorctrl.delete()
 
         rawfn = os.path.join(self.f3path, self.f3raw.name)

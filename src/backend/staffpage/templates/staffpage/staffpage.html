@@ -9,10 +9,18 @@
   {{ qc_instruments | json_script:'instruments_el'}}
   {{ peptide_sets | json_script:'peptide_sets' }}
   {{ selected_pepset | json_script:'selected_pepset' }}
+  {{ servers | json_script:'servers' }}
+  {{ shares | json_script:'shares' }}
+  {{ sharefuns | json_script:'sfuns' }}
+  {{ secclass | json_script:'secu' }}
   <script>
     let instruments = JSON.parse(document.getElementById('instruments_el').textContent);
     let trackedPeptideSetsInit = JSON.parse(document.getElementById('peptide_sets').textContent);
     let selectedTrackedPeptidesInit = JSON.parse(document.getElementById('selected_pepset').textContent);
+    let init_servers = JSON.parse(document.getElementById('servers').textContent);
+    let init_shares = JSON.parse(document.getElementById('shares').textContent);
+    let sharefuns = JSON.parse(document.getElementById('sfuns').textContent);
+    let secclasses = JSON.parse(document.getElementById('secu').textContent);
   </script>
 {% endblock head %}
 

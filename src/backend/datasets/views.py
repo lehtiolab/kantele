@@ -367,7 +367,8 @@ def get_source_dss_for_transfers(alldss):
     - a share which is accessible to an rsync-key-having controller
     - False
     Maybe make function of storeshare?'''
-    rsync_dss = alldss.filter(storageshare__fileservershare__server__can_rsync_remote=True)
+    rsync_dss = alldss.filter(storageshare__fileservershare__server__can_rsync_remote=True,
+            storageshare__fileservershare__server__active=True)
     if rsync_dss.exists():
         srcdss = rsync_dss.get()
     elif alldss.exists():
@@ -492,7 +493,8 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
 
     Shared by save_new_dataset, update_dataset, and save_storage_shares'''
 
-    shares_q = filemodels.ServerShare.objects.filter(active=True, has_rawdata=True)
+    shares_q = filemodels.ServerShare.objects.filter(active=True,
+            function=filemodels.ShareFunction.RAWDATA)
     alldss_q = models.DatasetServer.objects.filter(dataset=dset, active=True)
     existing_sfl = filemodels.StoredFileLoc.objects.filter(active=True,
             sfile__rawfile__datasetrawfile__dataset=dset)
@@ -565,7 +567,7 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
                 # FIXME append params for rsync job here if no sflocs.exists()?
 
     if rsync_jobs:
-        if rsync_server := filemodels.FileServer.objects.filter(can_rsync_remote=True):
+        if rsync_server := filemodels.FileServer.objects.filter(can_rsync_remote=True, active=True):
             rsync_server = rsync_server.values('pk').first()
         else:
             return JsonResponse({'error': 'There is no configured fileserver that can handle '
@@ -588,15 +590,15 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
     for dss, oldpath, newpath in dsshare_mvjobs:
         create_job_without_check('rename_dset_storage_loc', dss_id=dss.pk, sfloc_ids=sfls_dss[dss.pk],
                 newpath=newpath)
-        models.ProjectLog.objects.create(project=dset.runname.experiment.project,
-                level=models.ProjLogLevels.INFO, message=f'User {user_id} changed dataset '
-                f'{dset.pk} path to {newpath} from {oldpath}')
+        models.ProjectLog.objects.create(project=project, level=models.ProjLogLevels.INFO,
+                message=f'User {user_id} changed dataset {dset.pk} path to {newpath} from {oldpath}')
 
     # Create rsync jobs to new storage shares if needed
     if rsync_jobs:
         # get original alldss_q, since it has been changed above
         pre_alldss = alldss_q.filter(pk__in=pre_alldss_pks)
-        rsync_dss = pre_alldss.filter(storageshare__fileservershare__server__can_rsync_remote=True)
+        rsync_dss = pre_alldss.filter(storageshare__fileservershare__server__can_rsync_remote=True,
+                storageshare__fileservershare__server__active=True)
         models.ProjectLog.objects.create(project=project, level=models.ProjLogLevels.INFO,
                 message=f'User {user_id} transferred dataset {dset.pk} to {share.name}({share.pk})')
         if rsync_dss.exists():

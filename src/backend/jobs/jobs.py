@@ -5,7 +5,7 @@ from django.utils import timezone
 
 from kantele import settings
 from jobs.models import Task, Job, JobError
-from rawstatus.models import RawFile, StoredFile, StoredFileLoc, DataSecurityClass, ShareFunction, ServerShare
+from rawstatus.models import RawFile, StoredFile, StoredFileLoc, DataSecurityClass, ShareFunction, ServerShare, FileserverShare, FileServer
 from datasets import models as dm
 
 
@@ -115,6 +115,45 @@ class BaseJob:
     def _get_extrafiles_to_rsync(self, **kwargs):
         return []
 
+    def _select_rsync_server(self, srcshare_id, dstshare_id):
+        # Select file servers to rsync from/to - FIXME share code!
+        '''Shares should already have been confirmed to be active?
+        Or can we do that here?
+        '''
+        servers = FileserverShare.objects.filter(share_id__in=[srcshare_id, dstshare_id],
+                server__active=True)
+        rsync_server_q = servers.filter(server__can_rsync_remote=True)
+        if singleserver := FileServer.objects.filter(fileservershare__in=servers, active=True,
+                fileservershare__share=dstshare_id).filter(fileservershare__share=srcshare_id):
+            # Try to get both shares from same server, rsync can skip SSH then
+            srcserver = servers.filter(server__in=singleserver,
+                    share=srcshare_id).values('server__fqdn', 'server__name', 'path').first()
+            dstserver = servers.filter(server__in=singleserver, share=dstshare_id
+                    ).values('server__fqdn', 'server__name', 'path').first()
+            src_user = dst_user = rskey = False
+            rsyncservername = srcserver['server__name']
+        elif rsync_server_q.filter(share_id=srcshare_id).exists():
+            # rsyncing server has src file, push to remote
+            srcserver = rsync_server_q.filter(share_id=srcshare_id).values(
+                    'server__fqdn', 'path', 'server__name').first()
+            dstserver = servers.filter(share_id=dstshare_id).values('server__fqdn'
+                    , 'path', 'server__rsynckeyfile', 'server__rsyncusername').first()
+            rsyncservername = srcserver['server__name']
+            dst_user, rskey = dstserver['server__rsyncusername'], dstserver['server__rsynckeyfile']
+            src_user = False
+        elif rsync_server_q.filter(share_id=dstshare_id).exists():
+            # rsyncing server is the dst, pull from remote
+            dstserver = rsync_server_q.values('server__fqdn', 'path', 'server__name').first()
+            srcserver = servers.filter(share_id=srcshare_id).values('server__fqdn',
+                    'path', 'server__rsynckeyfile', 'server__rsyncusername').first()
+            rsyncservername = dstserver['server__name']
+            src_user, rskey = srcserver['server__rsyncusername'], srcserver['server__rsynckeyfile']
+            dst_user = False
+        else:
+            # FIXME error needs finding in error check already
+            raise RuntimeError('Could not get file share on any rsync capable controller server')
+        return srcserver, dstserver, rsyncservername, src_user, dst_user, rskey
+
     def on_create_prep_rsync_jobs(self, **kwargs):
         '''If needed, rsync the DB and other singlefiles which is not on the analysis share,
         this function provides a dict with the job name and kwargs for that'''
@@ -130,13 +169,15 @@ class BaseJob:
             for extra_sf in StoredFile.objects.filter(
                     pk__in=set(all_exfiles_sfpk).difference([x['sfile_id'] for x in 
                         extra_sfl_q.filter(servershare_id=sfl['servershare_id']).values('sfile_id')])):
-                extra_sf_sfl_q = extra_sf.storedfileloc_set.filter(active=True)
-                if rs_extra_sfl := extra_sf_sfl_q.filter(servershare__fileservershare__server__can_rsync_remote=True):
+                extra_sf_sfl_q = extra_sf.storedfileloc_set.filter(active=True,
+                        servershare__active=True, servershare__fileservershare__server__active=True)
+                if rs_extra_sfl := extra_sf_sfl_q.filter(
+                        servershare__fileservershare__server__can_rsync_remote=True):
                     # either the extra sfl is on an rsync-capable server:
                     # .first() since it can be on multiple mounts on that server
                     extra_sfl = rs_extra_sfl.values('pk', 'servershare__function', 'path').first()
-                elif ServerShare.objects.filter(pk=sfl['servershare_id'],
-                        fileservershare__server__can_rsync_remote=True):
+                elif FileserverShare.objects.filter(share_id=sfl['servershare_id'],
+                        share__active=True, server__active=True, server__can_rsync_remote=True):
                     # or the target server is rsync capable
                     extra_sfl = extra_sf_sfl_q.values('pk', 'servershare__function', 'path').first()
                 else:
@@ -220,7 +261,7 @@ class SingleFileJob(BaseJob):
     '''
 
     def oncreate_getfiles_query(self, **kwargs):
-        return StoredFileLoc.objects.filter(pk=kwargs['sfloc_id'])
+        return StoredFileLoc.objects.filter(pk=kwargs['sfloc_id'], servershare__active=True)
         # As in multifile job (PurgeFiles)
 
     def get_dsids_jobrunner(self, **kwargs):
@@ -233,7 +274,7 @@ class MultiFileJob(BaseJob):
     '''Job class to specify any job on a number of files on a specific share.
     '''
     def oncreate_getfiles_query(self, **kwargs):
-        return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'])
+        return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'], servershare__active=True)
 
     def get_dsids_jobrunner(self, **kwargs):
         ''''In case a single file has a dataset'''
@@ -271,7 +312,7 @@ class DatasetJob(BaseJob):
         When e.g. check_job_error is used, there is no job yet, and this will return the files
         of a dataset'
         '''
-        return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'])
+        return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'], servershare__active=True)
 
 
 class MultiDatasetJob(BaseJob):
@@ -288,4 +329,4 @@ class MultiDatasetJob(BaseJob):
 
     def oncreate_getfiles_query(self, **kwargs):
         '''As for dataset job'''
-        return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'])
+        return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'], servershare__active=True)
