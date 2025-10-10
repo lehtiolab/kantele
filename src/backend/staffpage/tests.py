@@ -398,7 +398,7 @@ class TestSaveServers(BaseQCFileTest):
         new_mount = self.cl.post(self.url, content_type='application/json', data={'pk': False,
             'name': 'testmount', 'uri': 'urimount', 'fqdn': 'a.b.c.d', 'active': True, 'can_backup': True,
             'show_analysis_profile': False, 'can_rsync_remote': True, 'rsyncusername': '',
-            'rsynckeyfile': '', 'mounted': [(self.ssana.pk, 'fake')]})
+            'rsynckeyfile': '', 'mounted': [{'share': self.ssana.pk, 'path': 'fake'}]})
         self.assertIn('Saved server testmount with ID ', new_mount.json()['msg'])
         fs = rm.FileServer.objects.get(name='testmount', can_rsync_remote=True, uri='urimount')
         self.assertFalse(anaq.filter(server=fs).exists())
@@ -424,7 +424,7 @@ class TestSaveServers(BaseQCFileTest):
         new_mounts_ana = self.cl.post(self.url, content_type='application/json', data={'pk': False,
             'name': 'test_mount_ana', 'uri': 'uritma', 'fqdn': 'a.b.c.d', 'active': True, 'can_backup': True,
             'can_rsync_remote': False, 'rsyncusername': 'testname', 'rsynckeyfile': 'testfile',
-            'mounted': [(self.ssana.pk, 'fake2')], 'show_analysis_profile': True,
+            'mounted': [{'share': self.ssana.pk, 'path': 'fake2'}], 'show_analysis_profile': True,
             'nfprofiles': '["prof2"]', 'queue_name': 'q2', 'scratchdir': '/path/to/otherscratch'})
         self.assertIn('Saved server test_mount_ana', new_mounts_ana.json()['msg'])
         fs = rm.FileServer.objects.get(name='test_mount_ana', can_backup=True, rsyncusername='testname')
@@ -437,7 +437,7 @@ class TestSaveServers(BaseQCFileTest):
         new_mounts_ana = self.cl.post(self.url, content_type='application/json', data={'pk': False,
             'name': 'test_mount_ana', 'uri': 'uritma', 'fqdn': 'a.b.c.d', 'active': True, 'can_backup': True,
             'can_rsync_remote': False, 'rsyncusername': 'testname', 'rsynckeyfile': 'testfile',
-            'mounted': [(self.ssana.pk, 'fake2')], 'show_analysis_profile': True,
+            'mounted': [{'share': self.ssana.pk, 'path': 'fake2'}], 'show_analysis_profile': True,
             'nfprofiles': '["prof2"]', 'queue_name': 'q2', 'scratchdir': '/path/to/otherscratch'})
         pk = re.match('Saved server test_mount_ana with ID ([0-9]+)', new_mounts_ana.json()['msg']).group(1)
         fs = rm.FileServer.objects.get(pk=pk)
@@ -455,7 +455,7 @@ class TestSaveServers(BaseQCFileTest):
         upd_resp = self.cl.post(self.url, content_type='application/json', data={'pk': pk, 
             'name': 'test_mount_ana_upd', 'uri': 'uritma', 'fqdn': 'a.b.c.d', 'active': True, 'can_backup': False,
             'can_rsync_remote': False, 'rsyncusername': '', 'rsynckeyfile': 'testfile',
-            'mounted': [(self.ssana.pk, 'fake2'), (self.ssanaruns.pk, 'fake3')],
+            'mounted': [{'share': self.ssana.pk, 'path': 'fake2'}, {'share': self.ssanaruns.pk, 'path': 'fake3'}],
             'show_analysis_profile': True,
             'nfprofiles': '["prof2"]', 'queue_name': 'q2', 'scratchdir': '/path/to/otherscratch'})
         self.assertEqual(f'Saved server test_mount_ana_upd with ID {pk}', upd_resp.json()['msg'])
@@ -473,7 +473,7 @@ class TestSaveServers(BaseQCFileTest):
             'name': 'test_mount_ana_upd', 'uri': 'uritma', 'fqdn': 'a.b.c.d', 'active': True,
             'can_backup': False,
             'can_rsync_remote': False, 'rsyncusername': '', 'rsynckeyfile': 'testfile',
-            'mounted': [(self.ssanaruns.pk, 'fake3')], 'show_analysis_profile': False})
+            'mounted': [{'share': self.ssanaruns.pk, 'path': 'fake3'}], 'show_analysis_profile': False})
         self.assertEqual(f'Saved server test_mount_ana_upd with ID {pk}', upd_resp.json()['msg'])
         fs.refresh_from_db()
         self.assertEqual(fs.name, 'test_mount_ana_upd')
@@ -487,7 +487,7 @@ class TestSaveServers(BaseQCFileTest):
             'name': 'test_mount_ana_upd_deac', 'uri': 'uritma', 'fqdn': 'a.b.c.d', 'active': False,
             'can_backup': False,
             'can_rsync_remote': False, 'rsyncusername': '', 'rsynckeyfile': 'testfile',
-            'mounted': [(self.ssana.pk, 'fake2'), (self.ssanaruns.pk, 'fake3')],
+            'mounted': [{'share': self.ssana.pk, 'path': 'fake2'}, {'share': self.ssanaruns.pk, 'path': 'fake3'}],
             'show_analysis_profile': True,
             'nfprofiles': '["prof2"]', 'queue_name': 'q2', 'scratchdir': '/path/to/otherscratch'})
         self.assertEqual(f'Deactivated server with ID {pk}', upd_resp.json()['msg'])
@@ -501,7 +501,7 @@ class TestSaveServers(BaseQCFileTest):
             'name': 'test_mount_ana_upd_deac', 'uri': 'uritma', 'fqdn': 'a.b.c.d', 'active': False,
             'can_backup': False,
             'can_rsync_remote': False, 'rsyncusername': '', 'rsynckeyfile': 'testfile',
-            'mounted': [(self.ssana.pk, 'fake2'), (self.ssanaruns.pk, 'fake3')],
+            'mounted': [{'share': self.ssana.pk, 'path': 'fake2'}, {'share': self.ssanaruns.pk, 'share': 'fake3'}],
             'show_analysis_profile': True,
             'nfprofiles': '["prof2"]', 'queue_name': 'q2', 'scratchdir': '/path/to/otherscratch'})
         self.assertEqual(f'Cannot update deactivated server', upd_resp.json()['msg'])
@@ -516,7 +516,7 @@ class TestSaveServers(BaseQCFileTest):
             'name': 'test_mount_ana_upd_act', 'uri': 'uritma', 'fqdn': 'a.b.c.d', 'active': True,
             'can_backup': False,
             'can_rsync_remote': False, 'rsyncusername': '', 'rsynckeyfile': 'testfile',
-            'mounted': [(self.ssana.pk, 'fake2'), (self.ssanaruns.pk, 'fake3')],
+            'mounted': [{'share': self.ssana.pk, 'path': 'fake2'}, {'share': self.ssanaruns.pk, 'path': 'fake3'}],
             'show_analysis_profile': True,
             'nfprofiles': '["prof2"]', 'queue_name': 'q2', 'scratchdir': '/path/to/otherscratch'})
         self.assertEqual(f'Saved server test_mount_ana_upd_act with ID {pk}', upd_resp.json()['msg'])

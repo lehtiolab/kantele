@@ -430,11 +430,11 @@ def save_server(request):
         fs = rm.FileServer.objects.create(**{f: data[f] for f in ['name', 'uri', 'fqdn', 'active',
             'can_backup', 'can_rsync_remote', 'rsyncusername', 'rsynckeyfile']})
 
-    for share_id, path in data['mounted']:
-        rm.FileserverShare.objects.update_or_create(server=fs, share_id=share_id,
-                defaults={'path': path})
+    for mount in data['mounted']:
+        rm.FileserverShare.objects.update_or_create(server=fs, share_id=mount['share'],
+                defaults={'path': mount['path']})
     rm.FileserverShare.objects.filter(server=fs).exclude(
-            share_id__in=[x[0] for x in data['mounted']]).delete()
+            share_id__in=[x['share'] for x in data['mounted']]).delete()
 
     if data['show_analysis_profile']:
         rm.AnalysisServerProfile.objects.update_or_create(server=fs, defaults={
