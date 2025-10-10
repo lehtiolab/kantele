@@ -55,7 +55,7 @@ class MSInstrument(models.Model):
 
 class DataSecurityClass(models.IntegerChoices):
     # Go from lowest to highest classification
-    NOSECURITY = 1, 'Not classified'
+    NOSECURITY = 1, 'Accessible'
     # FIXME when ready, also have personal data dsets
     # update the analysis/tests.py then, will return more serevrs in getdatasets (there are TODOs marked)
     #PERSONAL = 2, 'Personal data'
@@ -71,11 +71,6 @@ class FileServer(models.Model):
     uri = models.TextField(help_text='How users can find server')
     fqdn = models.TextField(help_text='controller URL for rsync SSH')
     active = models.BooleanField(default=True, help_text='Are we using this server?')
-    # Is this an analysis server? In that case we specify 
-    is_analysis = models.BooleanField(default=False)
-    # Scratchdir is for nxf TMPDIR, and stageing (and can be blank for analysis servers too)
-    scratchdir = models.TextField(blank=True,
-            help_text='For nextflow TMPDIR and stage if needed. Can be blank even for analysis servers')
     can_rsync_remote = models.BooleanField(default=False, help_text='Does the server have rsync private keys for other servers (aka is some kind of controller)')
     can_backup = models.BooleanField(default=False)
     # username/keyfilename are for access TO this server 
@@ -113,12 +108,11 @@ class ServerShare(models.Model):
     name = models.TextField(unique=True)  # storage, tmp,
     max_security = models.IntegerField(choices=DataSecurityClass.choices)
     description = models.TextField()
+    # deactivating does not deactivate SFLoc, since you should be able to reactivate again
     active = models.BooleanField(default=True)
     function = models.IntegerField(choices=ShareFunction.choices)
     maxdays_data = models.IntegerField(default=0, help_text='How many days after inactive files are'
             'deleted from the share, 0 means inifinite')
-    # This may become obsolete in the future but is needed now
-    has_rawdata = models.BooleanField(default=True)
 
     def __str__(self):
         return self.name

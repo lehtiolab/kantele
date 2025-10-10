@@ -77,8 +77,16 @@ class RefineMzmls(DatasetJob):
         # or do we not know which share output will be put on?? NF RUNDIR should be in db
         # otherwise we cannot register!
 
-        dss = dm.DatasetServer.objects.values('storage_loc').get(pk=kwargs['dss_id'])
-        anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['server_id'])
+        try:
+            dss = dm.DatasetServer.objects.values('storage_loc').get(pk=kwargs['dss_id'],
+                    storageshare__active=True)
+        except dm.DatasetServer.DoesNotExist:
+            raise RuntimeError('Dataset to refine is not on an existing active servershare')
+        try:
+            anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['server_id'],
+                    server__active=True)
+        except rm.AnalysisServerProfile.DoesNotExist:
+            raise RuntimeError('Server chosen to run refine workflow is not existing/active')
         self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_NXF)
         sharemap = {fss['share_id']: fss['path'] for fss in rm.FileserverShare.objects.filter(
             server__active=True, share__active=True,
@@ -139,7 +147,12 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
         sfl = rm.StoredFileLoc.objects.values('servershare_id', 'path', 'sfile__filename',
                 'sfile__rawfile_id', 'sfile__rawfile__producer__name').get(pk=kwargs['sfloc_id'])
-        anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['fserver_id'])
+        try:
+            anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['fserver_id'],
+                    server__active=True)
+        except rm.AnalysisServerProfile.DoesNotExist:
+            raise RuntimeError('Processing server requested does not exist or is not active or is '
+                    'not capable of analysis')
         self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_QC_NXF)
 
         wf = models.UserWorkflow.objects.filter(wftype=models.UserWorkflow.WFTypeChoices.QC).last()
@@ -262,7 +275,8 @@ class RunNextflowWorkflow(MultiDatasetJob):
             anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['fserver_id'],
                     server__active=True)
         except rm.AnalysisServerProfile.DoesNotExist:
-            raise RuntimeError('Server specified no longer exists or active')
+            raise RuntimeError('Processing server requested does not exist or is not active or is '
+                    'not capable of analysis')
         self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_NXF)
         sharemap = {fss['share_id']: fss['path'] for fss in rm.FileserverShare.objects.filter(
             share__active=True, server_id=kwargs['fserver_id']).values('share_id', 'path')}

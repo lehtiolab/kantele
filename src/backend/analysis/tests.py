@@ -93,7 +93,7 @@ class AnalysisPageTest(BaseIntegrationTest):
         am.PsetFileParam.objects.create(pset=self.pset, param=self.pfn2, allow_resultfiles=True)
 
         self.nfwf = am.NextflowWfVersionParamset.objects.create(update='an update', commit='abc123',
-                filename='main.nf', profiles=[], nfworkflow=self.nfw, paramset=self.pset, nfversion='22', active=True)
+                filename='main.nf', nfworkflow=self.nfw, paramset=self.pset, nfversion='22', active=True)
         self.wftype = am.UserWorkflow.WFTypeChoices.STD
         self.wf = am.UserWorkflow.objects.create(name='testwf', wftype=self.wftype, public=True)
         self.wf.nfwfversionparamsets.add(self.nfwf)

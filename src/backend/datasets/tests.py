@@ -1162,7 +1162,7 @@ class TestUnlockDataset(BaseTest):
         nfw = am.NextflowWorkflowRepo.objects.create(description='a wf', repo='gh/wf')
         pset = am.ParameterSet.objects.create(name='ps1')
         nfwf = am.NextflowWfVersionParamset.objects.create(update='an update', commit='abc123',
-           filename='main.nf', profiles=[], nfworkflow=nfw, paramset=pset, nfversion='22', active=True)
+           filename='main.nf', nfworkflow=nfw, paramset=pset, nfversion='22', active=True)
         wftype = am.UserWorkflow.WFTypeChoices.STD
         wf = am.UserWorkflow.objects.create(name='testwf', wftype=wftype, public=True)
         wf.nfwfversionparamsets.add(nfwf)
