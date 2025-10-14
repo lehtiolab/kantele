@@ -209,7 +209,7 @@ class ConvertDatasetMzml(DatasetJob):
         dstpath = os.path.join(analocalshare['path'], runpath)
 
         pwiz = Proteowizard.objects.get(pk=kwargs['pwiz_id'])
-        for sfl in self.getfiles_query(**kwargs):
+        for sfl in self.oncreate_getfiles_query(**kwargs):
             mzmlfilename = os.path.splitext(sfl.sfile.filename)[0] + '.mzML'
             localmzsf, localmzsfl = get_or_create_mzmlentry(sfl.sfile, pwiz=pwiz, refined=False,
                     servershare_id=analocalshare['share_id'], path=dstpath, mzmlfilename=mzmlfilename)
