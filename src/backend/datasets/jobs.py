@@ -211,9 +211,14 @@ class ConvertDatasetMzml(DatasetJob):
         pwiz = Proteowizard.objects.get(pk=kwargs['pwiz_id'])
         for sfl in self.oncreate_getfiles_query(**kwargs):
             mzmlfilename = os.path.splitext(sfl.sfile.filename)[0] + '.mzML'
-            localmzsf, localmzsfl = get_or_create_mzmlentry(sfl.sfile, pwiz=pwiz, refined=False,
-                    servershare_id=analocalshare['share_id'], path=dstpath, mzmlfilename=mzmlfilename)
-            dst_sfls.append(localmzsfl.pk)
+            localmzsfl = get_or_create_mzmlentry(sfl.sfile, pwiz=pwiz, refined=False, path=dstpath,
+                    servershare_id=analocalshare['share_id'], mzmlfilename=mzmlfilename)
+            if localmzsfl:
+                dst_sfls.append(localmzsfl.pk)
+            else:
+                # This goes to system log, not user
+                raise RuntimeError('Trying to create mzML that already seems to exist, '
+                        f'{mzmlfilename}')
         return {'dstsfloc_ids': dst_sfls, 'runpath': runpath, 
                 'srcsharepath': anasrcshareonserver['path']}
 
@@ -277,6 +282,8 @@ def get_or_create_mzmlentry(sfile, pwiz, refined, servershare_id, path, mzmlfile
             rawfile_id=sfile.rawfile_id, filetype_id=sfile.filetype_id, defaults={'md5': new_md5,
                 'filename': mzmlfilename})
     # Update sfl path if old (inactive) exists, since new job -> new runpath
+    # Do not set active here, first check if that is already the case below, to detect
+    # existing files to skip
     sfl, sfl_cr = StoredFileLoc.objects.update_or_create(sfile=mzsf, servershare_id=servershare_id,
             defaults={'path': path})
     if cr:
@@ -285,7 +292,7 @@ def get_or_create_mzmlentry(sfile, pwiz, refined, servershare_id, path, mzmlfile
         # Old file exists or is going to be made in a job, skip it. This will make job error
         # but it probably should do that, as it may occur when you delete a job
         # FIXME now we really need an on_delete/on_create thing on the job, to reset dst_sflocs
-        return False, False
+        return False
     elif not sfl_cr:
         # Any previous mzML files which are (set to be) deleted or otherwise odd (not checked)
         # need resetting. Only update in case of non-active/checked, so cannot use update_or_create
@@ -295,4 +302,4 @@ def get_or_create_mzmlentry(sfile, pwiz, refined, servershare_id, path, mzmlfile
         mzsf.deleted = False
         mzsf.md5 = new_md5
         mzsf.save()
-    return mzsf, sfl
+    return sfl

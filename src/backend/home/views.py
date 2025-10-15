@@ -989,7 +989,8 @@ def create_mzmls(request):
     mzmls_exist_any_deleted_state = filemodels.StoredFile.objects.filter(
             rawfile__datasetrawfile__dataset=dset, checked=True, mzmlfile__isnull=False)
     mzmls_exist = mzmls_exist_any_deleted_state.filter(deleted=False, storedfileloc__active=True)
-    if num_rawfns == mzmls_exist.filter(mzmlfile__pwiz=pwiz).count():
+    mzmls_exist_samepw = mzmls_exist.filter(mzmlfile__pwiz=pwiz)
+    if num_rawfns == mzmls_exist_samepw.count():
         return JsonResponse({'error': 'This dataset already has existing mzML files of that '
             'proteowizard version'}, status=403)
     # Get all sfl which are on a share attached to analysis server
@@ -1025,7 +1026,10 @@ def create_mzmls(request):
         del_sfl_q.update(active=False)
     # Now queue the convert, then queue redistribution to other places
     # Pick one but any servershare which is reachable on an analysis server:
-    srcsfl_pk = [x['pk'] for x in rawsfl.filter(servershare_id=source_ssid).values('pk')]
+    # Leave out existing mzMLs in case of half-complete dataset (e.g. when 
+    # broken mzMLs have been deleted by admin)
+    srcsfl_pk = [x['pk'] for x in rawsfl.filter(servershare_id=source_ssid).exclude(
+        sfile__rawfile__in=[x['rawfile'] for x in mzmls_exist_samepw.values('rawfile')]).values('pk')]
     dss_id = dsmodels.DatasetServer.objects.filter(dataset=dset,
             storageshare_id=source_ssid).values('pk').get()['pk']
 
@@ -1098,21 +1102,22 @@ def refine_mzmls(request):
     # Check if existing normal/refined mzMLs (normal mzMLs can be deleted for this 
     # due to age, its just the number we need, but refined mzMLs should not be)
     mzmls = filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=dset, 
-            mzmlfile__isnull=False, checked=True)
-    nr_refined = mzmls.filter(mzmlfile__refined=True, deleted=False).count()
+            mzmlfile__isnull=False, checked=True, deleted=False)
+    existing_refined = mzmls.filter(mzmlfile__refined=True, storedfileloc__active=True
+            ).distinct('pk')
     normal_mzml = mzmls.filter(mzmlfile__refined=False)
-    nr_exist_mzml = normal_mzml.filter(deleted=False, storedfileloc__active=True).count()
+    # need to distinct because join on sfl can duplicate rows
+    nr_exist_mzml = normal_mzml.filter(storedfileloc__active=True).distinct('pk').count()
     nr_dsrs = dset.datasetrawfile_set.count()
     if not nr_dsrs:
         return JsonResponse({'error': 'There are no raw files in dataset'}, status=403)
-    elif nr_refined and normal_mzml.count() == nr_refined:
-        return JsonResponse({'error': 'Refined data already exists'}, status=403)
     elif nr_exist_mzml < nr_dsrs:
-        # This also checks for accidental identical names of the files (shouldnt be possible
-        # inside a dataset, but still)
         return JsonResponse({'error': 'Need to create normal mzMLs before refining'}, status=403)
+    elif nr_exist_mzml == existing_refined.count():
+        return JsonResponse({'error': 'Refined data already exists'}, status=403)
 
     # Check if we have files on a server with analysis
+    # there should never be active sflocs of multiple pwiz versions
     mzmlsfl = filemodels.StoredFileLoc.objects.filter(sfile__rawfile__datasetrawfile__dataset=dset,
             active=True, sfile__mzmlfile__isnull=False,
             servershare__fileservershare__server__analysisserverprofile__isnull=False,
@@ -1155,7 +1160,8 @@ def refine_mzmls(request):
             editable=False)
 
     dss_id, source_ssid = srcdss['pk'], srcdss['storageshare_id']
-    srcsfl_pk = [x['pk'] for x in mzmlsfl.filter(servershare_id=source_ssid).values('pk')]
+    srcsfl_pk = [x['pk'] for x in mzmlsfl.filter(servershare_id=source_ssid).exclude(
+        sfile__rawfile__in=[x['rawfile'] for x in existing_refined.values('rawfile')]).values('pk')]
     job = create_job('refine_mzmls', dss_id=dss_id, analysis_id=analysis.id, wfv_id=data['wfid'],
             sfloc_ids=srcsfl_pk, dbfn_id=dbid, qtype=dset.quantdataset.quanttype.shortname,
             instrument=instrument, anaserver_id=anaserver_id)

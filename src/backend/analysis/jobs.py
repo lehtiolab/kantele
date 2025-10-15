@@ -55,16 +55,18 @@ class RefineMzmls(DatasetJob):
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
         dstpath = os.path.join(analocalshare['path'],
                 analysis.get_run_base_dir(models.UserWorkflow.WFTypeChoices.SPEC))
-        for sfl in self.getfiles_query(**kwargs).select_related('sfile__mzmlfile__pwiz', 'sfile'):
+        for sfl in self.oncreate_getfiles_query(**kwargs).select_related('sfile__mzmlfile__pwiz', 'sfile'):
             mzmlfilename = f'{os.path.splitext(sfl.sfile.filename)[0]}_refined.mzML'
             # Create local mzsfl for the analysis server, to rsync from
-            localmzsf, localmzsfl = get_or_create_mzmlentry(sfl.sfile, pwiz=sfl.sfile.mzmlfile.pwiz,
+            localmzsfl = get_or_create_mzmlentry(sfl.sfile, pwiz=sfl.sfile.mzmlfile.pwiz,
                     refined=True, servershare_id=analocalshare['share_id'], path=dstpath,
                     mzmlfilename=mzmlfilename)
-            if localmzsf:
-                local_dst_sfls.append(localmzsfl.pk)
-
-            dst_sfls.append(localmzsfl.pk)
+            if localmzsfl:
+                dst_sfls.append(localmzsfl.pk)
+            else:
+                # This goes to system log, not user
+                raise RuntimeError('Trying to create mzML that already seems to exist, '
+                        f'{mzmlfilename}')
         return {'dstsfloc_ids': dst_sfls, 'server_id': kwargs['anaserver_id'],
                 'srcsharepath': anasrcshareonserver['path']}
 

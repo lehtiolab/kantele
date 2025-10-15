@@ -60,6 +60,50 @@ class TestCreateMzmls(MzmlTests):
         self.assertEqual(resp.status_code, 403)
         self.assertIn('already has existing mzML files of that proteowizard', resp.json()['error'])
 
+        # Create second raw file for dset
+        f3raw2 = rm.RawFile.objects.create(name='f3raw2', producer=self.prod,
+                source_md5='f3_fakemd5_2', size=100, date=timezone.now(), claimed=True,
+                usetype=rm.UploadFileType.RAWFILE)
+        dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=f3raw2)
+        f3sf2 = rm.StoredFile.objects.create(rawfile=f3raw2, filename=f3raw2.name,
+                md5=f3raw2.source_md5, filetype=self.ft, checked=True)
+        f3sss2 = rm.StoredFileLoc.objects.create(sfile=f3sf2, servershare=self.ssnewstore,
+                path=self.storloc, active=True, purged=False)
+
+        j_q = jm.Job.objects.filter(funcname='convert_dataset_mzml')
+        self.assertFalse(j_q.exists())
+        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pwiz.pk,
+            'dsid': self.ds.pk})
+        j = j_q.get()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(j.state, Jobstates.PENDING)
+        with open(os.path.join(self.f3path, f3raw2.name), 'w') as fp:
+            pass
+        exp_kw  = {'options': [], 'filters': ['"peakPicking true 2"', '"precursorRefine"'], 
+                'dss_id': self.dss.pk, 'pwiz_id': self.pwiz.pk, 'sfloc_ids': [f3sss2.pk]}
+        for k, val in exp_kw.items():
+            self.assertEqual(j.kwargs[k], val)
+        mzmlfn = f'{os.path.splitext(f3raw2.name)[0]}.mzML'
+        mzmlfn0 = os.path.join(self.rootdir, self.nfrunshare.path,
+                f'{self.ds.pk}_convert_mzml_{j.kwargs["timestamp"]}', mzmlfn)
+        mzmlfn1 = os.path.join(self.f3path, mzmlfn)
+        mzml_sf = rm.StoredFile.objects.get(rawfile=f3raw2, mzmlfile__pwiz=self.pwiz.pk)
+        mzml_q = rm.StoredFileLoc.objects.filter(sfile=mzml_sf, servershare=self.ssnewstore,
+                active=True)
+        self.assertTrue(mzml_q.filter(purged=True).exists())
+        self.assertFalse(os.path.exists(mzmlfn0))
+        j = jm.Job.objects.first()
+        self.run_job() # convert mzml
+        self.assertTrue(os.path.exists(mzmlfn0))
+        self.assertFalse(os.path.exists(mzmlfn1))
+        self.assertFalse(mzml_q.filter(purged=False).exists())
+        self.run_job() # running rsync to newstorage
+        self.assertTrue(os.path.exists(mzmlfn1))
+        self.assertTrue(mzml_q.filter(purged=False).exists())
+        self.run_job() # setting to done
+        j2 = jm.Job.objects.last()
+        self.assertEqual(j2.state, 'done')
+
     def test_other_pwiz_rsyncpull(self):
         '''Test if old pwiz existing files get purge job BEFORE launching new job, files are
         pulled from analysis to storage after w rsync'''
@@ -365,11 +409,30 @@ class TestRefineMzmls(MzmlTests):
                 filetype=self.lft, checked=True, filename=dbraw.name)
         rm.StoredFileLoc.objects.create(sfile=dbsf, servershare=self.analocalstor, path='libfiles',
                 active=True, purged=False)
-        # Create a real mzML file to refine
-        with open(os.path.join(self.newstorctrl.path, self.f3mzsss.path, self.f3sfmz.filename), 'w') as fp:
-            pass
+        # Create second file for dset
+        f3raw2 = rm.RawFile.objects.create(name='f3raw2', producer=self.prod,
+                source_md5='f3_fakemd5_2', size=100, date=timezone.now(), claimed=True,
+                usetype=rm.UploadFileType.RAWFILE)
+        dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=f3raw2)
+        f3sf2 = rm.StoredFile.objects.create(rawfile=f3raw2, filename=f3raw2.name,
+                md5=f3raw2.source_md5, filetype=self.ft, checked=True)
+        f3sss2 = rm.StoredFileLoc.objects.create(sfile=f3sf2, servershare=self.ssnewstore,
+                path=self.storloc, active=True, purged=False)
+        f3sfmz2 = rm.StoredFile.objects.create(rawfile=f3raw2,
+                filename=f'{os.path.splitext(f3raw2.name)[0]}.mzML',
+                md5='md5_for_f3sf_mzml2', filetype=self.ft, checked=True)
+        f3mzsss2 = rm.StoredFileLoc.objects.create(sfile=f3sfmz2, servershare=self.ssnewstore,
+                path=self.storloc, active=True, purged=False)
+        f3mzml2 = am.MzmlFile.objects.create(sfile=f3sfmz2, pwiz=self.pwiz)
+
+        refined1 = rm.StoredFile.objects.filter(mzmlfile__refined=True, rawfile=self.f3raw, deleted=False)
+        refined2 = rm.StoredFile.objects.filter(mzmlfile__refined=True, rawfile=f3raw2, deleted=False)
+        self.assertFalse(refined1.exists())
+        self.assertFalse(refined2.exists())
         resp = self.cl.post(self.url, content_type='application/json', data={'dsid': self.ds.pk,
             'dbid': dbsf.pk, 'wfid': self.refinewf.pk})
+        self.assertTrue(refined1.exists())
+        self.assertTrue(refined2.exists())
         self.assertEqual(resp.status_code, 200)
         jdb = jm.Job.objects.first()
         self.assertEqual(jdb.funcname, 'rsync_otherfiles_to_servershare')
@@ -380,16 +443,59 @@ class TestRefineMzmls(MzmlTests):
             self.assertEqual(j.kwargs[k], val)
         self.run_job() # rsync db
         mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}_refined.mzML'
+        mzmlfn2 = f'{os.path.splitext(f3raw2.name)[0]}_refined.mzML'
         ana = am.Analysis.objects.last()
-        mzmlfn1 = os.path.join(self.rootdir, self.nfrunshare.path, ana.get_run_base_dir(), mzmlfn)
-        mzmlfn2 = os.path.join(self.f3path, mzmlfn)
-        self.assertFalse(os.path.exists(mzmlfn1))
+        mzmlfn1_nf = os.path.join(self.rootdir, self.nfrunshare.path, ana.get_run_base_dir(), mzmlfn)
+        mzmlfn1_path = os.path.join(self.f3path, mzmlfn)
+        mzmlfn2_nf = os.path.join(self.rootdir, self.nfrunshare.path, ana.get_run_base_dir(), mzmlfn2)
+        mzmlfn2_path = os.path.join(self.f3path, mzmlfn2)
+        self.assertFalse(os.path.exists(mzmlfn1_nf))
+        self.assertFalse(os.path.exists(mzmlfn2_nf))
+        self.assertFalse(os.path.exists(mzmlfn1_path))
+        self.assertFalse(os.path.exists(mzmlfn2_path))
         self.run_job() # refining
-        self.assertTrue(os.path.exists(mzmlfn1))
-        self.assertFalse(os.path.exists(mzmlfn2))
+        self.assertTrue(os.path.exists(mzmlfn1_nf))
+        self.assertFalse(os.path.exists(mzmlfn1_path))
+        self.assertTrue(os.path.exists(mzmlfn2_nf))
+        self.assertFalse(os.path.exists(mzmlfn2_path))
         self.run_job() # rsync refined files
-        self.assertTrue(os.path.exists(mzmlfn2))
+        self.assertTrue(os.path.exists(mzmlfn1_path))
+        self.assertTrue(os.path.exists(mzmlfn2_path))
         self.run_job() # set to done
         j = jm.Job.objects.last()
         self.assertEqual(j.funcname, 'rsync_dset_files_to_servershare')
         self.assertEqual(j.state, Jobstates.DONE)
+
+        # Delete one of the refined mzMLs and re-run
+        refined2.delete()
+        os.unlink(mzmlfn2_nf)
+        os.unlink(mzmlfn2_path)
+        resp = self.cl.post(self.url, content_type='application/json', data={'dsid': self.ds.pk,
+            'dbid': dbsf.pk, 'wfid': self.refinewf.pk})
+        self.assertEqual(resp.status_code, 200)
+        jdb = jm.Job.objects.first()
+        self.assertEqual(jdb.funcname, 'rsync_otherfiles_to_servershare')
+        j2 = jm.Job.objects.filter(funcname='refine_mzmls').last()
+        self.assertGreater(j2.pk, j.pk)
+        exp_kw = {'dss_id': self.dss.pk, 'wfv_id': self.refinewf.pk, 'dbfn_id': dbsf.pk, 
+                'qtype': self.ds.quantdataset.quanttype.shortname}
+        for k, val in exp_kw.items():
+            self.assertEqual(j2.kwargs[k], val)
+        ana = am.Analysis.objects.last()
+        # re-define path bc new run dir
+        mzmlfn2_nf = os.path.join(self.rootdir, self.nfrunshare.path, ana.get_run_base_dir(), mzmlfn2)
+        self.assertFalse(os.path.exists(mzmlfn2_nf))
+        self.assertTrue(os.path.exists(mzmlfn1_path))
+        self.assertFalse(os.path.exists(mzmlfn2_path))
+        self.run_job() # refining
+        self.assertTrue(os.path.exists(mzmlfn1_path))
+        self.assertTrue(os.path.exists(mzmlfn2_nf))
+        self.assertFalse(os.path.exists(mzmlfn2_path))
+        self.run_job() # rsync refined files
+        self.assertTrue(os.path.exists(mzmlfn1_path))
+        self.assertTrue(os.path.exists(mzmlfn2_path))
+        self.run_job() # set to done
+        j = jm.Job.objects.last()
+        self.assertEqual(j.funcname, 'rsync_dset_files_to_servershare')
+        self.assertEqual(j.state, Jobstates.DONE)
+
