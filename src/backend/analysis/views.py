@@ -1011,7 +1011,7 @@ def store_analysis(request):
         try:
             exta = exta.get()
         except am.ExternalAnalysis.DoesNotExist:
-            upl_ft = rm.StoredFileType.objects.get(filetype=settings.ANALYSIS_FT_NAME)
+            upl_ft = rm.StoredFileType.objects.get(name=settings.ANALYSIS_FT_NAME)
             ana_prod = rm.Producer.objects.get(client_id=settings.ANALYSISCLIENT_APIKEY)
             upl_token = create_upload_token(upl_ft.pk, request.user.pk, ana_prod,
                     rm.UploadFileType.ANALYSIS)
@@ -1234,8 +1234,8 @@ def store_analysis(request):
         else:
             jobid = create_job(fname, state=jj.Jobstates.WAITING, **kwargs)['id']
         am.NextflowSearch.objects.update_or_create(defaults={'nfwfversionparamset_id': req['nfwfvid'], 'job_id': jobid, 'workflow_id': req['wfid'], 'token': ''}, analysis=analysis)
-        analysis.storage_dir = analysis.get_public_output_dir()
-        analysis.save()
+    analysis.storage_dir = analysis.get_public_output_dir()
+    analysis.save()
     return JsonResponse({'errmsg': False, 'multierror': [], 'analysis_id': analysis.id, 'token': api_token})
 
 

@@ -3,6 +3,7 @@ import os
 import json
 from glob import glob
 from time import sleep
+from base64 import b64encode
 
 from django.core.management import call_command
 from django.utils import timezone
@@ -680,6 +681,43 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.wftype = am.UserWorkflow.WFTypeChoices.STD
         self.wf = am.UserWorkflow.objects.create(name='testwf', wftype=self.wftype, public=True)
         self.wf.nfwfversionparamsets.add(self.nfwf)
+
+    def test_store_external_analysis(self):
+        params = {'flags': {}, 'inputparams': {}, 'multicheck': {}}
+        postdata = {'dsids': [], 'upload_external': True, 'external_description': 'bla bla',
+                'analysis_id': False, 'infiles': {}, 'picked_ftypes': {}, 'nfwfvid': False,
+                'dssetnames': {}, 'components': {'ISOQUANT_SAMPLETABLE': False, 'ISOQUANT': {}},
+                'analysisname': 'Test new external analysis', 'fnfields': {}, 'dsetfields': {},
+                'params': params, 'singlefiles': {}, 'multifiles': {}, 'base_analysis': {
+                    'isComplement': False, 'dsets_identical': False, 'selected': False,
+                    'typedname': '', 'fetched': {}, 'resultfiles': []},
+                'wfid': False, 'analysisserver_id': False,
+            }
+        resp = self.cl.post(self.url, content_type='application/json', data=postdata)
+        self.assertEqual(resp.status_code, 200)
+        timestamp = datetime.strftime(datetime.now(), '%Y%m%d_')
+        ana = am.Analysis.objects.last()
+        self.assertFalse(hasattr(ana, 'analysissampletable'))
+        self.assertFalse(am.AnalysisDatasetSetValue.objects.filter(analysis=ana).exists())
+        self.assertFalse(am.AnalysisSetname.objects.filter(analysis=ana).exists())
+        self.assertFalse(am.DatasetAnalysis.objects.filter(analysis=ana).exists())
+        self.assertFalse(am.AnalysisSetname.objects.filter(analysis=ana).exists())
+        self.assertFalse(am.AnalysisParam.objects.filter(analysis=ana).exists())
+        self.assertEqual(ana.name, postdata['analysisname'])
+        self.assertEqual(ana.storage_dir, ana.get_public_output_dir())
+        startrundir = f'{self.user.username}/{ana.pk}_USER_{ana.name.replace(' ', '_')}_{timestamp}'
+        self.assertTrue(ana.storage_dir.startswith(startrundir))
+        token = rm.UploadToken.objects.last()
+        checkjson = {'errmsg': False, 'multierror': [], 'analysis_id': ana.pk, 'token': {
+            'expired': False, 'expires': datetime.strftime(token.expires, '%Y-%m-%d, %H:%M'),
+            'user_token': b64encode(f'{token.token}|{settings.KANTELEHOST}|0'.encode('utf-8')).decode('utf-8')
+            }}
+        self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
+        startresp = self.cl.post('/analysis/start/', content_type='application/json',
+                data={'analysis_id': resp.json()['analysis_id']})
+        self.assertEqual(startresp.status_code, 403)
+        self.assertEqual(startresp.json(), {'error': 'This job does not exist (anymore), '
+            'it may have been deleted'})
 
     def test_new_analysis_and_run_and_purge(self):
         quant = self.ds.quantdataset.quanttype
