@@ -1044,16 +1044,11 @@ def create_mzmls(request):
             dataset=dset, active=True)}
         share_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
                 dstshare_ids_dss.keys(), mzjob['kwargs']['server_id'])
-        # First put result in local-to-analysis-server share
-        for dstshare_id in share_classes['local']:
-            local_rsjob = create_job('rsync_dset_files_to_servershare',
-                    dss_id=dstshare_ids_dss[dstshare_id],
-                    sfloc_ids=mzjob['kwargs']['dstsfloc_ids'], dstshare_id=dstshare_id)
-        # Then put result in rsync-accessible share
+        # First put result in rsync-accessible share
         for dstshare_id in share_classes['rsync_sourcable']:
             srcjob = create_job('rsync_dset_files_to_servershare', dstshare_id=dstshare_id,
                     dss_id=dstshare_ids_dss[dstshare_id],
-                    sfloc_ids=local_rsjob['kwargs']['dstsfloc_ids'])
+                    sfloc_ids=mzjob['kwargs']['dstsfloc_ids'])
             src_sflids_for_remote = srcjob['kwargs']['dstsfloc_ids']
         if share_classes['remote'] and not share_classes['rsync_sourcable']:
             # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
@@ -1174,15 +1169,15 @@ def refine_mzmls(request):
             dataset=dset, active=True)}
         share_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
                 dstshare_ids_dss.keys(), job['kwargs']['server_id'])
-        # First put result in local-to-analysis-server share
-        for dstshare_id in share_classes['local']:
-            local_rsjob = create_job('rsync_dset_files_to_servershare',
-                    dss_id=dstshare_ids_dss[dstshare_id],
-                    sfloc_ids=job['kwargs']['dstsfloc_ids'], dstshare_id=dstshare_id)
+#        # First put result in local-to-analysis-server share
+#        for dstshare_id in share_classes['local']:
+#            local_rsjob = create_job('rsync_dset_files_to_servershare',
+#                    dss_id=dstshare_ids_dss[dstshare_id],
+#                    sfloc_ids=job['kwargs']['dstsfloc_ids'], dstshare_id=dstshare_id)
         # Then put result in rsync-accessible share
         for dstshare_id in share_classes['rsync_sourcable']:
             srcjob = create_job('rsync_dset_files_to_servershare', dstshare_id=dstshare_id,
-                    dss_id=dstshare_ids_dss[dstshare_id], sfloc_ids=local_rsjob['kwargs']['dstsfloc_ids'])
+                    dss_id=dstshare_ids_dss[dstshare_id], sfloc_ids=job['kwargs']['dstsfloc_ids'])
             src_sflids_for_remote = srcjob['kwargs']['dstsfloc_ids']
         if share_classes['remote'] and not share_classes['rsync_sourcable']:
             # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
@@ -1190,7 +1185,7 @@ def refine_mzmls(request):
             dstshare = filemodels.ServerShare.objects.filter(function=filemodels.ShareFunction.INBOX
                     ).values('pk').first()
             src_sflids_for_remote = []
-            for sflpk in local_rsjob['kwargs']['dstsfloc_ids']:
+            for sflpk in job['kwargs']['dstsfloc_ids']:
                 srcjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflpk,
                         dstshare_id=dstshare['pk'], dstpath=filemodels.ServerShare.get_inbox_path(
                             dset_id=dset.pk))

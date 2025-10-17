@@ -36,8 +36,9 @@ def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profile
         cmdraws = ';'.join([os.path.join(x[0], x[1]) for x in raws])
         params.extend(['--raws', cmdraws])
     try:
-        run_outdir = run_nextflow(run, params, basedir, gitwfdir, profiles, nf_version, scratchdir)
+        run_outdir = run_nextflow(run, params, run['dsspath'], gitwfdir, profiles, nf_version, scratchdir)
     except subprocess.CalledProcessError as e:
+        print(e)
         errmsg = process_error_from_nf_log(os.path.join(gitwfdir, '.nextflow.log'))
         taskfail_update_db(self.request.id, errmsg)
         raise RuntimeError('Error occurred converting mzML files: '

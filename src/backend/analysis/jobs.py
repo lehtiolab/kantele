@@ -45,24 +45,21 @@ class RefineMzmls(DatasetJob):
         shares where the dataset is, and we need the ids for that job'''
         local_dst_sfls, remote_dst_sfls = [], []
         dst_sfls = []
-        dss = dm.DatasetServer.objects.values('storageshare_id').get(pk=kwargs['dss_id'])
-        analocalshare = rm.FileserverShare.objects.filter(server_id=kwargs['anaserver_id'],
-                share__active=True,
-                share__function=rm.ShareFunction.ANALYSISRESULTS).values('share_id', 'path').first()
+        dss = dm.DatasetServer.objects.values('storageshare_id', 'storage_loc').get(
+                pk=kwargs['dss_id'])
         anasrcshareonserver = rm.FileserverShare.objects.filter(server_id=kwargs['anaserver_id'],
-                share_id=dss['storageshare_id']).values('path').first()
+                share_id=dss['storageshare_id']).values('path', 'share_id').first()
 
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
-        dstpath = os.path.join(analocalshare['path'],
-                analysis.get_run_base_dir(models.UserWorkflow.WFTypeChoices.SPEC))
+        dstpath = os.path.join(anasrcshareonserver['path'], dss['storage_loc'])
         for sfl in self.oncreate_getfiles_query(**kwargs).select_related('sfile__mzmlfile__pwiz', 'sfile'):
             mzmlfilename = f'{os.path.splitext(sfl.sfile.filename)[0]}_refined.mzML'
             # Create local mzsfl for the analysis server, to rsync from
-            localmzsfl = get_or_create_mzmlentry(sfl.sfile, pwiz=sfl.sfile.mzmlfile.pwiz,
-                    refined=True, servershare_id=analocalshare['share_id'], path=dstpath,
+            mzsfl = get_or_create_mzmlentry(sfl.sfile, pwiz=sfl.sfile.mzmlfile.pwiz,
+                    refined=True, servershare_id=anasrcshareonserver['share_id'], path=dstpath,
                     mzmlfilename=mzmlfilename)
-            if localmzsfl:
-                dst_sfls.append(localmzsfl.pk)
+            if mzsfl:
+                dst_sfls.append(mzsfl.pk)
             else:
                 # This goes to system log, not user
                 raise RuntimeError('Trying to create mzML that already seems to exist, '
@@ -130,6 +127,7 @@ class RefineMzmls(DatasetJob):
                'runname':  analysis.get_run_base_dir(),
                'outsharepath': outsharepath,
                'server_id': anaserver.server_id,
+               'dsspath': dss['storage_loc'],
                }
         self.run_tasks.append((run, params, mzmls, stagefiles, ','.join(anaserver.nfprofiles), nfwf.nfversion,
             anaserver.scratchdir))

@@ -196,30 +196,27 @@ class ConvertDatasetMzml(DatasetJob):
         shares where the dataset is, and we need the ids for that job'''
         local_dst_sfls, remote_dst_sfls = [], []
         dst_sfls = []
-        dss = DatasetServer.objects.values('storageshare_id', 'dataset_id').get(
+        dss = DatasetServer.objects.values('storageshare_id', 'storage_loc', 'dataset_id').get(
                 pk=kwargs['dss_id'])
-        analocalshare = FileserverShare.objects.filter(share__active=True, server__active=True,
-                share__function=rm.ShareFunction.ANALYSISRESULTS,
-                server_id=kwargs['server_id']).values('share_id', 'path').first()
         anasrcshareonserver = FileserverShare.objects.filter(server_id=kwargs['server_id'],
                 server__active=True, share__active=True,
-                share_id=dss['storageshare_id']).values('path').first()
+                share_id=dss['storageshare_id']).values('share_id', 'path').first()
 
         runpath = f'{dss["dataset_id"]}_convert_mzml_{kwargs["timestamp"]}'
-        dstpath = os.path.join(analocalshare['path'], runpath)
+        dstpath = os.path.join(anasrcshareonserver['path'], dss['storage_loc'])
 
         pwiz = Proteowizard.objects.get(pk=kwargs['pwiz_id'])
         for sfl in self.oncreate_getfiles_query(**kwargs):
             mzmlfilename = os.path.splitext(sfl.sfile.filename)[0] + '.mzML'
-            localmzsfl = get_or_create_mzmlentry(sfl.sfile, pwiz=pwiz, refined=False, path=dstpath,
-                    servershare_id=analocalshare['share_id'], mzmlfilename=mzmlfilename)
-            if localmzsfl:
-                dst_sfls.append(localmzsfl.pk)
+            mzsfl = get_or_create_mzmlentry(sfl.sfile, pwiz=pwiz, refined=False, path=dss['storage_loc'],
+                    servershare_id=anasrcshareonserver['share_id'], mzmlfilename=mzmlfilename)
+            if mzsfl:
+                dst_sfls.append(mzsfl.pk)
             else:
                 # This goes to system log, not user
                 raise RuntimeError('Trying to create mzML that already seems to exist, '
                         f'{mzmlfilename}')
-        return {'dstsfloc_ids': dst_sfls, 'runpath': runpath, 
+        return {'dstsfloc_ids': dst_sfls, 'runpath': runpath, 'dsspath': dss['storage_loc'],
                 'srcsharepath': anasrcshareonserver['path']}
 
     def process(self, **kwargs):
@@ -254,6 +251,7 @@ class ConvertDatasetMzml(DatasetJob):
                'runname': kwargs['runpath'],
                'server_id': anaserver.server_id,
                'outsharepath': sharemap[mzsfl['servershare_id']],
+               'dsspath': kwargs['dsspath'],
                }
         params = ['--container', pwiz.container_version]
         for pname in ['options', 'filters']:

@@ -84,20 +84,13 @@ class TestCreateMzmls(MzmlTests):
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
         mzmlfn = f'{os.path.splitext(f3raw2.name)[0]}.mzML'
-        mzmlfn0 = os.path.join(self.rootdir, self.nfrunshare.path,
-                f'{self.ds.pk}_convert_mzml_{j.kwargs["timestamp"]}', mzmlfn)
         mzmlfn1 = os.path.join(self.f3path, mzmlfn)
         mzml_sf = rm.StoredFile.objects.get(rawfile=f3raw2, mzmlfile__pwiz=self.pwiz.pk)
         mzml_q = rm.StoredFileLoc.objects.filter(sfile=mzml_sf, servershare=self.ssnewstore,
                 active=True)
         self.assertTrue(mzml_q.filter(purged=True).exists())
-        self.assertFalse(os.path.exists(mzmlfn0))
         j = jm.Job.objects.first()
         self.run_job() # convert mzml
-        self.assertTrue(os.path.exists(mzmlfn0))
-        self.assertFalse(os.path.exists(mzmlfn1))
-        self.assertFalse(mzml_q.filter(purged=False).exists())
-        self.run_job() # running rsync to newstorage
         self.assertTrue(os.path.exists(mzmlfn1))
         self.assertTrue(mzml_q.filter(purged=False).exists())
         self.run_job() # setting to done
@@ -109,9 +102,8 @@ class TestCreateMzmls(MzmlTests):
         pulled from analysis to storage after w rsync'''
 
         # Remove non-remote analysis server, so results are copied:
-        # 1. to local dataset
-        # 2. to rsyncable area (here: open ssnewstorage)
-        # 3. to remote
+        # 1. to rsyncable area (here: open ssnewstorage)
+        # 2. to remote
         self.anaserver.delete()
         oldpw = am.Proteowizard.objects.create(version_description='older', container_version='',
                 nf_version=self.nfwv)
@@ -147,42 +139,34 @@ class TestCreateMzmls(MzmlTests):
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
         mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}.mzML'
-        mzmlfn0 = os.path.join(self.rootdir, self.nfrunshare2.path,
-                f'{self.ds.pk}_convert_mzml_{j.kwargs["timestamp"]}', mzmlfn)
-        mzmlfn1 = os.path.join(self.f3path, mzmlfn)
-        mzmlfn2 = os.path.join(dss2_fpath, mzmlfn)
+        mzmlfn1 = os.path.join(dss2_fpath, mzmlfn)
+        mzmlfn2 = os.path.join(self.f3path, mzmlfn)
         mzml_sf = rm.StoredFile.objects.get(rawfile=self.f3raw, mzmlfile__pwiz=self.pwiz.pk)
         oldmzml_q = rm.StoredFileLoc.objects.filter(pk=self.f3mzsss.pk, active=False)
         self.assertTrue(oldmzml_q.filter(purged=False).exists())
-        mzml0_q = rm.StoredFileLoc.objects.filter(sfile=mzml_sf, servershare=self.ssanaruns2,
-                active=True)
         mzml1_q = rm.StoredFileLoc.objects.filter(sfile=mzml_sf, servershare=self.analocalstor,
                 active=True)
         mzml2_q = rm.StoredFileLoc.objects.filter(sfile=mzml_sf, servershare=self.ssnewstore,
                 active=True)
         self.assertTrue(mzml1_q.filter(purged=True).exists())
         self.assertTrue(mzml2_q.filter(purged=True).exists())
+        # Create old mzml files to delete
         with open(mzmlfn1, 'w') as fp:
             pass
         with open(mzmlfn2, 'w') as fp:
             pass
-        self.assertFalse(os.path.exists(mzmlfn0))
         self.assertTrue(os.path.exists(mzmlfn1))
         self.assertTrue(os.path.exists(mzmlfn2))
         j = jm.Job.objects.first()
         self.assertEqual(j.funcname, 'remove_dset_files_servershare')
         self.run_job() # delete old mzml
-        self.assertFalse(os.path.exists(mzmlfn1))
+        self.assertFalse(os.path.exists(mzmlfn2))
         self.assertTrue(oldmzml_q.filter(purged=True).exists())
         self.run_job() # delete old mzml (second dss)
-        self.assertFalse(os.path.exists(mzmlfn2))
-        self.run_job() # convert mzml
-        self.assertTrue(mzml0_q.filter(purged=False).exists())
-        self.assertTrue(mzml1_q.filter(purged=True).exists())
-        self.assertTrue(os.path.exists(mzmlfn0))
         self.assertFalse(os.path.exists(mzmlfn1))
-        self.run_job() # running rsync to local
+        self.run_job() # convert mzml
         self.assertTrue(mzml1_q.filter(purged=False).exists())
+        self.assertTrue(os.path.exists(mzmlfn1))
         self.assertFalse(mzml2_q.filter(purged=False).exists())
         self.run_job() # running rsync to newstorage
         self.assertTrue(mzml1_q.filter(purged=False).exists())
@@ -226,22 +210,30 @@ class TestCreateMzmls(MzmlTests):
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
         mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}.mzML'
-        mzmlfn0 = os.path.join(self.rootdir, self.nfrunshare2.path,
-                f'{self.ds.pk}_convert_mzml_{j.kwargs["timestamp"]}', mzmlfn)
+        runpath = f'{self.ds.pk}_convert_mzml_{j.kwargs["timestamp"]}' 
+        f3sfmz = rm.StoredFile.objects.get(rawfile=self.f3raw, mzmlfile__isnull=False)
         mzmlfn1 = os.path.join(self.rootdir, 'oldstorage', dss2path, mzmlfn)
-        mzmlfn2 = os.path.join(dss2_fpath, mzmlfn)
+        m1q = rm.StoredFileLoc.objects.filter(sfile=f3sfmz, servershare=self.analocalstor,
+                path=dss2path, active=True, purged=False)
+        mzmlfn2 = os.path.join(self.inboxctrl.path, 'datasets', f'{self.ds.pk}', mzmlfn)
+        m2q = rm.StoredFileLoc.objects.filter(sfile=f3sfmz, servershare=self.ssinbox,
+                path=f'datasets/{self.ds.pk}', active=True, purged=False)
         mzmlfn3 = os.path.join(self.f3path, mzmlfn)
-        self.assertFalse(os.path.exists(mzmlfn0))
+        m3q = rm.StoredFileLoc.objects.filter(sfile=f3sfmz, servershare=self.ssnewstore,
+                path=self.storloc, active=True, purged=False)
+        self.assertFalse(m1q.filter(purged=True).exists())
         self.run_job() # run convert
-        self.assertTrue(os.path.exists(mzmlfn0))
-        self.assertFalse(os.path.exists(mzmlfn1))
-        self.run_job() # from analysis tmp to analysis dss storage
+        self.assertTrue(m1q.exists())
+        self.assertFalse(m2q.exists())
         self.assertTrue(os.path.exists(mzmlfn1))
         self.run_job() # running rsync to accessible primary dset on open storage
         self.assertTrue(os.path.exists(mzmlfn2))
+        self.assertTrue(m2q.exists())
+        self.assertFalse(m3q.exists())
         self.assertFalse(os.path.exists(mzmlfn3))
         self.run_job() # rsync to second dset from primary controller
         self.assertTrue(os.path.exists(mzmlfn3))
+        self.assertTrue(m3q.exists())
         self.run_job() # set to done
         j2 = jm.Job.objects.last()
         self.assertEqual(j2.state, 'done')
@@ -265,17 +257,13 @@ class TestCreateMzmls(MzmlTests):
         mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}_refined.mzML'
         ref_ana = am.Analysis.objects.last()
         timestamp = datetime.strftime(ref_ana.date, '%Y%m%d_%H.%M')
-        mzmlfn0 = os.path.join(self.rootdir, self.nfrunshare2.path,
-                f'{ref_ana.pk}_{self.wf.wftype.name}_refine_dataset_{self.ds.pk}_{timestamp}', mzmlfn)
         mzmlfn1 = os.path.join(dss2_fpath, mzmlfn)
         mzmlfn2 = os.path.join(self.inboxctrl.path, 'datasets', str(self.ds.pk),  mzmlfn)
         mzmlfn3 = os.path.join(self.f3path, mzmlfn)
         self.assertFalse(os.path.exists(mzmlfn1))
         self.assertFalse(os.path.exists(mzmlfn2))
         self.run_job() # refining
-        self.assertTrue(os.path.exists(mzmlfn0))
-        self.assertFalse(os.path.exists(mzmlfn1))
-        self.run_job() # running rsync to remote analysis src storage
+        #self.assertTrue(os.path.exists(mzmlfn0))
         self.assertTrue(os.path.exists(mzmlfn1))
         self.run_job() # rsync to inbox
         self.assertTrue(os.path.exists(mzmlfn2))
@@ -323,27 +311,22 @@ class TestCreateMzmls(MzmlTests):
                 path=dss2path, active=True)
         self.assertTrue(mzsfl_q_stor.filter(purged=True).exists())
         self.assertTrue(mzsfl_q_tmp.filter(purged=True).exists())
-        mzmlfn0 = os.path.join(self.rootdir, self.nfrunshare.path,
-                f'{self.ds.pk}_convert_mzml_{j.kwargs["timestamp"]}', mzmlfn)
         mzmlfn1 = os.path.join(self.f3path, mzmlfn)
         mzmlfn2 = os.path.join(dss2_fpath, mzmlfn)
         self.assertFalse(os.path.exists(mzmlfn1))
         self.assertFalse(os.path.exists(mzmlfn2))
         self.run_job() # convert mzml
-        self.assertTrue(os.path.exists(mzmlfn0))
-        self.assertFalse(os.path.exists(mzmlfn1))
-        self.assertTrue(mzsfl_q_stor.filter(purged=True).exists())
-        self.assertTrue(mzsfl_q_tmp.filter(purged=True).exists())
-        self.run_job() # running rsync to ssnewstore mounted on analysis
+        self.assertTrue(os.path.exists(mzmlfn1))
+        self.assertFalse(os.path.exists(mzmlfn2))
         self.assertTrue(mzsfl_q_stor.filter(purged=False).exists())
         self.assertTrue(mzsfl_q_tmp.filter(purged=True).exists())
         self.run_job() # running rsync to sstmp, not mounted
+        self.assertTrue(os.path.exists(mzmlfn2))
         self.assertTrue(mzsfl_q_tmp.filter(purged=False).exists())
         self.run_job() # set to done
         j2 = jm.Job.objects.last()
         self.assertEqual(j2.state, 'done')
         t = j2.task_set.first()
-        self.assertTrue(os.path.exists(mzmlfn2))
 
 
 class TestRefineMzmls(MzmlTests):
@@ -445,30 +428,19 @@ class TestRefineMzmls(MzmlTests):
         mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}_refined.mzML'
         mzmlfn2 = f'{os.path.splitext(f3raw2.name)[0]}_refined.mzML'
         ana = am.Analysis.objects.last()
-        mzmlfn1_nf = os.path.join(self.rootdir, self.nfrunshare.path, ana.get_run_base_dir(), mzmlfn)
         mzmlfn1_path = os.path.join(self.f3path, mzmlfn)
-        mzmlfn2_nf = os.path.join(self.rootdir, self.nfrunshare.path, ana.get_run_base_dir(), mzmlfn2)
         mzmlfn2_path = os.path.join(self.f3path, mzmlfn2)
-        self.assertFalse(os.path.exists(mzmlfn1_nf))
-        self.assertFalse(os.path.exists(mzmlfn2_nf))
         self.assertFalse(os.path.exists(mzmlfn1_path))
         self.assertFalse(os.path.exists(mzmlfn2_path))
         self.run_job() # refining
-        self.assertTrue(os.path.exists(mzmlfn1_nf))
-        self.assertFalse(os.path.exists(mzmlfn1_path))
-        self.assertTrue(os.path.exists(mzmlfn2_nf))
-        self.assertFalse(os.path.exists(mzmlfn2_path))
-        self.run_job() # rsync refined files
         self.assertTrue(os.path.exists(mzmlfn1_path))
         self.assertTrue(os.path.exists(mzmlfn2_path))
         self.run_job() # set to done
-        j = jm.Job.objects.last()
-        self.assertEqual(j.funcname, 'rsync_dset_files_to_servershare')
+        j.refresh_from_db()
         self.assertEqual(j.state, Jobstates.DONE)
 
         # Delete one of the refined mzMLs and re-run
         refined2.delete()
-        os.unlink(mzmlfn2_nf)
         os.unlink(mzmlfn2_path)
         resp = self.cl.post(self.url, content_type='application/json', data={'dsid': self.ds.pk,
             'dbid': dbsf.pk, 'wfid': self.refinewf.pk})
@@ -489,13 +461,8 @@ class TestRefineMzmls(MzmlTests):
         self.assertFalse(os.path.exists(mzmlfn2_path))
         self.run_job() # refining
         self.assertTrue(os.path.exists(mzmlfn1_path))
-        self.assertTrue(os.path.exists(mzmlfn2_nf))
-        self.assertFalse(os.path.exists(mzmlfn2_path))
-        self.run_job() # rsync refined files
-        self.assertTrue(os.path.exists(mzmlfn1_path))
         self.assertTrue(os.path.exists(mzmlfn2_path))
         self.run_job() # set to done
-        j = jm.Job.objects.last()
-        self.assertEqual(j.funcname, 'rsync_dset_files_to_servershare')
-        self.assertEqual(j.state, Jobstates.DONE)
+        j2.refresh_from_db()
+        self.assertEqual(j2.state, Jobstates.DONE)
 

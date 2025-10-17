@@ -88,11 +88,10 @@ def check_ensembl_uniprot_fasta_download(self, dbname, version, organism, dbtype
     print(f'Finished downloading {desc}')
         
 
-
-def run_nextflow(run, params, rundir, gitwfdir, profiles, nf_version, scratchdir):
+def run_nextflow(run, params, baseoutdir, gitwfdir, profiles, nf_version, scratchdir):
     """Fairly generalized code for kantele celery task to run a WF in NXF"""
     print('Starting nextflow workflow {}'.format(run['nxf_wf_fn']))
-    outdir = os.path.join(run['outsharepath'], os.path.basename(rundir))
+    outdir = os.path.join(run['outsharepath'], baseoutdir)
     try:
         clone(run['repo'], gitwfdir, checkout=run['wf_commit'])
     except FileExistsError:
@@ -172,7 +171,8 @@ def run_nextflow_workflow(self, run, params, stagefiles, profiles, nf_version, s
                 fp.write(f'\n{fn}')
         params.extend(['--oldmzmldef', os.path.join(stagedir, 'oldinputdef.txt')])
     params = [x if x != 'RUNNAME__PLACEHOLDER' else run['runname'] for x in params]
-    outfiles = execute_normal_nf(run, params, rundir, gitwfdir, self.request.id, nf_version, profiles, scratchdir)
+    outfiles = execute_normal_nf(run, params, os.path.basename(rundir), gitwfdir, self.request.id,
+            nf_version, profiles, scratchdir)
 
     # Register output files to web host
     reg_session, reg_headers = get_session_cookies()
@@ -221,7 +221,7 @@ def refine_mzmls(self, run, params, mzmls, stagefiles, profiles, nf_version, sta
         for fn in mzmls_def:
             fp.write(f'{fn}\n')
     params.extend(['--input', os.path.join(stagedir, 'mzmldef.txt')])
-    outfiles = execute_normal_nf(run, params, basedir, gitwfdir, self.request.id, nf_version, profiles, scratchdir)
+    outfiles = execute_normal_nf(run, params, run['dsspath'], gitwfdir, self.request.id, nf_version, profiles, scratchdir)
     outfiles_db = {}
     for outfn in outfiles:
         path, fn = os.path.split(outfn)
@@ -356,18 +356,18 @@ def process_error_from_nf_log(logfile):
         return '\n'.join(errorlines)
 
 
-def execute_normal_nf(run, params, rundir, gitwfdir, taskid, nf_version, profiles, scratchdir):
+def execute_normal_nf(run, params, baseoutdir, gitwfdir, taskid, nf_version, profiles, scratchdir):
     log_analysis(run['analysis_id'], 'Staging files finished, starting analysis')
     if not profiles:
         profiles = 'standard'
     try:
-        outdir = run_nextflow(run, params, rundir, gitwfdir, profiles, nf_version, scratchdir)
+        outdir = run_nextflow(run, params, baseoutdir, gitwfdir, profiles, nf_version, scratchdir)
     except subprocess.CalledProcessError as e:
         errmsg = process_error_from_nf_log(os.path.join(gitwfdir, '.nextflow.log'))
         log_analysis(run['analysis_id'], 'Workflow crashed, reporting errors')
         taskfail_update_db(taskid, errmsg)
         raise RuntimeError('Error occurred running nextflow workflow '
-                           '{}\n\nERROR MESSAGE:\n{}'.format(rundir, errmsg))
+                f'{gitwfdir}\n\nERROR MESSAGE:\n{errmsg}')
     # Revoked jobs do not need DB-updating, but need just to be stopped, 
     # so do not catch SoftTimeLimit exception
 
@@ -382,7 +382,7 @@ def execute_normal_nf(run, params, rundir, gitwfdir, taskid, nf_version, profile
                  f' cleaning. Full NF trace log: \n{nxf_log.stdout}')
     outfiles = [os.path.join(outdir, x) for x in os.listdir(outdir)]
     outfiles = [x for x in outfiles if not os.path.isdir(x)]
-    reportfile = os.path.join(rundir, 'output', 'Documentation', 'pipeline_report.html')
+    reportfile = os.path.join(outdir, 'Documentation', 'pipeline_report.html')
     if os.path.exists(reportfile):
         outfiles.append(reportfile)
     return outfiles
@@ -399,9 +399,9 @@ def run_nextflow_longitude_qc(self, run, params, stagefiles, profiles, nf_versio
             stagefiles, params, scratchbasedir)
     # QC has no stagedir, we put the raw in rundir to stage
     # Also, outsharepath can be NF_RUNDIR since these files are thrown away after run
-    run['outsharepath'] = os.path.join(settings.NF_RUNDIR, 'output')
+    run['outsharepath'] = os.path.join(settings.NF_RUNDIR, 'qc_output')
     try:
-        outdir = run_nextflow(run, params, rundir, gitwfdir, profiles, nf_version, scratchdir)
+        outdir = run_nextflow(run, params, os.path.basename(rundir), gitwfdir, profiles, nf_version, scratchdir)
     except subprocess.CalledProcessError:
         errmsg = process_error_from_nf_log(os.path.join(gitwfdir, '.nextflow.log'))
         log_analysis(run['analysis_id'], 'QC Workflow crashed')
