@@ -15,7 +15,7 @@ p.add_argument('-with-trace', action='store_const', const=True, default=False)
 p.add_argument('-resume', action='store_const', const=True, default=False)
 args = p.parse_args(sys.argv[1:])
 
-os.makedirs(args.outdir)
+os.makedirs(args.outdir, exist_ok=True)
 
 # raws is a fn, or '*'
 for fn in glob(args.raws):

@@ -20,7 +20,7 @@ p.add_argument('-with-trace', action='store_const', const=True, default=False)
 p.add_argument('-resume', action='store_const', const=True, default=False)
 args = p.parse_args(sys.argv[1:])
 
-os.makedirs(args.outdir)
+os.makedirs(args.outdir, exist_ok=True)
 
 # raws is a 'fn;fn2;fn3;...' or '*', but we use 1 file (or *) for testing so can use glob
 with open(args.input) as fp:
