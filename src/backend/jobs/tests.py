@@ -27,7 +27,7 @@ class TestUpdateStorageLocDset(BaseJobTest):
 
     def test_wrong_client(self):
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'client_id': settings.ANALYSISCLIENT_APIKEY})
+                data={'client_id': 'blablafakeclient'})
         self.assertEqual(resp.status_code, 403)
         resp = self.cl.post(self.url, content_type='application/json',
             data={'no_client_id': 1})
