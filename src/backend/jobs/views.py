@@ -62,7 +62,7 @@ def update_storage_loc_dset(request):
     """Updates storage_loc on dset after a dset update storage job"""
     data = json.loads(request.body.decode('utf-8'))
     if 'client_id' not in data or not taskclient_authorized(
-            data['client_id'], [settings.STORAGECLIENT_APIKEY]):
+            data['client_id'], settings.CLIENT_APIKEYS):
         return HttpResponseForbidden()
     dss = DatasetServer.objects.filter(pk=data['dss_id'])
     dss.update(storage_loc=data['dst_path'])
@@ -77,7 +77,7 @@ def update_storage_loc_dset(request):
 def update_storagepath_file(request):
     data = json.loads(request.body.decode('utf-8'))
     if 'client_id' not in data or not taskclient_authorized(
-            data['client_id'], [settings.STORAGECLIENT_APIKEY, settings.ANALYSISCLIENT_APIKEY]):
+            data['client_id'], settings.CLIENT_APIKEYS):
         return HttpResponseForbidden()
     print('Updating storage task finished')
     if 'sfloc_id' in data:
@@ -173,8 +173,7 @@ def purge_storedfile(request):
     """Ran after a job has deleted a file from the filesystem, sets
     file DB entry to purged"""
     data = request.POST
-    if 'client_id' not in data or not taskclient_authorized(
-            data['client_id'], [settings.STORAGECLIENT_APIKEY]):
+    if 'client_id' not in data or not taskclient_authorized(data['client_id'], settings.CLIENT_APIKEYS):
         return HttpResponseForbidden()
     sfile = StoredFileLoc.objects.filter(pk=data['sfloc_id']).update(purged=True)
     if 'task' in data:
@@ -187,7 +186,7 @@ def removed_emptydir(request):
     """Ran after a job has deleted an empty dir from the filesystem"""
     data = request.POST
     if 'client_id' not in data or not taskclient_authorized(
-            data['client_id'], [settings.STORAGECLIENT_APIKEY]):
+            data['client_id'], settings.CLIENT_APIKEYS):
         return HttpResponseForbidden()
     if 'task' in data:
         set_task_done(data['task'])
