@@ -58,7 +58,7 @@
         dest: "{{ celeryenv_file }}"
         mode: 0600
   
-  - name: Kantele celery env file
+  - name: Kantele celery hpc start script (assumes nextflow installed on PATH, not by module)
     become: yes
     become_user: "{{ kanteleuser }}"
     template:

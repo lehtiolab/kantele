@@ -1,3 +1,2 @@
 celery_env_template_file: celery_analysis_env.j2
-python_module_loader_cmd: ml python/3.12
-kantelelogdir: "{{ kanteledir }}/src/backend/log"
+kantelelogdir: "{{ kanteledir }}/log"

@@ -2,7 +2,7 @@ set -a
 source {{ celeryenv_file }}
 set +a
 
-{{ python_module_loader_cmd }}
+{{ nf_module_loader_cmd }}
 
 source "{{ kantelevenv }}/bin/activate"
 
