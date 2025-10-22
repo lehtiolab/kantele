@@ -174,7 +174,7 @@ class BaseTest(TestCase):
                 commit='master', filename='pwiz.py', nfworkflow=self.nfw,
                 paramset=self.pset, nfversion='', active=True)
         self.pwiz = am.Proteowizard.objects.create(version_description='pwversion desc1',
-                container_version='0', nf_version=self.nfwv)
+                params={'mzmltool': 'msconvert'}, nf_version=self.nfwv)
         self.f3sfmz = rm.StoredFile.objects.create(rawfile=self.f3raw, filename=f'{os.path.splitext(fn3)[0]}.mzML',
                 md5='md5_for_f3sf_mzml', filetype=self.ft, checked=True)
         self.f3mzsss = rm.StoredFileLoc.objects.create(sfile=self.f3sfmz, servershare=self.ssnewstore,

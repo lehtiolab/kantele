@@ -230,8 +230,9 @@ def refine_mzmls(self, run, params, mzmls, stagefiles, profiles, nf_version, sta
     reg_session, reg_headers = get_session_cookies()
     for non_ref_mzfn in mzmls:
         path, reffn = outfiles_db[non_ref_mzfn['refinedname']]
-        regfile = register_mzmlfile(non_ref_mzfn['refinedpk'], reffn, path, run['server_id'],
-                reg_session, reg_headers)
+        # FIXME md5sum in pipeline please
+        md5sum = calc_md5(os.path.join(path, reffn))
+        regfile = register_mzmlfile(non_ref_mzfn['refinedpk'], md5sum, reg_session, reg_headers)
     reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:analysisdone'))
     postdata = {'client_id': settings.APIKEY, 'analysis_id': run['analysis_id'],
             'task': self.request.id}
@@ -475,23 +476,15 @@ def register_resultfile(fname, sflpath, *, sharepath, server_id=False, share_id=
     return rj
  
 
-def register_mzmlfile(sflpk, fname, path, server_id, session, headers):
-    fullpath = os.path.join(path, fname)
+def register_mzmlfile(sflpk, md5sum, session, headers):
     reg_url = urljoin(settings.KANTELEHOST, reverse('files:uploaded_mzml'))
     postdata = {'sflpk': sflpk,
                 'client_id': settings.APIKEY,
-                'md5': calc_md5(fullpath),
-                'size': os.path.getsize(fullpath),
-                'date': str(os.path.getctime(fullpath)),
-                'claimed': True,
-                'sharepath': settings.NF_RUNDIR,
-                'path': os.path.relpath(path, settings.NF_RUNDIR),
-                'server_id': server_id,
+                'md5': md5sum,
                 }
     resp = session.post(url=reg_url, json=postdata, headers=headers)
     if resp.status_code != 500:
         rj = resp.json()
     else:
-        rj = False
-    resp.raise_for_status()
+        rj = {'error': 'Server error occurred, please investigate'}
     return rj

@@ -977,14 +977,19 @@ def create_mzmls(request):
         return JsonResponse({'error': 'Proteowizard version does not exist'}, status=400)
     except dsmodels.Dataset.DoesNotExist:
         return JsonResponse({'error': 'Dataset does not exist or is deleted'}, status=403)
-    filters = ['"peakPicking true 2"', '"precursorRefine"'] # peakPick first to operate as vendor picking
-    options = []
+    
+    # Use proteowizard or thermorawfileparser, but must define pwiz filters and options,
+    # even when trfp does not have those, dont want user to choose (yet)
+    # FIXME Bruker DDA would be a case for mzML that needs to choose pwiz over trfp
+    pwiz_filters = ['precursorRefine']
+    pwiz_options = []
     ds_instype = dset.datasetrawfile_set.distinct('rawfile__producer__msinstrument__instrumenttype')
     if ds_instype.count() > 1:
         return JsonResponse({'error': 'Dataset contains data from multiple instrument types, cannot convert all in the same way, separate them'}, status=403)
     if ds_instype.filter(rawfile__producer__msinstrument__instrumenttype__name='timstof').exists():
-        filters.append('"scanSumming precursorTol=0.02 scanTimeTol=10 ionMobilityTol=0.1"')
-        options.append('combineIonMobilitySpectra')
+        pwiz_filters.append('"scanSumming precursorTol=0.02 scanTimeTol=10 ionMobilityTol=0.1"')
+        pwiz_options.append('combineIonMobilitySpectra')
+
     num_rawfns = filemodels.RawFile.objects.filter(datasetrawfile__dataset_id=data['dsid']).count()
     mzmls_exist_any_deleted_state = filemodels.StoredFile.objects.filter(
             rawfile__datasetrawfile__dataset=dset, checked=True, mzmlfile__isnull=False)
@@ -1034,7 +1039,7 @@ def create_mzmls(request):
             storageshare_id=source_ssid).values('pk').get()['pk']
 
     # we dont do error checking earlier, before deleting old mzML, because deleting those is fine
-    mzjob = create_job('convert_dataset_mzml', options=options, filters=filters, dss_id=dss_id,
+    mzjob = create_job('convert_dataset_mzml', options=pwiz_options, filters=pwiz_filters, dss_id=dss_id,
             pwiz_id=pwiz.pk, timestamp=datetime.strftime(datetime.now(), '%Y%m%d_%H.%M'),
             server_id=analocalshare_q.values('server_id').first()['server_id'], sfloc_ids=srcsfl_pk)
     if mzjob['error']:

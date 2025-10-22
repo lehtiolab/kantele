@@ -723,26 +723,30 @@ def process_file_confirmed_ready(rfn, sfn, sfloc, upload, desc):
 # /files/newmzml/
 @require_POST
 def mzml_uploaded(request):
-    '''This is for uploading files from an instrument, so not from a user using the
-    upload script. We dont use a token since the scripts run on our own server.
+    '''This is for uploading mzML files after conversion, so not from a user using the
+    upload script. Not so much data to set since mzMLs are pre-made in DB.
+    We dont use a token since the scripts run on our own server.
     '''
     data =  json.loads(request.body.decode('utf-8'))
     try:
-        sflpk, dstsflpk, md5, filedate_raw = data['sflpk'], data.get('dst_sflpk'), data['md5'], data['date']
-        file_date = datetime.strftime(
-            datetime.fromtimestamp(float(filedate_raw)), '%Y-%m-%d %H:%M')
+        sflpk, md5, uploader_id = data['sflpk'], data['md5'], data['client_id']
     except ValueError as error:
         return JsonResponse({'error': 'Date passed to registration incorrectly formatted'}, status=400)
     except KeyError as error:
         print(f'Request to upload instrument file with missing parameter, {error}')
         return JsonResponse({'error': 'Bad request'}, status=400)
-    sfl = StoredFileLoc.objects.get(pk=sflpk)
+    if not Producer.objects.filter(client_id=uploader_id).exists():
+        return JsonResponse({'error': 'Upload producer not authorized'}, status=403)
+    try:
+        sfl = StoredFileLoc.objects.get(pk=sflpk)
+    except StoredFileLoc.DoesNotExist:
+        return JsonResponse({'error': 'Cannot find pre-registered mzML file to update'}, status=404)
     sfl.sfile.md5 = md5
     sfl.sfile.checked = True
     sfl.sfile.save()
     sfl.purged = False
     sfl.save()
-    return JsonResponse({})
+    return JsonResponse({'error': False})
 
 
 @require_POST

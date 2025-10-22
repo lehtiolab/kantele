@@ -331,8 +331,12 @@ class AnalysisResultFile(models.Model):
 
 
 class Proteowizard(models.Model):
+    # When updating a version, NF pipeline will get updated, not passing container
+    # into that here. So then new Proteowizard and new NextflowWfVersionParamset
+    # Filters and options for pwiz are currently defined in view
     version_description = models.TextField()
-    container_version = models.TextField() # chambm/i-agree-blabla:3.0.1234
+    params = models.JSONField(default=dict, blank=True,
+            help_text='E.g. {"centroid": "1,2", "mzmltool": "msconvert"}')
     date_added = models.DateTimeField(auto_now_add=True)
     nf_version = models.ForeignKey(NextflowWfVersionParamset, on_delete=models.CASCADE)
     active = models.BooleanField(default=True)

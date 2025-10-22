@@ -253,7 +253,8 @@ class ConvertDatasetMzml(DatasetJob):
                'outsharepath': sharemap[mzsfl['servershare_id']],
                'dsspath': kwargs['dsspath'],
                }
-        params = ['--container', pwiz.container_version]
+        params = ['--md5out']
+        params.extend([x for y in [(f'--{k}', v) for k,v in pwiz.params.items()] for x in y])
         for pname in ['options', 'filters']:
             p2parse = kwargs.get(pname, [])
             if len(p2parse):

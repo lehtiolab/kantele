@@ -48,8 +48,13 @@ def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profile
     transfer_url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
     reg_session, reg_headers = get_session_cookies()
     for raw in raws:
-        regfile = register_mzmlfile(raw[2], raw[3], run_outdir, run['server_id'], reg_session,
-                reg_headers)
+        md5fn = os.path.join(run_outdir, f'{os.path.splitext(raw[3])[0]}.md5')
+        with open(md5fn) as fp:
+            md5sum = fp.read().strip()
+        os.unlink(md5fn)
+        regfile = register_mzmlfile(raw[2], md5sum, reg_session, reg_headers)
+        if regfile['error']:
+            raise RuntimeError(regfile['error'])
     url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
     postdata = {'client_id': settings.APIKEY, 'task': self.request.id}
     update_db(url, json=postdata)

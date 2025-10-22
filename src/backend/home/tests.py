@@ -79,7 +79,7 @@ class TestCreateMzmls(MzmlTests):
         self.assertEqual(j.state, Jobstates.PENDING)
         with open(os.path.join(self.f3path, f3raw2.name), 'w') as fp:
             pass
-        exp_kw  = {'options': [], 'filters': ['"peakPicking true 2"', '"precursorRefine"'], 
+        exp_kw  = {'options': [], 'filters': ['precursorRefine'], 
                 'dss_id': self.dss.pk, 'pwiz_id': self.pwiz.pk, 'sfloc_ids': [f3sss2.pk]}
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
@@ -89,10 +89,14 @@ class TestCreateMzmls(MzmlTests):
         mzml_q = rm.StoredFileLoc.objects.filter(sfile=mzml_sf, servershare=self.ssnewstore,
                 active=True)
         self.assertTrue(mzml_q.filter(purged=True).exists())
+        md5sum = f'{mzml_sf.filename} md5 file'
+        self.assertNotEqual(mzml_sf.md5, md5sum)
         j = jm.Job.objects.first()
         self.run_job() # convert mzml
         self.assertTrue(os.path.exists(mzmlfn1))
         self.assertTrue(mzml_q.filter(purged=False).exists())
+        mzml_sf.refresh_from_db()
+        self.assertEqual(mzml_sf.md5, md5sum)
         self.run_job() # setting to done
         j2 = jm.Job.objects.last()
         self.assertEqual(j2.state, 'done')
@@ -105,8 +109,8 @@ class TestCreateMzmls(MzmlTests):
         # 1. to rsyncable area (here: open ssnewstorage)
         # 2. to remote
         self.anaserver.delete()
-        oldpw = am.Proteowizard.objects.create(version_description='older', container_version='',
-                nf_version=self.nfwv)
+        oldpw = am.Proteowizard.objects.create(version_description='older', nf_version=self.nfwv,
+                params={'mzmltool': 'msconvert'})
         self.f3mzml.pwiz = oldpw
         self.f3mzml.save()
 
@@ -130,7 +134,7 @@ class TestCreateMzmls(MzmlTests):
         purgej = jm.Job.objects.filter(funcname='remove_dset_files_servershare').last()
         j = jm.Job.objects.filter(funcname='convert_dataset_mzml').last()
         self.assertEqual(j.state, Jobstates.PENDING)
-        exp_kw  = {'options': [], 'filters': ['"peakPicking true 2"', '"precursorRefine"'], 
+        exp_kw  = {'options': [], 'filters': ['precursorRefine'], 
                 'dss_id': dss2.pk, 'pwiz_id': self.pwiz.pk,
                 'sfloc_ids': [x['pk'] for x in rm.StoredFileLoc.objects.filter(
                     servershare=self.analocalstor, # FIXME this gets picked randomly in home/views!
@@ -142,6 +146,8 @@ class TestCreateMzmls(MzmlTests):
         mzmlfn1 = os.path.join(dss2_fpath, mzmlfn)
         mzmlfn2 = os.path.join(self.f3path, mzmlfn)
         mzml_sf = rm.StoredFile.objects.get(rawfile=self.f3raw, mzmlfile__pwiz=self.pwiz.pk)
+        md5sum = f'{mzml_sf.filename} md5 file'
+        self.assertNotEqual(mzml_sf.md5, md5sum)
         oldmzml_q = rm.StoredFileLoc.objects.filter(pk=self.f3mzsss.pk, active=False)
         self.assertTrue(oldmzml_q.filter(purged=False).exists())
         mzml1_q = rm.StoredFileLoc.objects.filter(sfile=mzml_sf, servershare=self.analocalstor,
@@ -168,6 +174,8 @@ class TestCreateMzmls(MzmlTests):
         self.assertTrue(mzml1_q.filter(purged=False).exists())
         self.assertTrue(os.path.exists(mzmlfn1))
         self.assertFalse(mzml2_q.filter(purged=False).exists())
+        mzml_sf.refresh_from_db()
+        self.assertEqual(mzml_sf.md5, md5sum)
         self.run_job() # running rsync to newstorage
         self.assertTrue(mzml1_q.filter(purged=False).exists())
         self.assertTrue(mzml2_q.filter(purged=False).exists())
@@ -201,7 +209,7 @@ class TestCreateMzmls(MzmlTests):
         self.assertEqual(resp.status_code, 200)
         j = jm.Job.objects.first()
         self.assertEqual(j.funcname, 'convert_dataset_mzml')
-        exp_kw  = {'options': [], 'filters': ['"peakPicking true 2"', '"precursorRefine"'], 
+        exp_kw  = {'options': [], 'filters': ['precursorRefine'], 
                 'dss_id': dss2.pk, 'pwiz_id': self.pwiz.pk,
                 'sfloc_ids': [x['pk'] for x in rm.StoredFileLoc.objects.filter(
                     servershare=self.analocalstor, # FIXME this gets picked randomly in home/views!
@@ -296,7 +304,7 @@ class TestCreateMzmls(MzmlTests):
         self.assertEqual(resp.status_code, 200)
         j = jm.Job.objects.first()
         self.assertEqual(j.funcname, 'convert_dataset_mzml')
-        exp_kw  = {'options': ['combineIonMobilitySpectra'], 'filters': ['"peakPicking true 2"', '"precursorRefine"', '"scanSumming precursorTol=0.02 scanTimeTol=10 ionMobilityTol=0.1"'], 
+        exp_kw  = {'options': ['combineIonMobilitySpectra'], 'filters': ['precursorRefine', '"scanSumming precursorTol=0.02 scanTimeTol=10 ionMobilityTol=0.1"'], 
                 'dss_id': self.dss.pk, 'pwiz_id': self.pwiz.pk,
                 'sfloc_ids': [x['pk'] for x in rm.StoredFileLoc.objects.filter(
                     servershare=self.ssnewstore, # FIXME this gets picked randomly in home/views!
