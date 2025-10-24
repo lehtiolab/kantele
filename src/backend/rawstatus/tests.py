@@ -1122,6 +1122,7 @@ class TestArchiveFile(BaseFilesTest):
                 md5=self.registered_raw.source_md5, filetype_id=self.ft.id)
         self.sfloc = rm.StoredFileLoc.objects.create(sfile=self.sfile, servershare_id=self.sstmp.id,
                 path='', purged=False, active=True)
+        rm.PDCBackedupFile.objects.create(success=True, storedfile=self.sfile, pdcpath='')
 
     def test_get(self):
         resp = self.cl.get(self.url)
@@ -1136,23 +1137,45 @@ class TestArchiveFile(BaseFilesTest):
         self.assertEqual(resp.status_code, 404)
         self.assertEqual(resp.json()['error'], 'File does not exist, maybe it is deleted?')
 
-    def test_claimed_file(self):
+    def test_backup_delete_dset_file(self):
+        '''File is in a dataset and on remote, so is not on backup capable server'''
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.oldsf.pk})
+        self.assertEqual(resp.status_code, 402)
+        self.assertIn('File is in a dataset, force delete, archive entire set, or remove it '
+                'from dataset first', resp.json()['error'])
+        self.olddsuser.delete()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.oldsf.pk, 'force': True})
         self.assertEqual(resp.status_code, 403)
-        self.assertIn('File is in a dataset', resp.json()['error'])
+        self.user.is_staff = True
+        self.user.save()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.oldsf.pk, 'force': True})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
+            kwargs__sfloc_id=self.oldsss.pk, kwargs__dstshare_id=self.ssinbox.pk).exists())
+        self.assertTrue(jm.Job.objects.filter(funcname='create_pdc_archive',
+            kwargs__sfloc_id=self.oldsf.storedfileloc_set.get(servershare=self.ssinbox).pk).exists())
+        self.assertTrue(jm.Job.objects.filter(funcname='purge_files',
+            kwargs__sfloc_ids=[x.pk for x in self.oldsf.storedfileloc_set.all()]).exists())
 
-    def test_already_archived(self):
-        rm.PDCBackedupFile.objects.create(success=True, storedfile=self.sfile, pdcpath='')
+    def test_no_access(self):
+        # First a loose rawfile
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.sfile.pk})
         self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json()['error'], 'File is already archived')
+        self.assertEqual(resp.json()['error'], 'You are not authorized to remove files of type '
+                f'{rm.UploadFileType.RAWFILE.label}')
+
 
     def test_deleted_file(self):
+        '''- File has been scheduled for deletion, cannot make backup
+           - File is actually purged but wrongly labeled
+        '''
         sfile1 = rm.StoredFile.objects.create(rawfile=self.registered_raw,
                 filename=self.registered_raw.name, md5='deletedmd5', filetype_id=self.ft.id, deleted=True)
         rm.StoredFileLoc.objects.create(sfile=sfile1, servershare_id=self.sstmp.id, path='',
-                purged=False, active=True)
+                purged=False, active=False)
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': sfile1.pk})
         self.assertEqual(resp.status_code, 404)
         self.assertEqual(resp.json()['error'], 'File does not exist, maybe it is deleted?')
@@ -1169,12 +1192,24 @@ class TestArchiveFile(BaseFilesTest):
                 'please inform admin -- can not archive')
 
     def test_mzmlfile(self):
+        self.user.is_staff = True
+        self.user.save()
+
         am.MzmlFile.objects.create(sfile=self.sfile, pwiz=self.pwiz)
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.sfile.pk})
-        self.assertEqual(resp.status_code, 403)
-        self.assertIn('Derived mzML files are not archived', resp.json()['error'])
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare').exists())
+        self.assertFalse(jm.Job.objects.filter(funcname='create_pdc_archive').exists())
 
-    def test_ok(self):
+    def test_analysisfile(self):
+        otheruser = User.objects.create(username='other', email='email')
+        ana = am.Analysis.objects.create(user=otheruser, name='ana1', base_rundir='ana1')
+        am.AnalysisResultFile.objects.create(analysis=ana, sfile=self.sfile)
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.sfile.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json(), {'error': 'You are not authorized to delete this analysis file'})
+        ana.user = self.user
+        ana.save()
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.sfile.pk})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {'state': 'ok'})

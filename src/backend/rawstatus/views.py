@@ -1149,8 +1149,8 @@ def restore_file_from_cold(request):
 @login_required
 @require_POST
 def archive_file(request):
-    '''Single file function for archiving files, for cases where files are not in dataset,
-    e.g. on tmp storage only'''
+    '''Single file function for deleting files from disk, backing them up if that has not
+    been done yet'''
     data = json.loads(request.body.decode('utf-8'))
     try:
         sfile = StoredFile.objects.select_related('rawfile__datasetrawfile', 'filetype', 'rawfile__producer').get(pk=data['item_id'], deleted=False)
@@ -1159,31 +1159,65 @@ def archive_file(request):
     except KeyError:
         return JsonResponse({'error': 'Bad request'}, status=400)
     sfloc_q = StoredFileLoc.objects.filter(sfile=sfile, active=True)
+    analysis_id, dset_id = False, False
     if not sfloc_q.exists():
         return JsonResponse({'error': 'File is possibly deleted, but not marked as such, please '
             'inform admin -- can not archive'}, status=403)
-    elif sfile.rawfile.claimed or hasattr(sfile.rawfile, 'datasetrawfile'):
-        return JsonResponse({'error': 'File is in a dataset, please archive entire set or remove it from dataset first'}, status=403)
-    elif hasattr(sfile, 'pdcbackedupfile') and sfile.pdcbackedupfile.success == True and sfile.pdcbackedupfile.deleted == False:
-        return JsonResponse({'error': 'File is already archived'}, status=403)
-    elif hasattr(sfile, 'mzmlfile'):
-        return JsonResponse({'error': 'Derived mzML files are not archived, they can be regenerated from RAW data'}, status=403)
-    if sfl_q_bup := sfloc_q.filter(servershare__fileservershare__server__can_backup=True,
-            servershare__active=True, servershare__fileservershare__server__active=True):
-        sflocid = sfl_q_bup.values('pk').first()['pk']
+
+    elif hasattr(sfile.rawfile, 'datasetrawfile'):
+        dset = dsmodels.Dataset.objects.filter(datasetrawfile__rawfile=sfile.rawfile).values('pk',
+                'runname__experiment__project__ptype_id', 'deleted').get()
+        if not data.get('force'):
+            return JsonResponse({'error': 'File is in a dataset, force delete, archive entire set, '
+                'or remove it from dataset first'}, status=402)
+        elif dsviews.check_ownership(request.user, dset['runname__experiment__project__ptype_id'],
+                dset['pk'], dset['deleted']):
+            dset_id = dset['pk']
+        else:
+            return JsonResponse({'error': 'File is in a dataset which you are not authorized to '
+                'change'}, status=403)
+
+    elif sfile.analysisresultfile_set.exists():
+        analysis = sfile.analysisresultfile_set.first().analysis
+        analysis_id = analysis.pk
+        if not analysis.user == request.user and not request.user.is_staff:
+            return JsonResponse({'error': 'You are not authorized to delete this analysis file'},
+                    status=403)
+
+    elif sfile.rawfile.usetype == UploadFileType.USERFILE and not UserFile.objects.filter(
+            upload__user=request.user, sfile=sfile).exists() and not request.user.is_staff:
+        return JsonResponse({'error': 'File is a userfile which you are not authorized to '
+                'remove'}, status=403)
+
+    elif not request.user.is_staff:
+        # if not analysis, dset, userfile: library, QC, loose rawfile, need staff status
+        ft = UploadFileType(sfile.rawfile.usetype).label
+        return JsonResponse({'error': f'You are not authorized to remove files of type {ft}'},
+                status=403)
+
+
+    missing_backup = (not hasattr(sfile, 'pdcbackedupfile') or not sfile.pdcbackedupfile.success or 
+            sfile.pdcbackedupfile.deleted)
+    if not hasattr(sfile, 'mzmlfile') and missing_backup:
+        if sfl_q_bup := sfloc_q.filter(servershare__fileservershare__server__can_backup=True,
+                servershare__active=True, servershare__fileservershare__server__active=True):
+            # File on backup-available share, archive
+            sflocid = sfl_q_bup.values('pk').first()['pk']
+        else:
+            # First move file to inbox before doing a backup as it is not available
+            sflocid = sfloc_q.values('pk').first()['pk']
+            inbox = ServerShare.objects.filter(function=ShareFunction.INBOX, active=True).values(
+                    'pk').first()
+            inboxpath = ServerShare.get_inbox_path(dset_id=dset_id, analysis_id=analysis_id)
+            rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflocid,
+                    dstpath=inboxpath, dstshare_id=inbox['pk'])
+            sflocid = rsjob['kwargs']['dstsfloc_id']
         create_job('create_pdc_archive', sfloc_id=sflocid, isdir=sfile.filetype.is_folder)
-    else:
-        sflocid = sfloc_q.values('pk').first()['pk']
-        sfloc_inbox = StoredFileLoc.objects.filter(sfile=sfile, servershare__active=True,
-                servershare__function=ShareFunction.INBOX)
-        rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflocid,
-                dstsfloc_id=sfloc_inbox.first().pk)
-        sfloc_inbox.update(active=True)
-        create_job('create_pdc_archive', sfloc_id=sfloc_inbox.pk, isdir=sfile.filetype.is_folder)
     # sfloc is set to purged=True in the post-job-view for purge
     sfile.deleted = True
     sfile.save()
     create_job('purge_files', sfloc_ids=[x['pk'] for x in sfloc_q.values('pk')])
+    sfloc_q.update(active=False)
     return JsonResponse({'state': 'ok'})
 
 

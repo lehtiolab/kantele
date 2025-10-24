@@ -141,9 +141,8 @@ class BaseTest(TestCase):
                 storage_loc_ui=self.storloc, storage_loc=self.storloc, startdate=timezone.now())
         dm.DatasetComponentState.objects.create(dataset=self.ds, state=dm.DCStates.OK, dtcomp=self.dtcompfiles)
         dm.DatasetComponentState.objects.create(dataset=self.ds, state=dm.DCStates.OK, dtcomp=self.dtcompsamples)
-        self.contact, _ = dm.ExternalDatasetContact.objects.get_or_create(dataset=self.ds,
-                defaults={'email': 'contactname'})
-        dm.DatasetOwner.objects.get_or_create(dataset=self.ds, user=self.user)
+        dm.ExternalDatasetContact.objects.create(dataset=self.ds, email='contactname')
+        dm.DatasetOwner.objects.create(dataset=self.ds, user=self.user)
         self.f3path = os.path.join(self.newstorctrl.path, self.storloc)
         fn3 = 'raw3.raw' # directory to pretend its bruker file with analysis.tdf
         f3size = sum(os.path.getsize(os.path.join(wpath, subfile))
@@ -197,9 +196,9 @@ class BaseTest(TestCase):
         dm.QuantDataset.objects.get_or_create(dataset=self.oldds, quanttype=self.lfqt)
         dm.DatasetComponentState.objects.create(dataset=self.oldds, dtcomp=self.dtcompfiles, state=dm.DCStates.OK)
         dm.DatasetComponentState.objects.create(dataset=self.oldds, dtcomp=self.dtcompsamples, state=dm.DCStates.OK)
-        self.contact, _ = dm.ExternalDatasetContact.objects.get_or_create(dataset=self.oldds,
+        self.contact = dm.ExternalDatasetContact.objects.create(dataset=self.oldds,
                 email='contactname')
-        dm.DatasetOwner.objects.get_or_create(dataset=self.oldds, user=self.user)
+        self.olddsuser = dm.DatasetOwner.objects.create(dataset=self.oldds, user=self.user)
         self.oldfpath = os.path.join(self.oldstorctrl.path, self.oldstorloc)
         oldsize = os.path.getsize(os.path.join(self.oldfpath, oldfn))
         self.oldraw = rm.RawFile.objects.create(name=oldfn, producer=self.prod,
