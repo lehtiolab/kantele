@@ -245,15 +245,15 @@ class BaseTest(TestCase):
         self.anasfile = rm.StoredFile.objects.create(rawfile=self.ana_raw, filetype=anaft,
 
                 filename=self.ana_raw.name, md5=self.ana_raw.source_md5)
-        rm.StoredFileLoc.objects.create(sfile=self.anasfile, servershare=self.sstmp, path='',
-                active=True, purged=False)
+        self.anasfile_sfl = rm.StoredFileLoc.objects.create(sfile=self.anasfile,
+                servershare=self.ssana, path='', active=True, purged=False)
         self.ana_raw2 = rm.RawFile.objects.create(name='ana_file2', producer=self.anaprod,
                 source_md5='anarawabc1234', size=100, date=timezone.now(), claimed=True,
                 usetype=rm.UploadFileType.ANALYSIS)
         self.anasfile2 = rm.StoredFile.objects.create(rawfile=self.ana_raw2,
                 filetype_id=self.ft.id, filename=self.ana_raw2.name, filetype=anaft,
                     md5=self.ana_raw2.source_md5)
-        rm.StoredFileLoc.objects.create(sfile=self.anasfile2, servershare=self.sstmp, path='',
+        rm.StoredFileLoc.objects.create(sfile=self.anasfile2, servershare=self.ssana, path='',
                 active=True, purged=False)
 
 
