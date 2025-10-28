@@ -70,15 +70,6 @@ async function refreshFile(fnid) {
   files = files;
 }
 
-async function reactivateFiles() {
-  for (let fnid of selectedFiles) {
-    await treatItems('files/undelete/', 'file','reactivating', fnid, notif);
-    refreshFile(fnid);
-  }
-  updateNotif();
-}
-
-
 async function archiveFiles() {
   for (let fnid of selectedFiles) {
     await treatItems('files/archive/', 'file','archiving', fnid, notif);
@@ -95,10 +86,8 @@ function purgeFiles() {
 
 <Tabs tabshow="Files" notif={notif} />
 {#if selectedFiles.length}
-<a class="button is-small" title="Move deleted files to active storage (admins only)" on:click={reactivateFiles}>Undelete files</a>
 <a class="button is-small" title="Move files to cold storage (admins only)" on:click={archiveFiles}>Archive files</a>
 {:else}
-<a class="button is-small" title="Move deleted files to active storage (admins only)" disabled>Undelete files</a>
 <a class="button is-small" title="Move files to cold storage (admins only)" disabled>Archive files</a>
 <a class="button is-small" title="PERMANENTLY delete files from active and cold storage (admins only)" disabled>Purge files</a>
 {/if}
@@ -106,5 +95,5 @@ function purgeFiles() {
 <Table tab="Files" bind:items={files} bind:notif={notif} bind:selected={selectedFiles} fetchUrl="/show/files" findUrl="/find/files" getdetails={getFileDetails} fields={tablefields} inactive={['deleted']} on:detailview={showDetails} />
 
 {#if detailsVisible}
-<Details closeWindow={() => {detailsVisible = false}} fnIds={detailsVisible} />
+<Details on:refresh={e => refreshFile(e.detail.fnid)} closeWindow={() => {detailsVisible = false}} fnIds={detailsVisible} />
 {/if}

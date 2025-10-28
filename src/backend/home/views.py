@@ -785,13 +785,25 @@ def get_file_info(request, file_id):
         'rawfile__datasetrawfile', 'mzmlfile', 'rawfile__producer__msinstrument', 'libraryfile',
         'userfile').get()
     is_mzml = hasattr(sfile, 'mzmlfile')
-    info = {'analyses': [], 'servers': [],
+    historical_shares = filemodels.ServerShare.objects.filter(storedfileloc__sfile=sfile)
+    info = {'analyses': [], 'servers': [], 'storage_shares': [],
             'producer': sfile.rawfile.producer.name,
             'filename': sfile.filename,
             'renameable': False if is_mzml else True,
+            'deleted': sfile.deleted,
+            'ask_force_delete': False,
+            'restorable': hasattr(sfile, 'pdcbackedupfile') and sfile.pdcbackedupfile.success,
+            'all_storlocs': {x.id: {'name': x.name, 'id': x.pk, 'description': x.description}
+                for x in filemodels.ServerShare.objects.filter(active=True,
+                    function__in=[x['function'] for x in historical_shares.values('function')]
+                    ).exclude(function=filemodels.ShareFunction.INBOX)
+                },
             }
-    for x in sfile.storedfileloc_set.all().distinct('servershare__name', 'path').values('servershare__name', 'path'):
+    for x in sfile.storedfileloc_set.filter(servershare__active=True, active=True).exclude(
+            servershare__function=filemodels.ShareFunction.INBOX).distinct(
+            'servershare__name', 'path').values('servershare__name', 'path', 'servershare_id'):
         info['servers'].append((x['servershare__name'], x['path']))
+        info['storage_shares'].append(x['servershare_id'])
 
     if hasattr(sfile, 'libraryfile'):
         desc = sfile.libraryfile.description
