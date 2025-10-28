@@ -530,7 +530,7 @@ class TestUploadScript(BaseIntegrationTest):
         self.uploadtoken = rm.UploadToken.objects.create(user=self.user, token=self.token,
                 expires=timezone.now() + timedelta(settings.TOKEN_RENEWAL_WINDOW_DAYS + 1), expired=False,
                 producer=self.anaprod, filetype=anaft, uploadtype=rm.UploadFileType.ANALYSIS)
-        ana = am.Analysis.objects.create(user=self.user, name='testana', storage_dir='testdir_iso')
+        ana = am.Analysis.objects.create(user=self.user, name='testana', base_rundir='testdir_iso')
         exta = am.ExternalAnalysis.objects.create(analysis=ana, description='bla', last_token=self.uploadtoken)
         need_desc = 0
         self.user_token = b64encode(f'{self.token}|{self.live_server_url}|{need_desc}'.encode('utf-8')).decode('utf-8')
@@ -547,7 +547,7 @@ class TestUploadScript(BaseIntegrationTest):
         sf = rm.StoredFile.objects.last()
         sss = sf.storedfileloc_set.first()
         self.assertEqual(sf.filename, self.f3sf.filename)
-        self.assertEqual(sss.path, ana.storage_dir)
+        self.assertEqual(sss.path, ana.get_public_output_dir())
         self.assertEqual(sss.servershare, self.ssana)
         self.assertFalse(sf.checked)
         # Run rsync
@@ -1521,7 +1521,7 @@ class TestAutoDelete(BaseIntegrationTest):
         rm.StoredFileLoc.objects.filter(pk=expreportsfl.pk).update(last_date_used=exp_ldu)
 
         # Analysis files not expired, one shared
-        ana1 = am.Analysis.objects.create(user=self.user, name='ana1', storage_dir='ana1')
+        ana1 = am.Analysis.objects.create(user=self.user, name='ana1', base_rundir='ana1')
         anaraw = rm.RawFile.objects.create(name='ana1.html', producer=self.prod,
                 source_md5='ana1md5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.ANALYSIS)
@@ -1530,7 +1530,7 @@ class TestAutoDelete(BaseIntegrationTest):
         am.AnalysisResultFile.objects.create(analysis=ana1, sfile=anasf)
         rm.PDCBackedupFile.objects.create(success=True, storedfile=anasf, pdcpath='ana1')
         anasfl = rm.StoredFileLoc.objects.create(sfile=anasf,
-                servershare=self.ssanaruns, path=ana1.storage_dir, active=True, purged=False)
+                servershare=self.ssanaruns, path=ana1.base_rundir, active=True, purged=False)
         anaraw2 = rm.RawFile.objects.create(name='ana2.html', producer=self.prod,
                 source_md5='ana2md5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.ANALYSIS)
@@ -1539,10 +1539,10 @@ class TestAutoDelete(BaseIntegrationTest):
         am.AnalysisResultFile.objects.create(analysis=ana1, sfile=anasf2)
         rm.PDCBackedupFile.objects.create(success=True, storedfile=anasf2, pdcpath='ana2')
         anasfl2 = rm.StoredFileLoc.objects.create(sfile=anasf2,
-                servershare=self.ssanaruns, path=ana1.storage_dir, active=True, purged=False)
+                servershare=self.ssanaruns, path=ana1.base_rundir, active=True, purged=False)
 
         # Analysis files expired
-        ana2 = am.Analysis.objects.create(user=self.user, name='ana2', storage_dir='ana2')
+        ana2 = am.Analysis.objects.create(user=self.user, name='ana2', base_rundir='ana2')
         anaraw3 = rm.RawFile.objects.create(name='ana3.html', producer=self.prod,
                 source_md5='ana3md5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.ANALYSIS)
@@ -1551,14 +1551,14 @@ class TestAutoDelete(BaseIntegrationTest):
         am.AnalysisResultFile.objects.create(analysis=ana2, sfile=anasf3)
         rm.PDCBackedupFile.objects.create(success=True, storedfile=anasf3, pdcpath='ana3')
         anasfl3 = rm.StoredFileLoc.objects.create(sfile=anasf3,
-                servershare=self.ssanaruns, path=ana2.storage_dir, active=True, purged=False)
+                servershare=self.ssanaruns, path=ana2.base_rundir, active=True, purged=False)
         rm.StoredFileLoc.objects.filter(pk=anasfl3.pk).update(last_date_used=exp_ldu)
 
         # Shared analysis file (not expired):
         am.AnalysisResultFile.objects.create(analysis=ana2, sfile=anasf2)
 
         # Analysis without shared files expired
-        ana3 = am.Analysis.objects.create(user=self.user, name='ana3', storage_dir='ana3')
+        ana3 = am.Analysis.objects.create(user=self.user, name='ana3', base_rundir='ana3')
         anaraw4 = rm.RawFile.objects.create(name='ana4.html', producer=self.prod,
                 source_md5='ana4md5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.ANALYSIS)
@@ -1567,7 +1567,7 @@ class TestAutoDelete(BaseIntegrationTest):
         am.AnalysisResultFile.objects.create(analysis=ana3, sfile=anasf4)
         rm.PDCBackedupFile.objects.create(success=True, storedfile=anasf4, pdcpath='ana4')
         anasfl4 = rm.StoredFileLoc.objects.create(sfile=anasf4,
-                servershare=self.ssanaruns, path=ana3.storage_dir, active=True, purged=False)
+                servershare=self.ssanaruns, path=ana3.base_rundir, active=True, purged=False)
         rm.StoredFileLoc.objects.filter(pk=anasfl4.pk).update(last_date_used=exp_ldu)
 
         call_command('delete_expired_files')

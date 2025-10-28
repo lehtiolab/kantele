@@ -106,7 +106,7 @@ class AnalysisPageTest(BaseIntegrationTest):
                 share=self.ssweb, path=os.path.join(self.rootdir, 'web'))
 
         # Create analysis for isoquant:
-        self.ana = am.Analysis.objects.create(user=self.user, name='testana_iso', storage_dir='testdir_iso')
+        self.ana = am.Analysis.objects.create(user=self.user, name='testana_iso', base_rundir='testdir_iso')
         self.dsa = am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.ds)
         self.anajob = jm.Job.objects.create(funcname='testjob', kwargs={'fserver_id': self.anaserver.pk}, state=jj.Jobstates.WAITING,
                 timestamp=timezone.now())
@@ -127,7 +127,7 @@ class AnalysisPageTest(BaseIntegrationTest):
                 sfile=self.anasfile)
 
         # Create analysis for LF
-        self.analf = am.Analysis.objects.create(user=self.user, name='testana_lf', storage_dir='testdirlf')
+        self.analf = am.Analysis.objects.create(user=self.user, name='testana_lf', base_rundir='testdirlf')
         self.dsalf = am.DatasetAnalysis.objects.create(analysis=self.analf, dataset=self.oldds)
         self.anajoblf = jm.Job.objects.create(funcname='testjob', kwargs={}, state=jj.Jobstates.WAITING,
                 timestamp=timezone.now())
@@ -187,7 +187,7 @@ class LoadBaseAnaTestIso(AnalysisPageTest):
     def setUp(self):
         super().setUp()
         # create "added_results", i.e. a param in analysis which uses results from another ana
-        self.newana = am.Analysis.objects.create(user=self.user, name='testana_iso', storage_dir='testdir_iso')
+        self.newana = am.Analysis.objects.create(user=self.user, name='testana_iso', base_rundir='testdir_iso')
         job = jm.Job.objects.create(funcname='testjob', kwargs={}, state=jj.Jobstates.WAITING,
                 timestamp=timezone.now())
         am.NextflowSearch.objects.create(analysis=self.newana, nfwfversionparamset=self.nfwf,
@@ -704,9 +704,10 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.assertFalse(am.AnalysisSetname.objects.filter(analysis=ana).exists())
         self.assertFalse(am.AnalysisParam.objects.filter(analysis=ana).exists())
         self.assertEqual(ana.name, postdata['analysisname'])
-        self.assertEqual(ana.storage_dir, ana.get_public_output_dir())
-        startrundir = f'{self.user.username}/{ana.pk}_USER_{ana.name.replace(' ', '_')}_{timestamp}'
-        self.assertTrue(ana.storage_dir.startswith(startrundir))
+        self.assertEqual(ana.base_rundir, ana.get_run_base_dir())
+        startrundir = f'{ana.pk}_USER_{ana.name.replace(' ', '_')}_{timestamp}'
+        self.assertTrue(ana.base_rundir.startswith(startrundir))
+        self.assertTrue(ana.get_public_output_dir(), f'{self.user.username}/{startrundir}')
         token = rm.UploadToken.objects.last()
         checkjson = {'errmsg': False, 'multierror': [], 'analysis_id': ana.pk, 'token': {
             'expired': False, 'expires': datetime.strftime(token.expires, '%Y-%m-%d, %H:%M'),
@@ -781,7 +782,7 @@ class TestStoreAnalysis(AnalysisPageTest):
                     PT.FLAG: 'flags'}[ap.param.ptype]
             self.assertEqual(ap.value, params[pt][ap.param_id])
         self.assertEqual(ana.name, postdata['analysisname'])
-        self.assertEqual(ana.storage_dir, ana.get_public_output_dir())
+        self.assertEqual(ana.base_rundir, ana.get_run_base_dir())
         checkjson = {'errmsg': False, 'multierror': [], 'analysis_id': ana.pk, 'token': False}
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
         self.cl.post('/analysis/start/', content_type='application/json',
@@ -795,7 +796,7 @@ class TestStoreAnalysis(AnalysisPageTest):
         nfrunfn = os.path.join(self.nfrunshare.path, nfrunsfl.path, 'report.html')
         self.assertTrue(os.path.exists(nfrunfn))
 
-        anasfl = reports.filter(servershare=self.ssana, path=ana.storage_dir).get()
+        anasfl = reports.filter(servershare=self.ssana, path=ana.get_public_output_dir()).get()
         anadir = os.path.join(self.anashare.path, anasfl.path)
         anafn = os.path.join(anadir, 'report.html')
         self.assertTrue(os.path.exists(anafn))
@@ -903,8 +904,7 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
         self.assertEqual(self.ana.name, postdata['analysisname'])
         fullname = f'{self.ana.pk}_{self.wftype.name}_{self.ana.name}_{timestamp}'
         # This test flakes if executed right at midnight due to timestamp in assert string
-        storedir =  f'{self.ana.user.username}/{fullname}'.replace(' ', '_')
-        self.assertEqual(self.ana.storage_dir, storedir)
+        self.assertEqual(self.ana.base_rundir, fullname.replace(' ', '_'))
         self.anajob.refresh_from_db()
         c_ch = am.PsetComponent.ComponentChoices
         self.maxDiff = 50000
@@ -1047,7 +1047,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         self.assertEqual(self.analf.analysisfileparam_set.count(), 2)
         fullname = f'{self.analf.pk}_{self.wftype.name}_{self.analf.name}_{timestamp}'
         # This test flakes if executed right at midnight due to timestamp in assert string
-        self.assertEqual(self.analf.storage_dir[:-5], f'{self.analf.user.username}/{fullname}'.replace(' ', '_'))
+        self.assertEqual(self.analf.base_rundir[:-5], fullname.replace(' ', '_'))
         checkjson = {'errmsg': False, 'multierror': [], 'analysis_id': self.analf.pk, 'token': False}
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
         ba = am.AnalysisBaseanalysis.objects.get(analysis=self.analf)
@@ -1197,7 +1197,7 @@ class TestDeleteAnalysis(BaseTest):
 
     def setUp(self):
         super().setUp()
-        self.ana = am.Analysis.objects.create(user=self.user, name='test', storage_dir='testdir')
+        self.ana = am.Analysis.objects.create(user=self.user, name='test', base_rundir='testdir')
 
     def test_fail_request(self):
         resp = self.cl.get(self.url)
@@ -1243,7 +1243,7 @@ class TestPurgeAnalysis(BaseIntegrationTest):
 
     def setUp(self):
         super().setUp()
-        self.ana = am.Analysis.objects.create(user=self.user, name='test', storage_dir='testdir', deleted=True)
+        self.ana = am.Analysis.objects.create(user=self.user, name='test', base_rundir='testdir', deleted=True)
         self.user.is_staff = True
         self.user.save()
 

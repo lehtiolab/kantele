@@ -1155,7 +1155,7 @@ class TestUnlockDataset(BaseTest):
         super().setUp()
         self.ds.locked = True
         self.ds.save()
-        ana = am.Analysis.objects.create(user=self.user, name='testana_unlock', storage_dir='testdir_unclock')
+        ana = am.Analysis.objects.create(user=self.user, name='testana_unlock', base_rundir='testdir_unclock')
         self.dsa = am.DatasetAnalysis.objects.create(analysis=ana, dataset=self.ds)
         self.anajob = jm.Job.objects.create(funcname='testjob', kwargs={},
                 state=Jobstates.WAITING, timestamp=timezone.now())

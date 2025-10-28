@@ -830,7 +830,8 @@ def transfer_file(request):
     if upload.uploadtype == UploadFileType.RAWFILE:
         check_dup = True
     elif upload.uploadtype == UploadFileType.ANALYSIS:
-        dstpath = upload.externalanalysis.analysis.storage_dir
+        # FIXME what if sens data -> only go to specific shares, not delivery
+        dstpath = upload.externalanalysis.analysis.get_public_output_dir()
     elif upload.uploadtype == UploadFileType.LIBRARY:
         # Make file names unique because harder to control external files
         fname = f'{rawfn.pk}_{fname}'
@@ -901,7 +902,7 @@ def run_singlefile_qc(sfloc, server_id, user_op, acqtype):
             f'--{acqtype.name.lower()}']
     analysis, _ = Analysis.objects.update_or_create(user_id=user_op.user_id,
             name=f'{rawfile.producer.name}_{rawfile.name}_{rawfile.date}', defaults={
-                'log': [], 'deleted': False, 'purged': False, 'storage_dir': '', 'editable': False})
+                'log': [], 'deleted': False, 'purged': False, 'base_rundir': '', 'editable': False})
     qcrun, _ = dashmodels.QCRun.objects.update_or_create(rawfile=rawfile, defaults={'is_ok': False,
         'message': '', 'runtype': acqtype, 'analysis': analysis})
     tps = dashmodels.TrackedPeptideSet.objects.filter(active=True, acqmode=acqtype).order_by('-date').first()
