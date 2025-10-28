@@ -1196,6 +1196,8 @@ def update_sfile_storage(request):
         src_sfl.save()
         src_sfl_id = src_sfl.pk
         remaining_share_ids = [x for x in share_ids if x != src_sfl.servershare_id]
+        sfile.deleted = False
+        sfile.save()
 
     elif src_sfl_q := sfile.storedfileloc_set.filter(active=True, servershare__active=True, 
             servershare__fileservershare__server__can_rsync_remote=True,

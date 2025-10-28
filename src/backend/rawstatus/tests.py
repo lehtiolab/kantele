@@ -1236,6 +1236,8 @@ class TestUpdateStorageFile(BaseFilesTest):
                 path=self.storloc, active=False, purged=True)
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.f3sf.pk, 'share_ids': [self.sstmp.pk]})
+        self.f3sf.refresh_from_db()
+        self.assertFalse(self.f3sf.deleted)
         self.assertEqual(sfls.count(), 1)
         self.assertTrue(sfls.filter(servershare=self.sstmp).exists())
         self.assertTrue(bupjobs.filter(kwargs__sfloc_id=tmpf3sfl.pk).exists())
