@@ -24,7 +24,7 @@ from Bio import SeqIO
 from celery import states as taskstates
 
 from kantele import settings
-from rawstatus.models import (RawFile, Producer, StoredFile, ServerShare, StoredFileLoc,
+from rawstatus.models import (RawFile, Producer, StoredFile, FileServer, ServerShare, StoredFileLoc,
         ShareFunction, FileserverShare, StoredFileType, UserFile, MSFileData, PDCBackedupFile, 
         UploadToken, UploadFileType)
 from rawstatus import jobs as rsjobs
@@ -830,7 +830,8 @@ def transfer_file(request):
     if upload.uploadtype == UploadFileType.RAWFILE:
         check_dup = True
     elif upload.uploadtype == UploadFileType.ANALYSIS:
-        dstpath = upload.externalanalysis.analysis.storage_dir
+        # FIXME what if sens data -> only go to specific shares, not delivery
+        dstpath = upload.externalanalysis.analysis.get_public_output_dir()
     elif upload.uploadtype == UploadFileType.LIBRARY:
         # Make file names unique because harder to control external files
         fname = f'{rawfn.pk}_{fname}'
@@ -901,7 +902,7 @@ def run_singlefile_qc(sfloc, server_id, user_op, acqtype):
             f'--{acqtype.name.lower()}']
     analysis, _ = Analysis.objects.update_or_create(user_id=user_op.user_id,
             name=f'{rawfile.producer.name}_{rawfile.name}_{rawfile.date}', defaults={
-                'log': [], 'deleted': False, 'purged': False, 'storage_dir': '', 'editable': False})
+                'log': [], 'deleted': False, 'purged': False, 'base_rundir': '', 'editable': False})
     qcrun, _ = dashmodels.QCRun.objects.update_or_create(rawfile=rawfile, defaults={'is_ok': False,
         'message': '', 'runtype': acqtype, 'analysis': analysis})
     tps = dashmodels.TrackedPeptideSet.objects.filter(active=True, acqmode=acqtype).order_by('-date').first()
@@ -1094,63 +1095,160 @@ def download_px_project(request):
 
 @login_required
 @require_POST
-def restore_file_from_cold(request):
-    '''Single file function for restoring archived files, for cases where files are not in dataset,
-    e.g. on tmp storage only
+def update_sfile_storage(request):
+    '''Storage update including restoring from archive) for individual files
     Restores to 'share_ids': [1,2,3]
     '''
     data = json.loads(request.body.decode('utf-8'))
     try:
-        sfile = StoredFile.objects.select_related('rawfile__datasetrawfile', 'mzmlfile', 'pdcbackedupfile').get(pk=data['item_id'])
+        sfile = StoredFile.objects.select_related('pdcbackedupfile', 'rawfile').get(pk=data['item_id'])
         share_ids = data['share_ids']
     except StoredFile.DoesNotExist:
-        return JsonResponse({'error': 'File does not exist'}, status=403)
+        return JsonResponse({'error': 'File does not exist'}, status=404)
     except KeyError:
         return JsonResponse({'error': 'Parameters not passed'}, status=400)
-    if not sfile.deleted:
-        return JsonResponse({'error': 'File is not currently marked as deleted, will not undelete'}, status=403)
-    elif hasattr(sfile.rawfile, 'datasetrawfile'):
-        return JsonResponse({'error': 'File is in a dataset, please restore entire set'}, status=403)
-    elif not hasattr(sfile, 'pdcbackedupfile'):
-        return JsonResponse({'error': 'File has no archived copy in PDC backup registered in Kantele, can not restore'}, status=403)
-    elif not sfile.pdcbackedupfile.success or sfile.pdcbackedupfile.deleted:
-        return JsonResponse({'error': 'Archived copy exists but cannot be restored from, check with admin'}, status=403)
-    elif hasattr(sfile, 'mzmlfile'):
-        return JsonResponse({'error': 'mzML derived files are not archived, please regenerate it from RAW data'}, status=403)
-    # File is set to deleted, purged = False, False in the post-job-view
-    sfloc_q = sfile.storedfileloc_set.filter(servershare__fileservershare__server__can_backup=True,
-            servershare__active=True, servershare__fileservershare__server__active=True)
-    if sfl_bup_q := sfloc_q.filter(servershare_id__in=data['share_ids']):
-        # determine where to back up to, preferably a place the user wants to
-        sfl_bup = sfl_bup_q.first()
-    elif sfl_inbox_q := sfloc_q.filter(servershare__function=ShareFunction.INBOX):
-        # if that is not avail, pick inbox
-        sfl_bup = sfl_inbox_q.first()
-    elif sfloc_q.exists():
-        # Otherwise take first historical available share
-        sfl_bup = sfloc_q.first()
+
+    def get_path(sfile, dstshare_id, dss, analysis):
+        # Get dst path depending on file and share
+        if dss:
+            # For raw files, and mzML, and refined mzML
+            dstpath = dss.filter(storageshare_id=dstshare_id).values(
+                    'storage_loc_ui').get()['storage_loc_ui']
+        elif sfile.rawfile.usetype == UploadFileType.QC:
+            # QC raw files
+            dstpath = settings.QC_STORAGE_DIR
+        elif sfile.rawfile.usetype in [UploadFileType.LIBRARY, UploadFileType.USERFILE]:
+            # Library/user files
+            dstpath = settings.LIBRARY_FILE_PATH
+        elif analysis:
+            # Analysis results but not those from mzML converter/refiner
+            dstshare = ServerShare.objects.values('function').get(pk=dstshare_id)
+            if dstshare['function'] == ShareFunction.ANALYSIS_DELIVERY:
+                dstpath = analysis.get_public_output_dir()
+            else:
+                dstpath = analysis.base_rundir
+        else:
+            raise RuntimeError('Cannot determine path to update file to')
+        return dstpath
+
+    # Files can only be on those share types where they have once been, except INBOX
+    historical_shares = ServerShare.objects.filter(storedfileloc__sfile=sfile)
+    if ServerShare.objects.filter(pk__in=share_ids, active=True, function__in=[x['function']
+        for x in historical_shares.values('function')]).exclude(function=ShareFunction.INBOX
+            ).count() < len(share_ids):
+        return JsonResponse({'error': 'Invalid share requested to move file to'}, status=400)
+
+    if rsync_server := FileServer.objects.filter(can_rsync_remote=True, active=True):
+        rsync_server = rsync_server.values('pk').first()
     else:
-        return JsonResponse({'error': 'There is no copy of a file on a storage server with backup '
-            'function, or maybe the servers are not correctly registered'}, status=400)
-    # Now restore, then distribute to other dst shares
-    create_job('restore_from_pdc_archive', sfloc_id=sfl_bup.pk)
-    sfl_bup.active = True
-    sfl_bup.save()
-    rsjob_kws = []
-    for dstsfl in sfloc_q.exclude(pk=sfl_bup.pk).values('pk'):
-        rsjkw = {'sfloc_id': sfl_bup.pk, 'dstsfloc_id': dstsfl['pk']}
-        if rsjoberr := check_job_error('rsync_otherfiles_to_servershare', **rsjkw):
-            return JsonResponse({'error': rsjoberr}, status=400)
-        rsjob_kws.append(rsjkw)
-    [create_job('rsync_otherfiles_to_servershare', **kw) for kw in rsjob_kws]
+        return JsonResponse({'error': 'No server available to transfer file, likely '
+            'an incorrect configuration, please contact admin'}, status=400)
+
+    existing_sfl = sfile.storedfileloc_set.filter(active=True).values('pk', 'servershare_id')
+    existing_shares = [(x['pk'], x['servershare_id']) for x in existing_sfl]
+    deleted = sfile.deleted and not len(existing_shares)
+    dset_id, analysis, dss = False, False, False
+    if deleted and not PDCBackedupFile.objects.filter(storedfile=sfile, success=True,
+            deleted=False).exists():
+        return JsonResponse({'error': 'File has no archived copy in PDC backup registered in '
+            'Kantele, can not restore'}, status=403)
+
+    elif not deleted and (sfile.deleted or not len(existing_shares)):
+        return JsonResponse({'error': 'File is not marked as deleted but no copies can be found '
+            'in DB to exist on filesystem. Please contact admin.'}, status=400)
+
+    elif analysis_q := Analysis.objects.filter(analysisresultfile__sfile=sfile):
+        analysis = analysis_q.first()
+        # FIXME securityclass check when we have that!
+
+    elif hasattr(sfile.rawfile, 'datasetrawfile'):
+        if not deleted or not (dss := dsmodels.DatasetServer.objects.filter(active=True,
+                    dataset__datasetrawfile__rawfile=sfile.rawfile)):
+            # in dset -> only if file cold and there is dset on disk
+            return JsonResponse({'error': 'File is in a dataset, please update entire set'}, status=403)
+        if len(share_ids) > dsmodels.DatasetServer.objects.filter(storageshare_id__in=share_ids,
+                dataset__datasetrawfile__rawfile=sfile.rawfile, active=True).count():
+            # cannot move to location where there is no dss
+            # already done the max_security check)
+            return JsonResponse({'error': 'You cannot move dataset-associated files to where their '
+                'dataset is not, move the dataset instead'}, status=403)
+
+        dset_id = dss.values('dataset_id').first()['dataset_id']
+
+    if deleted:
+        # Select a place to do restore to, then start restore job:
+        sfloc_q = sfile.storedfileloc_set.filter(servershare__fileservershare__server__can_backup=True,
+                servershare__active=True, servershare__fileservershare__server__active=True)
+        if sfl_bup_q := sfloc_q.filter(servershare_id__in=share_ids):
+            # determine where to back up to, preferably a place the user wants to
+            src_sfl = sfl_bup_q.first()
+        elif sfl_inbox_q := sfloc_q.filter(servershare__function=ShareFunction.INBOX):
+            # if that is not avail, pick inbox
+            src_sfl = sfl_inbox_q.first()
+        elif sfloc_q.exists():
+            # Otherwise take first historical available share with backup capabilities
+            src_sfl = sfloc_q.first()
+        else:
+            return JsonResponse({'error': 'There is no copy of a file on a storage server with backup '
+                'function, or maybe the servers are not correctly registered'}, status=400)
+        create_job('restore_from_pdc_archive', sfloc_id=src_sfl.pk)
+        src_sfl.active = True
+        src_sfl.save()
+        src_sfl_id = src_sfl.pk
+        remaining_share_ids = [x for x in share_ids if x != src_sfl.servershare_id]
+        sfile.deleted = False
+        sfile.save()
+
+    elif src_sfl_q := sfile.storedfileloc_set.filter(active=True, servershare__active=True, 
+            servershare__fileservershare__server__can_rsync_remote=True,
+            servershare__fileservershare__server__active=True):
+        # We have an accessible file to distribute on rsync-capable server
+        src_sfl = src_sfl_q.values('pk', 'servershare_id').first()
+        src_sfl_id = src_sfl['pk']
+        remaining_share_ids = [x for x in share_ids if x != src_sfl['servershare_id']]
+
+    else:
+        # File only on remote, rsync to first rsync capable server
+        src_sfl = sfile.storedfileloc_set.filter(active=True, servershare__active=True, 
+            servershare__fileservershare__server__active=True).values('servershare_id').first()
+        srcserver = FileserverShare.objects.filter(share_id=src_sfl['servershare_id'],
+                ).values('server_id').first()
+        dstshare_classes = ServerShare.classify_shares_by_rsync_reach([x for x in share_ids],
+                srcserver['server_id'])
+        if dstshare_classes['rsync_sourcable']:
+            rs_src_dstshare_id = dstshare_classes['rsync_sourcable'][0]
+            rs_src_dstpath = get_path(sfile, rs_src_dstshare_id, dss, analysis)
+
+        elif dstshare_classes['remote']:
+            # need to rsync to INBOX (as it is guaranteed to be on an rsyncing capable
+            # controller (and sensitive classed)
+            rs_src_dstshare_id = ServerShare.objects.filter(function=ShareFunction.INBOX
+                    ).values('pk').first()['pk']
+            rs_src_dstpath = get_path(sfile, rs_src_dstshare_id, dss, analysis)
+
+        else:
+            return JsonResponse({'error': 'There is no copy of a file on a storage server which '
+                'can be reached, or maybe the servers are not correctly registered'}, status=400)
+
+        rs_src_job = create_job('rsync_otherfiles_to_servershare', sfloc_id=existing_shares[0][0],
+                    dstshare_id=rs_src_dstshare_id, dstpath=rs_src_dstpath)
+        src_sfl_id = rs_src_job['kwargs']['dstsfloc_id']
+        remaining_share_ids = [x for x in share_ids if x != rs_src_job['kwargs']['dstshare_id']]
+      
+    # Now distribute to remaining dst shares
+    for share_id in [x for x in remaining_share_ids if x not in [x[1] for x in existing_shares]]:
+        dstpath = get_path(sfile, share_id, dss, analysis)
+        create_job('rsync_otherfiles_to_servershare', sfloc_id=src_sfl_id, dstshare_id=share_id,
+                dstpath=dstpath)
+
     return JsonResponse({'state': 'ok'})
 
 
 @login_required
 @require_POST
-def archive_file(request):
-    '''Single file function for archiving files, for cases where files are not in dataset,
-    e.g. on tmp storage only'''
+def delete_file(request):
+    '''Single file function for deleting files from disk, backing them up if that has not
+    been done yet'''
     data = json.loads(request.body.decode('utf-8'))
     try:
         sfile = StoredFile.objects.select_related('rawfile__datasetrawfile', 'filetype', 'rawfile__producer').get(pk=data['item_id'], deleted=False)
@@ -1159,31 +1257,65 @@ def archive_file(request):
     except KeyError:
         return JsonResponse({'error': 'Bad request'}, status=400)
     sfloc_q = StoredFileLoc.objects.filter(sfile=sfile, active=True)
+    analysis_id, dset_id = False, False
     if not sfloc_q.exists():
         return JsonResponse({'error': 'File is possibly deleted, but not marked as such, please '
             'inform admin -- can not archive'}, status=403)
-    elif sfile.rawfile.claimed or hasattr(sfile.rawfile, 'datasetrawfile'):
-        return JsonResponse({'error': 'File is in a dataset, please archive entire set or remove it from dataset first'}, status=403)
-    elif hasattr(sfile, 'pdcbackedupfile') and sfile.pdcbackedupfile.success == True and sfile.pdcbackedupfile.deleted == False:
-        return JsonResponse({'error': 'File is already archived'}, status=403)
-    elif hasattr(sfile, 'mzmlfile'):
-        return JsonResponse({'error': 'Derived mzML files are not archived, they can be regenerated from RAW data'}, status=403)
-    if sfl_q_bup := sfloc_q.filter(servershare__fileservershare__server__can_backup=True,
-            servershare__active=True, servershare__fileservershare__server__active=True):
-        sflocid = sfl_q_bup.values('pk').first()['pk']
+
+    elif hasattr(sfile.rawfile, 'datasetrawfile'):
+        dset = dsmodels.Dataset.objects.filter(datasetrawfile__rawfile=sfile.rawfile).values('pk',
+                'runname__experiment__project__ptype_id', 'deleted').get()
+        if not data.get('force'):
+            return JsonResponse({'error': 'File is in a dataset, force delete, archive entire set, '
+                'or remove it from dataset first'}, status=402)
+        elif dsviews.check_ownership(request.user, dset['runname__experiment__project__ptype_id'],
+                dset['pk'], dset['deleted']):
+            dset_id = dset['pk']
+        else:
+            return JsonResponse({'error': 'File is in a dataset which you are not authorized to '
+                'change'}, status=403)
+
+    elif sfile.analysisresultfile_set.exists():
+        analysis = sfile.analysisresultfile_set.first().analysis
+        analysis_id = analysis.pk
+        if not analysis.user == request.user and not request.user.is_staff:
+            return JsonResponse({'error': 'You are not authorized to delete this analysis file'},
+                    status=403)
+
+    elif sfile.rawfile.usetype == UploadFileType.USERFILE and not UserFile.objects.filter(
+            upload__user=request.user, sfile=sfile).exists() and not request.user.is_staff:
+        return JsonResponse({'error': 'File is a userfile which you are not authorized to '
+                'remove'}, status=403)
+
+    elif not request.user.is_staff:
+        # if not analysis, dset, userfile: library, QC, loose rawfile, need staff status
+        ft = UploadFileType(sfile.rawfile.usetype).label
+        return JsonResponse({'error': f'You are not authorized to remove files of type {ft}'},
+                status=403)
+
+
+    missing_backup = (not hasattr(sfile, 'pdcbackedupfile') or not sfile.pdcbackedupfile.success or 
+            sfile.pdcbackedupfile.deleted)
+    if not hasattr(sfile, 'mzmlfile') and missing_backup:
+        if sfl_q_bup := sfloc_q.filter(servershare__fileservershare__server__can_backup=True,
+                servershare__active=True, servershare__fileservershare__server__active=True):
+            # File on backup-available share, archive
+            sflocid = sfl_q_bup.values('pk').first()['pk']
+        else:
+            # First move file to inbox before doing a backup as it is not available
+            sflocid = sfloc_q.values('pk').first()['pk']
+            inbox = ServerShare.objects.filter(function=ShareFunction.INBOX, active=True).values(
+                    'pk').first()
+            inboxpath = ServerShare.get_inbox_path(dset_id=dset_id, analysis_id=analysis_id)
+            rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflocid,
+                    dstpath=inboxpath, dstshare_id=inbox['pk'])
+            sflocid = rsjob['kwargs']['dstsfloc_id']
         create_job('create_pdc_archive', sfloc_id=sflocid, isdir=sfile.filetype.is_folder)
-    else:
-        sflocid = sfloc_q.values('pk').first()['pk']
-        sfloc_inbox = StoredFileLoc.objects.filter(sfile=sfile, servershare__active=True,
-                servershare__function=ShareFunction.INBOX)
-        rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflocid,
-                dstsfloc_id=sfloc_inbox.first().pk)
-        sfloc_inbox.update(active=True)
-        create_job('create_pdc_archive', sfloc_id=sfloc_inbox.pk, isdir=sfile.filetype.is_folder)
     # sfloc is set to purged=True in the post-job-view for purge
     sfile.deleted = True
     sfile.save()
     create_job('purge_files', sfloc_ids=[x['pk'] for x in sfloc_q.values('pk')])
+    sfloc_q.update(active=False)
     return JsonResponse({'state': 'ok'})
 
 

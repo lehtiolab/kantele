@@ -75,7 +75,7 @@ class RerunSingleQCTest(BaseQCFileTest):
         self.qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow')
         self.rs_jobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
                 kwargs__sfloc_id__in=[x.pk for x in self.oldsf.storedfileloc_set.all()])
-        ana = am.Analysis.objects.create(name='previousrun', user=self.user, storage_dir='blbala')
+        ana = am.Analysis.objects.create(name='previousrun', user=self.user, base_rundir='blbala')
         self.qcdata = dashm.QCRun.objects.create(rawfile=self.oldraw, analysis=ana,
                 runtype=dm.AcquisistionMode.DDA)
         self.olddsr.delete()
@@ -149,9 +149,9 @@ class RerunManyQCsTest(BaseQCFileTest):
         pset = am.ParameterSet.objects.create()
         uwf = am.UserWorkflow.objects.create(wftype=am.UserWorkflow.WFTypeChoices.QC, public=False)
         uwf.nfwfversionparamsets.create(nfworkflow=nfrepo, paramset=pset)
-        oldana = am.Analysis.objects.create(name='previousrun', user=self.user, storage_dir='blbala')
+        oldana = am.Analysis.objects.create(name='previousrun', user=self.user, base_rundir='blbala')
         dashm.QCRun.objects.create(rawfile=self.oldraw, analysis=oldana, runtype=dm.AcquisistionMode.DDA)
-        tmpana = am.Analysis.objects.create(name='previousrun', user=self.user, storage_dir='blbala3')
+        tmpana = am.Analysis.objects.create(name='previousrun', user=self.user, base_rundir='blbala3')
         dashm.QCRun.objects.create(rawfile=self.tmpraw, analysis=tmpana, runtype=dm.AcquisistionMode.DDA)
 
     def test_fail(self):

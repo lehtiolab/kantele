@@ -8,6 +8,7 @@ export async function parseResponse(response) {
   }
   // Deliver HTTP errors if any
   jsonresp.ok = response.ok;
+  jsonresp.status = response.status;
   return jsonresp;
 }
 

@@ -530,7 +530,7 @@ class TestUploadScript(BaseIntegrationTest):
         self.uploadtoken = rm.UploadToken.objects.create(user=self.user, token=self.token,
                 expires=timezone.now() + timedelta(settings.TOKEN_RENEWAL_WINDOW_DAYS + 1), expired=False,
                 producer=self.anaprod, filetype=anaft, uploadtype=rm.UploadFileType.ANALYSIS)
-        ana = am.Analysis.objects.create(user=self.user, name='testana', storage_dir='testdir_iso')
+        ana = am.Analysis.objects.create(user=self.user, name='testana', base_rundir='testdir_iso')
         exta = am.ExternalAnalysis.objects.create(analysis=ana, description='bla', last_token=self.uploadtoken)
         need_desc = 0
         self.user_token = b64encode(f'{self.token}|{self.live_server_url}|{need_desc}'.encode('utf-8')).decode('utf-8')
@@ -547,7 +547,7 @@ class TestUploadScript(BaseIntegrationTest):
         sf = rm.StoredFile.objects.last()
         sss = sf.storedfileloc_set.first()
         self.assertEqual(sf.filename, self.f3sf.filename)
-        self.assertEqual(sss.path, ana.storage_dir)
+        self.assertEqual(sss.path, ana.get_public_output_dir())
         self.assertEqual(sss.servershare, self.ssana)
         self.assertFalse(sf.checked)
         # Run rsync
@@ -1113,8 +1113,8 @@ class TestFileTransfer(BaseFilesTest):
         self.assertEqual(self.registered_raw.name, fname)
     
 
-class TestArchiveFile(BaseFilesTest):
-    url = '/files/archive/'
+class TestUpdateStorageFile(BaseFilesTest):
+    url = '/files/storage/'
 
     def setUp(self):
         super().setUp()
@@ -1123,36 +1123,208 @@ class TestArchiveFile(BaseFilesTest):
         self.sfloc = rm.StoredFileLoc.objects.create(sfile=self.sfile, servershare_id=self.sstmp.id,
                 path='', purged=False, active=True)
 
-    def test_get(self):
+
+    def test_fails(self):
         resp = self.cl.get(self.url)
         self.assertEqual(resp.status_code, 405)
-
-    def test_wrong_params(self):
         resp = self.cl.post(self.url, content_type='application/json', data={'hello': 'test'})
         self.assertEqual(resp.status_code, 400)
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': -1})
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()['error'], 'File does not exist')
 
-    def test_wrong_id(self):
+    def test_cannot_move(self):
+        badsharemsg = 'Invalid share requested to move file to'
+        # Analysis to raw share
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.anasfile.pk, 'share_ids': [self.analocalstor.pk]})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], badsharemsg)
+         
+        # Dset file to analysis
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.f3sf.pk, 'share_ids': [self.ssana.pk]})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], badsharemsg)
+
+        # No backup, cant restore
+        self.f3sf.deleted = True
+        self.f3sf.save()
+        self.f3sf.storedfileloc_set.update(active=False)
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.f3sf.pk, 'share_ids': [self.analocalstor.pk]})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'File has no archived copy in PDC backup '
+                'registered in Kantele, can not restore')
+        # Dset file to place without dataset
+        rm.PDCBackedupFile.objects.create(success=True, storedfile=self.f3sf,
+                pdcpath='testbup', deleted=False)
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.f3sf.pk, 'share_ids': [self.analocalstor.pk]})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'You cannot move dataset-associated files to '
+                'where their dataset is not, move the dataset instead')
+
+        # No active DSS
+        self.dss.active = False
+        self.dss.save()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.f3sf.pk, 'share_ids': [self.analocalstor.pk]})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'File is in a dataset, please update entire set')
+
+    def test_analysis(self):
+        # Analysis file on delivery to rundir, push directly to rsync capable dest
+        self.ana = am.Analysis.objects.create(user=self.user, name='test', base_rundir='testdir')
+        self.resultfn = am.AnalysisResultFile.objects.create(analysis=self.ana,
+                sfile=self.anasfile)
+        # Create inactive copy to see there is an historical copy in an nfrundir
+        oldsfl = rm.StoredFileLoc.objects.create(sfile=self.anasfile, servershare=self.ssanaruns,
+                path='hello', active=False, purged=True)
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.anasfile.pk, 'share_ids': [self.ssanaruns.pk]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(jm.Job.objects.filter(funcname='restore_from_pdc_archive').exists())
+        self.assertEqual(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare').count(), 1)
+
+        # Analysis file on rundir back to delivery, is on remote and will go to an rsync-ok server
+        self.anasfile_sfl.active, self.anasfile_sfl.purged = False, True
+        self.anasfile_sfl.save()
+        # Delete jobs to have fresh count
+        jm.Job.objects.all().delete()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.anasfile.pk, 'share_ids': [self.ssana.pk]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(jm.Job.objects.filter(funcname='restore_from_pdc_archive').exists())
+        self.assertEqual(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare').count(), 1)
+
+        # Analysis file on rundir to other rundir, is on remote and will go through inbox
+        self.anasfile_sfl.active, self.anasfile_sfl.purged = False, True
+        self.anasfile_sfl.save()
+        # Delete jobs to have fresh count
+        jm.Job.objects.all().delete()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.anasfile.pk, 'share_ids': [self.ssanaruns2.pk]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(jm.Job.objects.filter(funcname='restore_from_pdc_archive').exists())
+        self.assertEqual(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare').count(), 2)
+        inboxjob = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
+            kwargs__dstshare_id=self.ssinbox.pk)
+        self.assertTrue(inboxjob.exists())
+        secondjob = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
+            kwargs__dstshare_id=self.ssanaruns2.pk)
+        self.assertTrue(secondjob.exists())
+        self.assertEqual(secondjob.get().pk, inboxjob.get().pk + 1)
+
+    def test_dset(self):
+        # Between shares on storagecontroller (first retrieve, then rsync)
+        rsjobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare')
+        bupjobs = jm.Job.objects.filter(funcname='restore_from_pdc_archive')
+        self.assertFalse(rsjobs.exists())
+        self.assertFalse(bupjobs.exists())
+        rm.PDCBackedupFile.objects.create(success=True, storedfile=self.f3sf,
+                pdcpath='testbup', deleted=False)
+        self.f3sf.storedfileloc_set.update(active=False, purged=True)
+        self.f3sf.deleted = True
+        self.f3sf.save()
+        sfls = self.f3sf.storedfileloc_set.filter(active=True)
+        self.assertEqual(sfls.count(), 0)
+        dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.sstmp,
+                storage_loc_ui=self.storloc, storage_loc=self.storloc, startdate=timezone.now())
+        # Create inactive f3sss to make sure it doesnt go to inbox first
+        tmpf3sfl = rm.StoredFileLoc.objects.create(sfile=self.f3sf, servershare=self.sstmp,
+                path=self.storloc, active=False, purged=True)
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.f3sf.pk, 'share_ids': [self.sstmp.pk]})
+        self.f3sf.refresh_from_db()
+        self.assertFalse(self.f3sf.deleted)
+        self.assertEqual(sfls.count(), 1)
+        self.assertTrue(sfls.filter(servershare=self.sstmp).exists())
+        self.assertTrue(bupjobs.filter(kwargs__sfloc_id=tmpf3sfl.pk).exists())
+        self.assertFalse(rsjobs.exists())
+        self.assertEqual(resp.status_code, 200)
+
+        # From inbox to remote (first retrieve, then rsync)
+        jm.Job.objects.all().delete()
+        self.f3sf.storedfileloc_set.update(active=False, purged=True)
+        self.f3sf.deleted = True
+        self.f3sf.save()
+        sfls = self.f3sf.storedfileloc_set.filter(active=True)
+        self.assertEqual(sfls.count(), 0)
+        dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.analocalstor,
+                storage_loc_ui=self.storloc, storage_loc=self.storloc, startdate=timezone.now())
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.f3sf.pk, 'share_ids': [self.analocalstor.pk]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(sfls.count(), 2)
+        insfl = sfls.filter(servershare=self.ssinbox)
+        self.assertTrue(insfl.exists())
+        self.assertTrue(sfls.filter(servershare=self.analocalstor).exists())
+        srcsflid = insfl.get().pk
+        self.assertTrue(bupjobs.filter(kwargs__sfloc_id=srcsflid).exists())
+        self.assertTrue(rsjobs.filter(kwargs__sfloc_id=srcsflid).exists())
+        self.assertEqual(jm.Job.objects.count(), 2)
+
+
+class TestDeleteFile(BaseFilesTest):
+    url = '/files/delete/'
+
+    def setUp(self):
+        super().setUp()
+        self.sfile = rm.StoredFile.objects.create(rawfile=self.registered_raw, filename=self.registered_raw.name,
+                md5=self.registered_raw.source_md5, filetype_id=self.ft.id)
+        self.sfloc = rm.StoredFileLoc.objects.create(sfile=self.sfile, servershare_id=self.sstmp.id,
+                path='', purged=False, active=True)
+        rm.PDCBackedupFile.objects.create(success=True, storedfile=self.sfile, pdcpath='')
+
+    def test_fails(self):
+        resp = self.cl.get(self.url)
+        self.assertEqual(resp.status_code, 405)
+        resp = self.cl.post(self.url, content_type='application/json', data={'hello': 'test'})
+        self.assertEqual(resp.status_code, 400)
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': -1})
         self.assertEqual(resp.status_code, 404)
         self.assertEqual(resp.json()['error'], 'File does not exist, maybe it is deleted?')
 
-    def test_claimed_file(self):
+    def test_backup_delete_dset_file(self):
+        '''File is in a dataset and on remote, so is not on backup capable server'''
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.oldsf.pk})
+        self.assertEqual(resp.status_code, 402)
+        self.assertIn('File is in a dataset, force delete, archive entire set, or remove it '
+                'from dataset first', resp.json()['error'])
+        self.olddsuser.delete()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.oldsf.pk, 'force': True})
         self.assertEqual(resp.status_code, 403)
-        self.assertIn('File is in a dataset', resp.json()['error'])
+        self.user.is_staff = True
+        self.user.save()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.oldsf.pk, 'force': True})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
+            kwargs__sfloc_id=self.oldsss.pk, kwargs__dstshare_id=self.ssinbox.pk).exists())
+        self.assertTrue(jm.Job.objects.filter(funcname='create_pdc_archive',
+            kwargs__sfloc_id=self.oldsf.storedfileloc_set.get(servershare=self.ssinbox).pk).exists())
+        self.assertTrue(jm.Job.objects.filter(funcname='purge_files',
+            kwargs__sfloc_ids=[x.pk for x in self.oldsf.storedfileloc_set.all()]).exists())
 
-    def test_already_archived(self):
-        rm.PDCBackedupFile.objects.create(success=True, storedfile=self.sfile, pdcpath='')
+    def test_no_access(self):
+        # First a loose rawfile
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.sfile.pk})
         self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json()['error'], 'File is already archived')
+        self.assertEqual(resp.json()['error'], 'You are not authorized to remove files of type '
+                f'{rm.UploadFileType.RAWFILE.label}')
+
 
     def test_deleted_file(self):
+        '''- File has been scheduled for deletion, cannot make backup
+           - File is actually purged but wrongly labeled
+        '''
         sfile1 = rm.StoredFile.objects.create(rawfile=self.registered_raw,
                 filename=self.registered_raw.name, md5='deletedmd5', filetype_id=self.ft.id, deleted=True)
         rm.StoredFileLoc.objects.create(sfile=sfile1, servershare_id=self.sstmp.id, path='',
-                purged=False, active=True)
+                purged=False, active=False)
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': sfile1.pk})
         self.assertEqual(resp.status_code, 404)
         self.assertEqual(resp.json()['error'], 'File does not exist, maybe it is deleted?')
@@ -1169,12 +1341,24 @@ class TestArchiveFile(BaseFilesTest):
                 'please inform admin -- can not archive')
 
     def test_mzmlfile(self):
+        self.user.is_staff = True
+        self.user.save()
+
         am.MzmlFile.objects.create(sfile=self.sfile, pwiz=self.pwiz)
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.sfile.pk})
-        self.assertEqual(resp.status_code, 403)
-        self.assertIn('Derived mzML files are not archived', resp.json()['error'])
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare').exists())
+        self.assertFalse(jm.Job.objects.filter(funcname='create_pdc_archive').exists())
 
-    def test_ok(self):
+    def test_analysisfile(self):
+        otheruser = User.objects.create(username='other', email='email')
+        ana = am.Analysis.objects.create(user=otheruser, name='ana1', base_rundir='ana1')
+        am.AnalysisResultFile.objects.create(analysis=ana, sfile=self.sfile)
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.sfile.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json(), {'error': 'You are not authorized to delete this analysis file'})
+        ana.user = self.user
+        ana.save()
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.sfile.pk})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {'state': 'ok'})
@@ -1334,7 +1518,7 @@ class TestRenameFile(BaseIntegrationTest):
         self.assertIn('already exists. Please choose', rj['error'])
 
 
-class TestDeleteFile(BaseIntegrationTest):
+class TestDeleteJobFile(BaseIntegrationTest):
     jobname = 'purge_files'
 
     def test_dir(self):
@@ -1486,7 +1670,7 @@ class TestAutoDelete(BaseIntegrationTest):
         rm.StoredFileLoc.objects.filter(pk=expreportsfl.pk).update(last_date_used=exp_ldu)
 
         # Analysis files not expired, one shared
-        ana1 = am.Analysis.objects.create(user=self.user, name='ana1', storage_dir='ana1')
+        ana1 = am.Analysis.objects.create(user=self.user, name='ana1', base_rundir='ana1')
         anaraw = rm.RawFile.objects.create(name='ana1.html', producer=self.prod,
                 source_md5='ana1md5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.ANALYSIS)
@@ -1495,7 +1679,7 @@ class TestAutoDelete(BaseIntegrationTest):
         am.AnalysisResultFile.objects.create(analysis=ana1, sfile=anasf)
         rm.PDCBackedupFile.objects.create(success=True, storedfile=anasf, pdcpath='ana1')
         anasfl = rm.StoredFileLoc.objects.create(sfile=anasf,
-                servershare=self.ssanaruns, path=ana1.storage_dir, active=True, purged=False)
+                servershare=self.ssanaruns, path=ana1.base_rundir, active=True, purged=False)
         anaraw2 = rm.RawFile.objects.create(name='ana2.html', producer=self.prod,
                 source_md5='ana2md5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.ANALYSIS)
@@ -1504,10 +1688,10 @@ class TestAutoDelete(BaseIntegrationTest):
         am.AnalysisResultFile.objects.create(analysis=ana1, sfile=anasf2)
         rm.PDCBackedupFile.objects.create(success=True, storedfile=anasf2, pdcpath='ana2')
         anasfl2 = rm.StoredFileLoc.objects.create(sfile=anasf2,
-                servershare=self.ssanaruns, path=ana1.storage_dir, active=True, purged=False)
+                servershare=self.ssanaruns, path=ana1.base_rundir, active=True, purged=False)
 
         # Analysis files expired
-        ana2 = am.Analysis.objects.create(user=self.user, name='ana2', storage_dir='ana2')
+        ana2 = am.Analysis.objects.create(user=self.user, name='ana2', base_rundir='ana2')
         anaraw3 = rm.RawFile.objects.create(name='ana3.html', producer=self.prod,
                 source_md5='ana3md5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.ANALYSIS)
@@ -1516,14 +1700,14 @@ class TestAutoDelete(BaseIntegrationTest):
         am.AnalysisResultFile.objects.create(analysis=ana2, sfile=anasf3)
         rm.PDCBackedupFile.objects.create(success=True, storedfile=anasf3, pdcpath='ana3')
         anasfl3 = rm.StoredFileLoc.objects.create(sfile=anasf3,
-                servershare=self.ssanaruns, path=ana2.storage_dir, active=True, purged=False)
+                servershare=self.ssanaruns, path=ana2.base_rundir, active=True, purged=False)
         rm.StoredFileLoc.objects.filter(pk=anasfl3.pk).update(last_date_used=exp_ldu)
 
         # Shared analysis file (not expired):
         am.AnalysisResultFile.objects.create(analysis=ana2, sfile=anasf2)
 
         # Analysis without shared files expired
-        ana3 = am.Analysis.objects.create(user=self.user, name='ana3', storage_dir='ana3')
+        ana3 = am.Analysis.objects.create(user=self.user, name='ana3', base_rundir='ana3')
         anaraw4 = rm.RawFile.objects.create(name='ana4.html', producer=self.prod,
                 source_md5='ana4md5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.ANALYSIS)
@@ -1532,7 +1716,7 @@ class TestAutoDelete(BaseIntegrationTest):
         am.AnalysisResultFile.objects.create(analysis=ana3, sfile=anasf4)
         rm.PDCBackedupFile.objects.create(success=True, storedfile=anasf4, pdcpath='ana4')
         anasfl4 = rm.StoredFileLoc.objects.create(sfile=anasf4,
-                servershare=self.ssanaruns, path=ana3.storage_dir, active=True, purged=False)
+                servershare=self.ssanaruns, path=ana3.base_rundir, active=True, purged=False)
         rm.StoredFileLoc.objects.filter(pk=anasfl4.pk).update(last_date_used=exp_ldu)
 
         call_command('delete_expired_files')

@@ -162,13 +162,14 @@ class ServerShare(models.Model):
             return ''
 
     @staticmethod
-    def classify_shares_by_rsync_reach(dstshare_ids, serverid):
+    def classify_shares_by_rsync_reach(dstshare_ids, srcserverid):
         '''For all dst shares to rsync to, classify them with respect to if they are either
         local to a server where srcfiles are, or can be used to rsync from, or are remote.
         '''
-        # shares local 
+        # shares local, which are not used in rsyncing, since the files are already
+        # accessible on that server, but use them for exclude below
         localshares = [x['share_id'] for x in FileserverShare.objects.filter(
-            server_id=serverid, share_id__in=dstshare_ids).values('share_id')]
+            server_id=srcserverid, share_id__in=dstshare_ids).values('share_id')]
 
         # shares which can be used to rsync push from (excluded local job server shares):
         rsync_srcshares = [x['share_id'] for x in FileserverShare.objects.exclude(
@@ -230,6 +231,7 @@ class StoredFile(models.Model):
     # from archive for any operations
     # So e.g. queuing new rename dataset jobs can e.g. be skipped if files are deleted=True
     # as it indicates their status before the job is launched
+    # Also serves as indication of mzML/pwiz is deleted (rather than counting all sfloc)
     deleted = models.BooleanField(default=False)
 
     def __str__(self):

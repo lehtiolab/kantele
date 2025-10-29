@@ -272,7 +272,7 @@ class Analysis(models.Model):
     deleted = models.BooleanField(default=False)
     # FIXME purged lost its meaning now? w sfl in multi location
     purged = models.BooleanField(default=False)
-    storage_dir = models.TextField()
+    base_rundir = models.TextField()
     editable = models.BooleanField(default=True)
     #  to make sure that we dont accidentally put sens output on a public server
     # using rsync
@@ -289,13 +289,12 @@ class Analysis(models.Model):
         return f'{shortname}_{self.name}'
 
     def get_run_base_dir(self, wftype=False):
-       cleanname = re.sub('[^a-zA-Z0-9\.\-_]', '_', self.get_fullname(wftype))
-       return (f'{self.pk}_{cleanname}_{datetime.strftime(self.date, "%Y%m%d_%H.%M")}')
+        '''Used for setting self.base_rundir'''
+        cleanname = re.sub('[^a-zA-Z0-9\.\-_]', '_', self.get_fullname(wftype))
+        return (f'{self.pk}_{cleanname}_{datetime.strftime(self.date, "%Y%m%d_%H.%M")}')
 
     def get_public_output_dir(self):
         return os.path.join(self.user.username, self.get_run_base_dir())
-
-
 
 
 # Can this be generalized to deleted log for also files?

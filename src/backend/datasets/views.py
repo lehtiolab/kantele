@@ -56,9 +56,8 @@ def show_dataset(request, dataset_id):
                 'date', 'securityclass').get()
     except models.Dataset.DoesNotExist:
         return HttpResponseNotFound()
-    dsown_ids = [x['user_id'] for x in models.DatasetOwner.objects.filter(dataset_id=dset['pk']).values('user_id')]
     is_owner = check_ownership(request.user, dset['runname__experiment__project__ptype_id'],
-        dset['deleted'], dsown_ids)
+            dset['pk'], dset['deleted'])
     context = get_dset_context(dset['runname__experiment__project_id'])
     context.update({'dataset_id': dataset_id, 'is_owner': json.dumps(is_owner)})
     context['initdata'].update({'secclass': dset['securityclass'],
@@ -776,10 +775,10 @@ def change_owners(request):
     except models.Dataset.DoesNotExist:
         print('change_owners could not find dataset with that ID {}'.format(data['dataset_id']))
         return JsonResponse({'error': 'Something went wrong trying to change ownership for that dataset'}, status=403)
-    dsownq = models.DatasetOwner.objects.filter(dataset_id=dset['pk'])
-    if not check_ownership(request.user, dset['runname__experiment__project__ptype_id'],
-            dset['deleted'], [x['user_id'] for x in dsownq.values('user_id')]):
+    if not check_ownership(request.user, dset['runname__experiment__project__ptype_id'], dset['pk'],
+            dset['deleted']):
         return HttpResponseForbidden()
+    dsownq = models.DatasetOwner.objects.filter(dataset_id=dset['pk'])
     is_already_ownerq = dsownq.filter(user_id=data['owner'])
     is_already_owner = is_already_ownerq.exists()
     if data['op'] == 'add' and not is_already_owner:
@@ -802,7 +801,7 @@ def get_dataset_owners_ids(dset):
     return [x.user.id for x in dset.datasetowner_set.all()]
 
 
-def check_ownership(user, ptype_id, deleted, owners):
+def check_ownership(user, ptype_id, dsid, deleted):
     """
     Ownership is OK if:
     - User is staff OR
@@ -810,7 +809,8 @@ def check_ownership(user, ptype_id, deleted, owners):
     """
     if deleted and not user.is_staff:
         return False
-    elif user.id in owners or user.is_staff:
+    elif user.is_staff or user.id in [x['user_id'] for x in models.DatasetOwner.objects.filter(
+            dataset_id=dsid).values('user_id')]:
         return True
     elif ptype_id == settings.LOCAL_PTYPE_ID:
         return False
@@ -839,9 +839,8 @@ def check_save_permission(dset_id, logged_in_user, action=False):
 
     ds = dsq.filter(locked=action == 'unlock').values('deleted',
             'runname__experiment__project__ptype_id').get()
-    owner_ids = [x['user_id'] for x in models.DatasetOwner.objects.filter(dataset_id=dset_id).values('user_id')]
-    if check_ownership(logged_in_user, ds['runname__experiment__project__ptype_id'],
-            deleted=ds['deleted'], owners=owner_ids):
+    if check_ownership(logged_in_user, ds['runname__experiment__project__ptype_id'], dset_id,
+            deleted=ds['deleted']):
         return (False, 200)
     else:
         return ('You are not authorized to edit this dataset', 403)
@@ -962,9 +961,7 @@ def merge_projects(request):
         dsshare_upds, dsshare_jobs = [], []
         for dset in  models.Dataset.objects.filter(runname__experiment__project=proj).values(
                 'pk', 'deleted'):
-            dsown_ids = [x['user_id'] for x in models.DatasetOwner.objects.filter(
-                dataset_id=dset['pk']).values('user_id')]
-            if not check_ownership(request.user, proj.ptype_id, dset['deleted'], dsown_ids):
+            if not check_ownership(request.user, proj.ptype_id, dset['pk'], dset['deleted']):
                 return JsonResponse({'error': f'You do not have the rights to move all datasets in project {proj.name}'}, status=403)
         for exp in proj.experiment_set.all():
             runnames_pks = [x.pk for x in exp.runname_set.all()]
@@ -1055,8 +1052,7 @@ def rename_project(request):
         return JsonResponse({'error': f'Project name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
     dsets = models.Dataset.objects.filter(runname__experiment__project=proj)
     for dset in  dsets.values('pk', 'deleted'):
-        dsown_ids = [x['user_id'] for x in models.DatasetOwner.objects.filter(dataset_id=dset['pk']).values('user_id')]
-        if not check_ownership(request.user, proj.ptype_id, dset['deleted'], dsown_ids):
+        if not check_ownership(request.user, proj.ptype_id, dset['pk'], dset['deleted']):
             return JsonResponse({'error': f'You do not have the rights to change all datasets in this project'}, status=403)
     models.ProjectLog.objects.create(project=proj, level=models.ProjLogLevels.INFO,
             message=f'User {request.user.id} renamed project from {proj.name} to {data["newname"]}')
@@ -1315,9 +1311,8 @@ def move_dataset_cold(request):
         dset = models.Dataset.objects.select_related('runname__experiment__project').get(pk=data['item_id'])
     except models.Dataset.DoesNotExist:
         return JsonResponse({'error': 'Dataset does not exist'}, status=403)
-    dsownq = models.DatasetOwner.objects.filter(dataset_id=dset.pk)
-    if not check_ownership(request.user, dset.runname.experiment.project.ptype_id,
-            dset.deleted, [x['user_id'] for x in dsownq.values('user_id')]):
+    if not check_ownership(request.user, dset.runname.experiment.project.ptype_id, dset.pk,
+            dset.deleted):
         return JsonResponse({'error': 'Cannot archive dataset, no permission for user'}, status=403)
     archived = archive_and_delete_dataset(dset)
     if archived['state'] == 'error':
