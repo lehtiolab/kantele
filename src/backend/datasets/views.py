@@ -663,11 +663,9 @@ def save_storage_shares(request):
     data = json.loads(request.body.decode('utf-8'))
     dset = models.Dataset.objects.filter(pk=data['dataset_id']).select_related(
         'runname__experiment__project', 'datatype').get()
-    prefrac = dset.prefractionationdataset.prefractionation if hasattr(dset, 'prefractionationdataset') else False
-    hrrange = prefrac.hiriefdataset if prefrac and hasattr(prefrac, 'hiriefdataset') else False
-    #prefrac = models.Prefractionation.objects.get(pk=data['prefrac_id']) if data['prefrac_id'] else False
-    #hrrange = models.HiriefRange.objects.get(pk=data['hiriefrange']) if data.get('hiriefrange', False) else False
-
+    pfds = dset.prefractionationdataset if hasattr(dset, 'prefractionationdataset') else False
+    prefrac = pfds.prefractionation if pfds else False
+    hrrange = pfds.hiriefdataset.hirief if hasattr(pfds, 'hiriefdataset') else False
     if upd_stor_err := update_storage_shares(data['storage_shares'],
             dset.runname.experiment.project, dset.runname.experiment, dset, dset.datatype,
             prefrac, hrrange, request.user.id):
