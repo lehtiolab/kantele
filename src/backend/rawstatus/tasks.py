@@ -567,30 +567,34 @@ def classify_msrawfile(self, token, fnid, ftypename, sharepath, path, fname):
             val = False
 
         # Get MS time
-        try:
-            con = sqlite3.Connection(os.path.join(fpath, 'analysis.tdf'))
-        except sqlite3.OperationalError:
-            taskfail_update_db(self.request.id, msg='Cannot open database file, is the '
-                    f'categorization as {settings.BRUKERRAW} of the file correct?')
-            raise
-        try:
-            # Find last frame time (gradient length)
-            cur = con.execute('SELECT Time FROM Frames ORDER BY ROWID DESC LIMIT 1')
-        except sqlite3.DatabaseError as e:
-            if str(e) == 'file is not a database':
-                msg = 'This raw file is not a database, possibly it is corrupted'
-            elif str(e) == 'no such table: Frames':
-                msg = 'Could not find correct DB table Frames in raw file, contact admin'
-            else:
-                msg = str(e)
-            taskfail_update_db(self.request.id, msg=msg)
-            raise
-        try:
-            mstime_min = float(cur.fetchone()[0])
-        except (TypeError, ValueError):
-            msg = 'Could not determine MS time for raw file'
-            taskfail_update_db(self.request.id, msg=msg)
-            raise
+        # Copy analysis tdf to tmpfile to prevent CIFS file locking issue
+        with NamedTemporaryFile(mode='wb+') as fp:
+            shutil.copy(os.path.join(fpath, 'analysis.tdf'), fp.name)
+            try:
+                con = sqlite3.Connection(fp.name)
+            except sqlite3.OperationalError:
+                taskfail_update_db(self.request.id, msg='Cannot open database file, is the '
+                        f'categorization as {settings.BRUKERRAW} of the file correct?')
+                raise
+            try:
+                # Find last frame time (gradient length)
+                cur = con.execute('SELECT Time FROM Frames ORDER BY ROWID DESC LIMIT 1')
+            except sqlite3.DatabaseError as e:
+                if str(e) == 'file is not a database':
+                    msg = 'This raw file is not a database, possibly it is corrupted'
+                elif str(e) == 'no such table: Frames':
+                    msg = 'Could not find correct DB table Frames in raw file, contact admin'
+                else:
+                    msg = str(e)
+                taskfail_update_db(self.request.id, msg=msg)
+                raise
+            try:
+                mstime_min = float(cur.fetchone()[0])
+            except (TypeError, ValueError):
+                msg = 'Could not determine MS time for raw file'
+                taskfail_update_db(self.request.id, msg=msg)
+                raise
+            con.close()
 
     # Parse what was found
     # FIXME invalid dataset ID needs logging!
