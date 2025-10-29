@@ -202,10 +202,14 @@ class RestoreFromPDC(SingleFileJob):
                 servershare__fileservershare__server__can_backup=True):
             return 'Cannot retrieve file to specified location: no backup server connected there'
 
+    def getfiles_query(self, **kwargs):
+        '''In this case, the sflocs are dst files and will have purged=True instead of False'''
+        return self.oncreate_getfiles_query(**kwargs).filter(purged=True)
+
     def process(self, **kwargs):
         '''Path must come from storedfile itself, not its dataset, since it
         can be a file without a dataset'''
-        sfloc = self.getfiles_query(**kwargs)
+        sfloc = self.getfiles_query(**kwargs).get()
         self.run_tasks.append(restore_file_pdc_runtask(sfloc))
         print('PDC restore task queued')
 
