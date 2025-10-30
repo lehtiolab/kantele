@@ -10,6 +10,7 @@ from celery import states
 from celery.result import AsyncResult
 from django.http import HttpResponseForbidden, HttpResponse, JsonResponse
 from django.contrib.auth.decorators import login_required
+from django.contrib.admin.views.decorators import staff_member_required
 from django.views.decorators.http import require_POST
 from django.db.models import F
 
@@ -123,6 +124,35 @@ def pause_job(request):
     return JsonResponse({}) 
     
 
+@staff_member_required
+@require_POST
+def hold_job(request):
+    '''Put a job in HOLD state, blocking the job queue until it is resumed.
+    Only retryable jobs can be held, and runnign jobs will get their tasks
+    revoked
+    '''
+    req = json.loads(request.body.decode('utf-8'))
+    jobq = models.Job.objects.filter(pk=req['item_id'])
+    if not jobq.exists():
+        return JsonResponse({'error': 'This job does not exist (anymore), it may have been deleted'
+            }, status=403)
+    job = jobq.get()
+    ownership = get_job_ownership(job, request)
+    if not is_job_retryable(job):
+        return JsonResponse({'error': 'Job type {} cannot be held/resumed'.format(job.funcname)}, status=403)
+
+    if tasks := job.task_set.exclude(state=states.SUCCESS):
+        revoke_and_delete_tasks(tasks)
+        updated = jobq.update(state=Jobstates.HOLD)
+    else:
+        updated = jobq.filter(state__in=[Jobstates.ERROR, Jobstates.DONE, Jobstates.REVOKING,
+            Jobstates.CANCELED]).update(state=Jobstates.HOLD)
+    if not updated:
+        return JsonResponse({'error': 'Did not hold job, it was already in a state '
+            'which cannot be changed to HOLD'}, status=406)
+    return JsonResponse({})
+
+    
 @login_required
 @require_POST
 def resume_job(request):

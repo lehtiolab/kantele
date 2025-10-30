@@ -356,14 +356,17 @@ def show_jobs(request):
 
 
 def get_job_actions(job, ownership):
+    # FIXME define these on the Job model or wrapper
     actions = []
     if job.state == jj.Jobstates.ERROR and (ownership['is_staff'] or ownership['owner_loggedin']) and jv.is_job_retryable_ready(job):
         actions.append('retry')
     if ownership['is_staff']:
         if job.state in jj.JOBSTATES_PAUSABLE:
             actions.append('pause')
-        elif job.state == jj.Jobstates.WAITING:
+        elif job.state == [jj.Jobstates.WAITING, jj.Jobstates.HOLD]:
             actions.append('resume')
+        if jv.is_job_retryable(job):
+            actions.append('hold')
         if job.state == jj.Jobstates.PROCESSING:
             actions.append('force retry')
         if job.state not in jj.JOBSTATES_DONE:

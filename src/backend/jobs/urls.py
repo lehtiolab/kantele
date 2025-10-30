@@ -11,6 +11,7 @@ urlpatterns = [
     path('delete/', views.delete_job, name='deletejob'),
     path('pause/', views.pause_job, name='pausejob'),
     path('resume/', views.resume_job, name='resumejob'),
+    path('hold/', views.hold_job),
     path('deletefile/', views.purge_storedfile, name='deletefile'),
     path('deletedir/', views.removed_emptydir, name='rmdir'),
     path('set/external/', views.register_external_file, name='register_external'),
