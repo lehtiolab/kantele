@@ -16,7 +16,7 @@ from kantele import settings
 from datasets import models
 from analysis import models as am
 from rawstatus import models as filemodels
-from jobs.jobutil import create_job, check_job_error, create_job_without_check, jobmap
+from jobs.jobutil import create_job, check_job_error, create_job_without_check
 from jobs import models as jm
 from jobs import jobs as jj
 from corefac import models as cm

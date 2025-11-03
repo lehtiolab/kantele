@@ -36,7 +36,7 @@ class RefineMzmls(DatasetJob):
     refname = 'refine_mzmls'
     task = tasks.refine_mzmls
     queue = False
-    revokable = True
+    can_be_canceled = True
 
     def on_create_addkwargs(self, **kwargs):
         '''Create target SFLs on local analysis server and final destination 
@@ -140,7 +140,7 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
     refname = 'run_longit_qc_workflow'
     task = tasks.run_nextflow_longitude_qc
     queue = False
-    revokable = True
+    can_be_canceled = True
 
     def process(self, **kwargs):
         """Assumes one file, one analysis"""
@@ -163,7 +163,7 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
         stagefiles = {'--raw': [(os.path.join(fss['path'], sfl['path']), sfl['sfile__filename'])]}
         timestamp = datetime.strftime(analysis.date, '%Y%m%d_%H.%M')
         models.NextflowSearch.objects.update_or_create(defaults={'nfwfversionparamset_id': nfwf.id, 
-            'job_id': self.job_id, 'workflow_id': wf.id, 'token': f'nf-{uuid4()}'},
+            'job_id': self.job.pk, 'workflow_id': wf.id, 'token': f'nf-{uuid4()}'},
             analysis=analysis)
         run = {'timestamp': timestamp,
                'analysis_id': analysis.id,
@@ -246,7 +246,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
     refname = 'run_nf_search_workflow'
     task = tasks.run_nextflow_workflow
     queue = False
-    revokable = True
+    can_be_canceled = True
 
     """
     inputs is {'params': ['--isobaric', 'tmt10plex'],

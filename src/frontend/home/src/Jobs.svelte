@@ -33,6 +33,12 @@ async function retryJob(jobid) {
   updateNotif();
 }
 
+async function holdJob(jobid) {
+  await treatItems('/jobs/hold/', 'job', 'holding', jobid, notif);
+  refreshJob(jobid);
+  updateNotif();
+}
+
 async function pauseJob(jobid) {
   await treatItems('/jobs/pause/', 'job', 'pausing', jobid, notif);
   refreshJob(jobid);
@@ -54,6 +60,7 @@ async function deleteJob(jobid) {
 const actionmap = {
   retry: retryJob,
   'force retry': retryJob,
+  hold: holdJob,
   pause: pauseJob,
   resume: resumeJob,
   delete: deleteJob,

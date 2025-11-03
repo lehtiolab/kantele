@@ -137,10 +137,11 @@ class RemoveFilesFromServershare(RemoveDatasetFilesFromServershare):
     def get_dsids_jobrunner(self, **kwargs):
         return []
 
-    def get_rf_ids_for_filejobs(self, **kwargs):
+    def get_rf_ids_for_filejobs(self):
         """This is run before running job, to define files used by
         the job (so it cant run if if files are in use by other job)"""
-        return [x['sfile__rawfile_id'] for x in self.getfiles_query(**kwargs).values('sfile__rawfile_id')]
+        return [x['sfile__rawfile_id'] for x in self.getfiles_query(**self.job.kwargs
+            ).values('sfile__rawfile_id')]
 
 
 class RsyncFileTransferFromWeb(SingleFileJob):
@@ -251,7 +252,6 @@ class RenameFile(SingleFileJob):
     refname = 'rename_file'
     task = tasks.rename_file
     queue = False
-    retryable = False
     """Only renames file inside same path/server. Does not move cross directories. Does not change extensions.
     Updates RawFile in job instead of view since jobs are processed in a single queue. StoredFile names are
     updated in the post job view.

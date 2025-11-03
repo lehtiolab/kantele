@@ -23,7 +23,7 @@ from datasets.views import check_ownership, get_dset_storestate, fill_sampleprep
 from rawstatus import models as filemodels
 from jobs import jobs as jj
 from jobs import views as jv
-from jobs.jobutil import create_job
+from jobs.jobutil import create_job, jobmap
 from jobs import models as jm
 from mstulos import models as mm
 from corefac import models as cm
@@ -358,21 +358,21 @@ def show_jobs(request):
 def get_job_actions(job, ownership):
     # FIXME define these on the Job model or wrapper
     actions = []
-    if job.state == jj.Jobstates.ERROR and (ownership['is_staff'] or ownership['owner_loggedin']) and jv.is_job_retryable_ready(job):
+    jwrap = jobmap[job.funcname](job)
+    if job.state in jj.JOBSTATES_RETRYABLE and (ownership['is_staff'] or ownership['owner_loggedin']):
         actions.append('retry')
     if ownership['is_staff']:
-        if job.state in jj.JOBSTATES_PAUSABLE:
+        if job.state not in [jj.Jobstates.REVOKING, *jj.JOBSTATES_RETRYABLE]:
+            actions.append('hold')
+        if jwrap.can_be_canceled and job.state in jj.JOBSTATES_PAUSABLE:
             actions.append('pause')
         elif job.state == [jj.Jobstates.WAITING, jj.Jobstates.HOLD]:
             actions.append('resume')
-        if jv.is_job_retryable(job):
-            actions.append('hold')
         if job.state == jj.Jobstates.PROCESSING:
+            # Not using state==QUEUED here, because is like state == pending
             actions.append('force retry')
-        if job.state not in jj.JOBSTATES_DONE:
+        if jwrap.can_be_canceled and job.state not in jj.JOBSTATES_DONE:
             actions.append('delete')
-        if job.state == jj.Jobstates.PENDING:
-            actions.append('pause')
     return actions
 
 
@@ -492,13 +492,13 @@ def get_proj_info(request, proj_id):
 
 def populate_dset(dsids, dbdsets, user):
     dsets = OrderedDict()
-    jobmap = defaultdict(list)
+    dsjobmap = defaultdict(list)
     for job in jm.Job.objects.filter(
             filejob__rawfile__datasetrawfile__dataset_id__in=dsids
             ).exclude(state__in=jj.JOBSTATES_DONE).distinct('pk').values('state', 'pk',
                     'filejob__rawfile__datasetrawfile__dataset_id'):
         dsid = job['filejob__rawfile__datasetrawfile__dataset_id']
-        jobmap[dsid].append((str(job['pk']), job['state']))
+        dsjobmap[dsid].append((str(job['pk']), job['state']))
     for dset in dbdsets.values('pk', 'deleted', 'runname__experiment__project__ptype_id', 'locked',
             'date', 'runname__experiment__name', 'runname__experiment__project__ptype__name',
             'runname__experiment__project__name', 'runname__name', 
@@ -559,7 +559,7 @@ def populate_dset(dsids, dbdsets, user):
                 'state': 'pending'})
 
         # Add job states
-        dsjobs = [(jobid, state) for jobid, state in jobmap[dset['pk']]]
+        dsjobs = [(jobid, state) for jobid, state in dsjobmap[dset['pk']]]
         dsets[dset['pk']]['jobstate'] = [x[1] for x in dsjobs]
         dsets[dset['pk']]['jobids'] = ','.join([x[0] for x in dsjobs])
         if dset['prefractionationdataset__prefractionation__name']:

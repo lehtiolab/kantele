@@ -15,10 +15,10 @@ from rawstatus import models as rm
 class RenameDatasetStorageLoc(DatasetJob):
     '''Renames dataset path in specific share, then updates storedfileloc for that dataset
     Calling this job needs to be checked for forbidden duplicate storage locs
+    SFL.path will be updated afterwards in post job view
     '''
     refname = 'rename_dset_storage_loc'
     task = tasks.rename_dset_storage_location
-    retryable = False
 
     def process(self, **kwargs):
         srcsfs = self.getfiles_query(**kwargs)
@@ -187,7 +187,7 @@ class ConvertDatasetMzml(DatasetJob):
     refname = 'convert_dataset_mzml'
     task = tasks.run_convert_mzml_nf
     queue = False
-    revokable = True
+    can_be_canceled = True
 
     def on_create_addkwargs(self, **kwargs):
         '''Create target SFLs on local analysis server and final destination 
