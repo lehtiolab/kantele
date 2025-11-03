@@ -18,6 +18,7 @@ from datasets import models as dsmodels
 from analysis import models as anmodels
 from analysis import views as av
 from analysis import jobs as aj
+from datasets import models as dm
 from datasets import jobs as dsjobs
 from datasets.views import check_ownership, get_dset_storestate, fill_sampleprepparam, populate_proj
 from rawstatus import models as filemodels
@@ -336,10 +337,13 @@ def show_jobs(request):
                          'actions': get_job_actions(job, ownership)}
         items[job.id]['fn_ids'] = [x['pk'] for x in filemodels.StoredFile.objects.filter(
             rawfile__in=job.filejob_set.all().values('rawfile')).values('pk')]
-        dsets = job.kwargs.get('dset_id', job.kwargs.get('dset_ids', []))
-        if type(dsets) == int:
-            dsets = [dsets]
-        items[job.id]['dset_ids'] = dsets
+        if dss := job.kwargs.get('dss_id', False):
+            dsets = dm.Dataset.objects.filter(datasetserver__pk=dss)
+        elif dss := job.kwargs.get('dss_ids', False):
+            dsets = dm.Dataset.objects.filter(datasetserver__pk__in=dss)
+        else:
+            dsets = dm.Dataset.objects.none()
+        items[job.id]['dset_ids'] = [x['pk'] for x in dsets.values('pk')]
     stateorder = [
             jj.Jobstates.ERROR,
             jj.Jobstates.PROCESSING,
