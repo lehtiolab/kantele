@@ -403,11 +403,11 @@ def get_job_actions(job, ownership):
     if job.state in jj.JOBSTATES_RETRYABLE and (ownership['is_staff'] or ownership['owner_loggedin']):
         actions.append('retry')
     if ownership['is_staff']:
-        if job.state not in [jj.Jobstates.REVOKING, *jj.JOBSTATES_RETRYABLE]:
+        if job.state not in [jj.Jobstates.REVOKING, jj.Jobstates.HOLD, *jj.JOBSTATES_RETRYABLE]:
             actions.append('hold')
         if jwrap.can_be_canceled and job.state in jj.JOBSTATES_PAUSABLE:
             actions.append('pause')
-        elif job.state == [jj.Jobstates.WAITING, jj.Jobstates.HOLD]:
+        elif job.state in [jj.Jobstates.WAITING, jj.Jobstates.HOLD]:
             actions.append('resume')
         if job.state == jj.Jobstates.PROCESSING:
             # Not using state==QUEUED here, because is like state == pending
