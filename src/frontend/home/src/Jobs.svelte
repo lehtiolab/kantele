@@ -113,7 +113,9 @@ async function getJobDetails(jobId) {
   bind:notif={notif}
   bind:selected={selectedjobs}
   fetchUrl="/show/jobs"
-  findUrl="find/jobs"
+  findUrl="/show/jobs"
+  defaultQ="state:active"
+  show_deleted_or_q="from:2025, to:20250701, state:active state:waiting state:queued, state:error state:old"
   getdetails={getJobDetails}
   fixedbuttons={fixedbuttons}
   fields={tablefields}

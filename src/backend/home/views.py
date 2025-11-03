@@ -49,22 +49,12 @@ def find_projects(userquery):
     query = Q()
     for q in [x for x in userquery.split(',') if x != '']:
         match q.split(':'):
-            case ['from', date] | ['to', date]:
-                match len(date):
-                    case 4:
-                        dt = datetime.strptime(date, '%Y')
-                    case 6:
-                        dt = datetime.strptime(date, '%Y%m')
-                    case 8:
-                        dt = datetime.strptime(date, '%Y%m%d')
-                    case _:
-                        dt = False
-                if dt:
-                    match q.split(':')[0]:
-                        case 'from':
-                            query &= Q(registered__gte=dt)
-                        case 'to':
-                            query &= Q(registered__lte=dt)
+            case ['from', date]:
+                if dt := parse_userquery(date, 'date'):
+                    query &= Q(registered__gte=dt)
+            case ['to', date]:
+                if dt := parse_userquery(date, 'date'):
+                    query &= Q(registered__lte=dt)
             case ['type', projtype]:
                 ptypename = {'cf': settings.CF_PTYPE_NAME}.get(projtype) or projtype
                 query &= Q(ptype__name__iexact=ptypename)
@@ -329,6 +319,8 @@ def show_jobs(request):
     if 'ids' in request.GET:
         jobids = request.GET['ids'].split(',')
         dbjobs = jm.Job.objects.filter(pk__in=jobids)
+    elif userq := request.GET.get('q'):
+        dbjobs = find_jobs(userq)
     else:
         dbjobs = jm.Job.objects.exclude(state__in=jj.JOBSTATES_DONE)
     for job in dbjobs.select_related('nextflowsearch__analysis__user').order_by('-timestamp'):
@@ -348,11 +340,56 @@ def show_jobs(request):
         if type(dsets) == int:
             dsets = [dsets]
         items[job.id]['dset_ids'] = dsets
-    stateorder = [jj.Jobstates.ERROR, jj.Jobstates.PROCESSING, jj.Jobstates.PENDING, jj.Jobstates.HOLD,
-            jj.Jobstates.WAITING]
+    stateorder = [
+            jj.Jobstates.ERROR,
+            jj.Jobstates.PROCESSING,
+            jj.Jobstates.PENDING,
+            jj.Jobstates.HOLD,
+            jj.Jobstates.WAITING,
+            jj.Jobstates.DONE,
+            jj.Jobstates.CANCELED,
+            ]
     return JsonResponse({'items': items, 'order': 
                          [x for u in ['user', 'admin'] for s in stateorder 
                           for x in order[u][s]]})
+
+
+def parse_userquery(q, qtype):
+    match qtype:
+        case 'date':
+            match len(q):
+                case 4:
+                    result = datetime.strptime(q, '%Y')
+                case 6:
+                    result = datetime.strptime(q, '%Y%m')
+                case 8:
+                    result = datetime.strptime(q, '%Y%m%d')
+                case _:
+                    result = False
+    return result
+
+
+def find_jobs(userquery):
+    query = Q()
+    for q in [x for x in userquery.split(',') if x != '']:
+        match q.split(':'):
+            case ['from', date]:
+                if dt := parse_userquery(date, 'date'):
+                    query &= Q(timestamp__gte=dt)
+            case ['to', date]:
+                if dt := parse_userquery(date, 'date'):
+                    query &= Q(timestamp__lte=dt)
+            case ['state', 'active']:
+                query &= Q(state__in=[jj.Jobstates.ERROR, *jj.JOBSTATES_WAIT])
+            case ['state', 'waiting']:
+                query &= Q(state__in=jj.JOBSTATES_WAIT)
+            case ['state', 'queued']:
+                query &= Q(state__in=jj.JOBSTATES_JOB_ACTIVE)
+            case ['state', 'error']:
+                query &= Q(state=jj.Jobstates.ERROR)
+            case ['state', 'old']:
+                query &= Q(state__in=jj.JOBSTATES_DONE)
+    return jm.Job.objects.filter(query)
 
 
 def get_job_actions(job, ownership):
