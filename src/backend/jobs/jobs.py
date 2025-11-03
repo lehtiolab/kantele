@@ -5,7 +5,7 @@ from django.utils import timezone
 
 from kantele import settings
 from jobs.models import Task, Job, JobError
-from rawstatus.models import RawFile, StoredFile, StoredFileLoc, DataSecurityClass, ShareFunction, ServerShare, FileserverShare, FileServer
+from rawstatus.models import FileJob, RawFile, StoredFile, StoredFileLoc, DataSecurityClass, ShareFunction, ServerShare, FileserverShare, FileServer
 from datasets import models as dm
 
 
@@ -59,27 +59,36 @@ JOBSTATES_TASKS_RUNNING = [Jobstates.PROCESSING, Jobstates.REVOKING]
 JOBSTATES_WAIT = [Jobstates.WAITING, Jobstates.PENDING, Jobstates.QUEUED, Jobstates.PROCESSING, Jobstates.HOLD]
 
 # Jobs retryable / startable
-JOBSTATES_RETRYABLE = [Jobstates.WAITING, Jobstates.HOLD, Jobstates.PROCESSING, Jobstates.ERROR, Jobstates.REVOKING, Jobstates.CANCELED]
+JOBSTATES_RETRYABLE = [Jobstates.ERROR, Jobstates.CANCELED]
 
 # Jobrunner filters using this for get_jobs_with_single_sfloc_to_wait_for
 JOBSTATES_RUNNER_WAIT = [Jobstates.HOLD, Jobstates.QUEUED, Jobstates.PROCESSING, Jobstates.ERROR, Jobstates.REVOKING]
-# FIXME Deprecate below line, is not used:
-JOBSTATES_PRE_OK_JOB = [Jobstates.WAITING, Jobstates.ERROR, Jobstates.REVOKING, Jobstates.CANCELED, Jobstates.HOLD]
 
 
 class BaseJob:
     """Base class for jobs"""
-    retryable = True
-    revokable = False
+    # Whether job can be taken out of the job queue without consequences
+    # as long as we dont have proper on_delete cleanup - this is needed
+    # to avoid having created file entries that are needed downstream
+    can_be_canceled = False
     # FIXME in most cases, kwargs is passed as a **dict, since we dont know what is in it
     # except inside the specific job, and on instantiation. This means it's not necessary
     # to pass AND receive with ** - may as well be a dict. It's a bit dirty though,
     # better to have more explicit args where that is possible.
 
-    def __init__(self, job_id):
-        self.job_id = job_id
+    def __init__(self, job):
+        self.job = job
         self.run_tasks = []
+        if job:
+            self.state = job.state if job else False
     
+    def create_db_job(self, name, state, kwargs):
+        self.job = Job.objects.create(funcname=name, timestamp=timezone.now(),
+            state=state, kwargs=kwargs)
+        FileJob.objects.bulk_create([FileJob(rawfile_id=rf_id, job_id=self.job.pk)
+            for rf_id in self.get_rf_ids_for_filejobs()])
+        return {'id': self.job.id, 'kwargs': kwargs, 'error': False}
+
     def check_error(self, **kwargs):
         # FIXME check_error will be used differently when creating vs when running, please fix!
         return self.check_error_on_creation(**kwargs)
@@ -208,10 +217,11 @@ class BaseJob:
         else:
             return Job.objects.none()
 
-    def get_rf_ids_for_filejobs(self, **kwargs):
+    def get_rf_ids_for_filejobs(self):
         """This is run before running job, to define files used by
         the job (so it cant run if if files are in use by other job)"""
-        return [x['sfile__rawfile_id'] for x in self.oncreate_getfiles_query(**kwargs).values('sfile__rawfile_id')]
+        return [x['sfile__rawfile_id'] for x in self.oncreate_getfiles_query(**self.job.kwargs
+            ).values('sfile__rawfile_id')]
 
     def get_dsids_jobrunner(self, **kwargs):
         return []
@@ -248,12 +258,12 @@ class BaseJob:
                 queue = self.queue
             else:
                 args, queue = runtask
-            print(f'Queueing task for job {self.job_id} to queue {queue}')
+            print(f'Queueing task for job {self.job.pk} to queue {queue}')
             tid = self.task.apply_async(args=args, queue=queue)
             self.create_db_task(tid, *args)
 
     def create_db_task(self, task_id, *args):
-        return Task.objects.create(asyncid=task_id, job_id=self.job_id, state=states.PENDING, args=args)
+        return Task.objects.create(asyncid=task_id, job_id=self.job.pk, state=states.PENDING, args=args)
 
 
 class SingleFileJob(BaseJob):
@@ -295,10 +305,10 @@ class DatasetJob(BaseJob):
     def get_dss_ids(self, **kwargs):
         return [kwargs['dss_id']]
 
-    def get_rf_ids_for_filejobs(self, **kwargs):
+    def get_rf_ids_for_filejobs(self):
         '''Let runner wait for entire dataset'''
         return [x['pk'] for x in RawFile.objects.filter(
-            datasetrawfile__dataset__datasetserver__id=kwargs['dss_id']).values('pk')]
+            datasetrawfile__dataset__datasetserver__id=self.job.kwargs['dss_id']).values('pk')]
 
     def oncreate_getfiles_query(self, **kwargs):
         '''Get all files which had a datasetrawfile association when this job was created/retried,
@@ -321,9 +331,9 @@ class MultiDatasetJob(BaseJob):
     def get_dss_ids(self, **kwargs):
         return kwargs['dss_ids']
 
-    def get_rf_ids_for_filejobs(self, **kwargs):
+    def get_rf_ids_for_filejobs(self):
         '''Let runner wait for entire datasets'''
-        dss = dm.DatasetServer.objects.filter(pk__in=kwargs['dss_ids'])
+        dss = dm.DatasetServer.objects.filter(pk__in=self.job.kwargs['dss_ids'])
         return [x['pk'] for x in RawFile.objects.filter(
             datasetrawfile__dataset__datasetserver__in=dss).values('pk')]
 

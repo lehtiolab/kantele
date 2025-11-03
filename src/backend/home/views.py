@@ -18,12 +18,13 @@ from datasets import models as dsmodels
 from analysis import models as anmodels
 from analysis import views as av
 from analysis import jobs as aj
+from datasets import models as dm
 from datasets import jobs as dsjobs
 from datasets.views import check_ownership, get_dset_storestate, fill_sampleprepparam, populate_proj
 from rawstatus import models as filemodels
 from jobs import jobs as jj
 from jobs import views as jv
-from jobs.jobutil import create_job
+from jobs.jobutil import create_job, jobmap
 from jobs import models as jm
 from mstulos import models as mm
 from corefac import models as cm
@@ -49,22 +50,12 @@ def find_projects(userquery):
     query = Q()
     for q in [x for x in userquery.split(',') if x != '']:
         match q.split(':'):
-            case ['from', date] | ['to', date]:
-                match len(date):
-                    case 4:
-                        dt = datetime.strptime(date, '%Y')
-                    case 6:
-                        dt = datetime.strptime(date, '%Y%m')
-                    case 8:
-                        dt = datetime.strptime(date, '%Y%m%d')
-                    case _:
-                        dt = False
-                if dt:
-                    match q.split(':')[0]:
-                        case 'from':
-                            query &= Q(registered__gte=dt)
-                        case 'to':
-                            query &= Q(registered__lte=dt)
+            case ['from', date]:
+                if dt := parse_userquery(date, 'date'):
+                    query &= Q(registered__gte=dt)
+            case ['to', date]:
+                if dt := parse_userquery(date, 'date'):
+                    query &= Q(registered__lte=dt)
             case ['type', projtype]:
                 ptypename = {'cf': settings.CF_PTYPE_NAME}.get(projtype) or projtype
                 query &= Q(ptype__name__iexact=ptypename)
@@ -329,6 +320,8 @@ def show_jobs(request):
     if 'ids' in request.GET:
         jobids = request.GET['ids'].split(',')
         dbjobs = jm.Job.objects.filter(pk__in=jobids)
+    elif userq := request.GET.get('q'):
+        dbjobs = find_jobs(userq)
     else:
         dbjobs = jm.Job.objects.exclude(state__in=jj.JOBSTATES_DONE)
     for job in dbjobs.select_related('nextflowsearch__analysis__user').order_by('-timestamp'):
@@ -344,32 +337,83 @@ def show_jobs(request):
                          'actions': get_job_actions(job, ownership)}
         items[job.id]['fn_ids'] = [x['pk'] for x in filemodels.StoredFile.objects.filter(
             rawfile__in=job.filejob_set.all().values('rawfile')).values('pk')]
-        dsets = job.kwargs.get('dset_id', job.kwargs.get('dset_ids', []))
-        if type(dsets) == int:
-            dsets = [dsets]
-        items[job.id]['dset_ids'] = dsets
-    stateorder = [jj.Jobstates.ERROR, jj.Jobstates.PROCESSING, jj.Jobstates.PENDING, jj.Jobstates.HOLD,
-            jj.Jobstates.WAITING]
+        if dss := job.kwargs.get('dss_id', False):
+            dsets = dm.Dataset.objects.filter(datasetserver__pk=dss)
+        elif dss := job.kwargs.get('dss_ids', False):
+            dsets = dm.Dataset.objects.filter(datasetserver__pk__in=dss)
+        else:
+            dsets = dm.Dataset.objects.none()
+        items[job.id]['dset_ids'] = [x['pk'] for x in dsets.values('pk')]
+    stateorder = [
+            jj.Jobstates.ERROR,
+            jj.Jobstates.PROCESSING,
+            jj.Jobstates.PENDING,
+            jj.Jobstates.HOLD,
+            jj.Jobstates.WAITING,
+            jj.Jobstates.DONE,
+            jj.Jobstates.CANCELED,
+            ]
     return JsonResponse({'items': items, 'order': 
                          [x for u in ['user', 'admin'] for s in stateorder 
                           for x in order[u][s]]})
 
 
+def parse_userquery(q, qtype):
+    match qtype:
+        case 'date':
+            match len(q):
+                case 4:
+                    result = datetime.strptime(q, '%Y')
+                case 6:
+                    result = datetime.strptime(q, '%Y%m')
+                case 8:
+                    result = datetime.strptime(q, '%Y%m%d')
+                case _:
+                    result = False
+    return result
+
+
+def find_jobs(userquery):
+    query = Q()
+    for q in [x for x in userquery.split(',') if x != '']:
+        match q.split(':'):
+            case ['from', date]:
+                if dt := parse_userquery(date, 'date'):
+                    query &= Q(timestamp__gte=dt)
+            case ['to', date]:
+                if dt := parse_userquery(date, 'date'):
+                    query &= Q(timestamp__lte=dt)
+            case ['state', 'active']:
+                query &= Q(state__in=[jj.Jobstates.ERROR, *jj.JOBSTATES_WAIT])
+            case ['state', 'waiting']:
+                query &= Q(state__in=jj.JOBSTATES_WAIT)
+            case ['state', 'queued']:
+                query &= Q(state__in=jj.JOBSTATES_JOB_ACTIVE)
+            case ['state', 'error']:
+                query &= Q(state=jj.Jobstates.ERROR)
+            case ['state', 'old']:
+                query &= Q(state__in=jj.JOBSTATES_DONE)
+    return jm.Job.objects.filter(query)
+
+
 def get_job_actions(job, ownership):
+    # FIXME define these on the Job model or wrapper
     actions = []
-    if job.state == jj.Jobstates.ERROR and (ownership['is_staff'] or ownership['owner_loggedin']) and jv.is_job_retryable_ready(job):
+    jwrap = jobmap[job.funcname](job)
+    if job.state in jj.JOBSTATES_RETRYABLE and (ownership['is_staff'] or ownership['owner_loggedin']):
         actions.append('retry')
     if ownership['is_staff']:
-        if job.state in jj.JOBSTATES_PAUSABLE:
+        if job.state not in [jj.Jobstates.REVOKING, *jj.JOBSTATES_RETRYABLE]:
+            actions.append('hold')
+        if jwrap.can_be_canceled and job.state in jj.JOBSTATES_PAUSABLE:
             actions.append('pause')
-        elif job.state == jj.Jobstates.WAITING:
+        elif job.state == [jj.Jobstates.WAITING, jj.Jobstates.HOLD]:
             actions.append('resume')
         if job.state == jj.Jobstates.PROCESSING:
+            # Not using state==QUEUED here, because is like state == pending
             actions.append('force retry')
-        if job.state not in jj.JOBSTATES_DONE:
+        if jwrap.can_be_canceled and job.state not in jj.JOBSTATES_DONE:
             actions.append('delete')
-        if job.state == jj.Jobstates.PENDING:
-            actions.append('pause')
     return actions
 
 
@@ -489,13 +533,13 @@ def get_proj_info(request, proj_id):
 
 def populate_dset(dsids, dbdsets, user):
     dsets = OrderedDict()
-    jobmap = defaultdict(list)
+    dsjobmap = defaultdict(list)
     for job in jm.Job.objects.filter(
             filejob__rawfile__datasetrawfile__dataset_id__in=dsids
             ).exclude(state__in=jj.JOBSTATES_DONE).distinct('pk').values('state', 'pk',
                     'filejob__rawfile__datasetrawfile__dataset_id'):
         dsid = job['filejob__rawfile__datasetrawfile__dataset_id']
-        jobmap[dsid].append((str(job['pk']), job['state']))
+        dsjobmap[dsid].append((str(job['pk']), job['state']))
     for dset in dbdsets.values('pk', 'deleted', 'runname__experiment__project__ptype_id', 'locked',
             'date', 'runname__experiment__name', 'runname__experiment__project__ptype__name',
             'runname__experiment__project__name', 'runname__name', 
@@ -556,7 +600,7 @@ def populate_dset(dsids, dbdsets, user):
                 'state': 'pending'})
 
         # Add job states
-        dsjobs = [(jobid, state) for jobid, state in jobmap[dset['pk']]]
+        dsjobs = [(jobid, state) for jobid, state in dsjobmap[dset['pk']]]
         dsets[dset['pk']]['jobstate'] = [x[1] for x in dsjobs]
         dsets[dset['pk']]['jobids'] = ','.join([x[0] for x in dsjobs])
         if dset['prefractionationdataset__prefractionation__name']:

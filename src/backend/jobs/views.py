@@ -10,6 +10,7 @@ from celery import states
 from celery.result import AsyncResult
 from django.http import HttpResponseForbidden, HttpResponse, JsonResponse
 from django.contrib.auth.decorators import login_required
+from django.contrib.admin.views.decorators import staff_member_required
 from django.views.decorators.http import require_POST
 from django.db.models import F
 
@@ -99,16 +100,21 @@ def update_storagepath_file(request):
 @login_required
 @require_POST
 def pause_job(request):
+    '''Puts a job in waiting state, taking it out of the job queue. Only 
+    cancelable jobs can be paused, and only jobs in a certain 
+    state (error, pending) can be paused.
+    '''
     req = json.loads(request.body.decode('utf-8'))
     jobq = models.Job.objects.filter(pk=req['item_id'])
     if not jobq.exists():
         return JsonResponse({'error': 'This job does not exist (anymore), it may have been deleted'}, status=403)
     job = jobq.get()
+    jwrapper = jobmap[job.funcname](job) 
     ownership = get_job_ownership(job, request)
     if not ownership['owner_loggedin'] and not ownership['is_staff']:
         return JsonResponse({'error': 'Only job owners and admin can pause this job'}, status=403)
-    elif not is_job_retryable(job):
-        return JsonResponse({'error': 'Job type {} cannot be paused/resumed'.format(job.funcname)}, status=403)
+    elif not jwrapper.can_be_canceled:
+        return JsonResponse({'error': 'Job type {} cannot be paused'.format(job.funcname)}, status=403)
 
     updated = jobq.filter(state__in=JOBSTATES_PAUSABLE).update(state=Jobstates.WAITING)
     if not updated:
@@ -118,11 +124,35 @@ def pause_job(request):
         job.task_set.exclude(state=states.SUCCESS).delete()
         if hasattr(job, 'joberror'):
             job.joberror.delete()
-        jwrapper = jobmap[job.funcname](job.id) 
         jwrapper.on_pause(**job.kwargs)
     return JsonResponse({}) 
     
 
+@staff_member_required
+@require_POST
+def hold_job(request):
+    '''Put a job in HOLD state, blocking the job queue until it is resumed.
+    Running jobs will get their tasks revoked.
+    '''
+    req = json.loads(request.body.decode('utf-8'))
+    jobq = models.Job.objects.filter(pk=req['item_id'])
+    if not jobq.exists():
+        return JsonResponse({'error': 'This job does not exist (anymore), it may have been deleted'
+            }, status=403)
+    job = jobq.get()
+    ownership = get_job_ownership(job, request)
+    if tasks := job.task_set.exclude(state=states.SUCCESS):
+        revoke_and_delete_tasks(tasks)
+        updated = jobq.update(state=Jobstates.HOLD)
+    else:
+        updated = jobq.filter(state__in=[Jobstates.ERROR, Jobstates.DONE, Jobstates.REVOKING,
+            Jobstates.CANCELED]).update(state=Jobstates.HOLD)
+    if not updated:
+        return JsonResponse({'error': 'Did not hold job, it was already in a state '
+            'which cannot be changed to HOLD'}, status=406)
+    return JsonResponse({})
+
+    
 @login_required
 @require_POST
 def resume_job(request):
@@ -335,22 +365,6 @@ def get_job_ownership(job, request):
              'is_staff': request.user.is_staff}
     
 
-def is_job_retryable_ready(job, tasks=False):
-    return is_job_retryable(job) and is_job_ready(job)
-
-
-def is_job_retryable(job, tasks=False):
-    return job.funcname in jobmap and jobmap[job.funcname].retryable
-
-
-def is_job_ready(job=False, tasks=False):
-    if tasks is False:
-        tasks = models.Task.objects.filter(job_id=job.id)
-    if {t.state for t in tasks}.difference(states.READY_STATES):
-        return False
-    return True
-
-
 @login_required
 def retry_job(request):
     if request.method != 'POST':
@@ -361,9 +375,9 @@ def retry_job(request):
     except models.Job.DoesNotExist:
         return JsonResponse({'error': 'This job does not exist (anymore), it may have been deleted'}, status=403)
     ownership = get_job_ownership(job, request)
-    if ownership['is_staff'] and is_job_retryable(job):
+    if ownership['is_staff']:
         do_retry_job(job, force=True)
-    elif ownership['owner_loggedin'] and is_job_retryable_ready(job):
+    elif ownership['owner_loggedin'] and job.state in JOBSTATES_RETRYABLE:
         do_retry_job(job)
     else:
         return JsonResponse({'error': 'You are not allowed to retry this job'}, status=403)
@@ -379,23 +393,19 @@ def revoke_and_delete_tasks(task_q):
 
 def do_retry_job(job, force=False):
     '''Jobs that are not DONE, CANCELED, PENDING, can be retried'''
+    jwrap = jobmap[job.funcname](job)
     tasks = models.Task.objects.filter(job=job)
-    if not is_job_retryable(job) and not force:
-        print('Cannot retry job, is not retryable')
-        return
-    if not is_job_ready(job=job, tasks=tasks) and not force:
+    if {t.state for t in tasks}.difference(states.READY_STATES) and not force:
         print('Tasks not all ready yet, will not retry, try again later')
         return
     # revoke tasks in case they are still running (force retry)
     revoke_and_delete_tasks(tasks.exclude(state=states.SUCCESS))
     # Redo file jobs (for runner) in case the job has been in WAITING state and other jobs 
     # have changed files associated to a dset or such.
-    jwrap = jobmap[job.funcname](job.pk)
     FileJob.objects.filter(job_id=job.pk).delete()
     FileJob.objects.bulk_create([FileJob(rawfile_id=rf_id, job_id=job.id) for rf_id in 
-        jwrap.get_rf_ids_for_filejobs(**job.kwargs)])
-    jobq = models.Job.objects.filter(pk=job.pk, state__in=JOBSTATES_RETRYABLE).update(
-            state=Jobstates.PENDING)
+        jwrap.get_rf_ids_for_filejobs()])
+    jobq = models.Job.objects.filter(pk=job.pk).update(state=Jobstates.PENDING)
     try:
         job.joberror.delete()
     except models.JobError.DoesNotExist:

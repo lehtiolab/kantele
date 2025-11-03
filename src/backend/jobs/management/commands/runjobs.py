@@ -45,7 +45,7 @@ def run_ready_jobs(job_fn_map, job_ds_map, active_jobs):
     active_jobs.difference_update([x['pk'] for x in wait_jobs])
     for job in jobs_not_finished:
         # First check if job is new or already registered
-        jwrapper = jobmap[job.funcname](job.id) 
+        jwrapper = jobmap[job.funcname](job) 
         if not job.id in job_fn_map:
             print(f'Registering new job {job.id} - {job.funcname} - {job.state}')
             # Register files
@@ -80,7 +80,8 @@ def run_ready_jobs(job_fn_map, job_ds_map, active_jobs):
             canceled = Job.objects.filter(pk=job.pk, state=Jobstates.REVOKING).update(state=Jobstates.CANCELED)
             # There is an extra check if the job actually has revokable tasks
             # Most jobs are not, but very long running user-ordered tasks are.
-            if jwrapper.revokable and canceled:
+            # like analysis, or dataset rsyncs
+            if jwrapper.can_be_canceled and canceled:
                 revoke_and_delete_tasks(tasks)
             del(job_fn_map[job.id])
             del(job_ds_map[job.id])

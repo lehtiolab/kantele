@@ -261,7 +261,7 @@ class ProcessJobTest(BaseTest):
 
     def setUp(self):
         super().setUp()
-        self.job = self.jobclass(1)
+        self.job = self.jobclass(False)
 
     def check(self, expected_tasks):
         for t in self.job.run_tasks:
