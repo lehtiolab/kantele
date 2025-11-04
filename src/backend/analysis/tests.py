@@ -666,6 +666,7 @@ class TestGetWorkflowVersionDetails(AnalysisPageTest):
             'prev_resultfiles': [{'ana': f'{self.wftype.name}_{self.ana.name}',
                 'date': datetime.strftime(self.ana.date, '%Y-%m-%d'), 'id': self.resultfn.sfile_id,
                 'fn': self.resultfn.sfile.filename}],
+            'servers': [{'id': x.pk, 'name': x.name} for x in [self.anaserver, self.remoteanaserver]],
             }}
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
 

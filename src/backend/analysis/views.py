@@ -660,6 +660,8 @@ def get_datasets(request, wfversion_id):
         return JsonResponse({**response, 'error': True}, status=400)
     else:
         max_sec = max(x['secclass'] for x in dsetinfo.values())
+        # All servers are already loaded by get_wf, before call to here, so now we
+        # refresh servers according to max security
         response.update({'dsets': dsetinfo, 'field_order': field_order, 
             'servers': [{'id': x['server_id'], 'name': x['server__name']} for x in
                 rm.FileserverShare.objects.filter(server__analysisserverprofile__isnull=False,
@@ -716,7 +718,11 @@ def get_workflow_versioned(request):
                 'help': f.param.help or False} for f in multifiles],
             'libfiles': {ft: [{'id': x.sfile.id, 'desc': x.description,
                 'name': x.sfile.filename}
-                for x in selectable_files if x.sfile.filetype_id == ft] for ft in ftypes}
+                for x in selectable_files if x.sfile.filetype_id == ft] for ft in ftypes},
+            # All servers shown before any call (if dsets) to datasets, which will
+            # refresh servers according to max security
+            'servers': [{'id': x['pk'], 'name': x['name']} for x in rm.FileServer.objects.filter(
+                analysisserverprofile__isnull=False, active=True).values('pk', 'name')],
     }
     # FIXME we should call get workflow versioned when new datasets are added, to get the new
     # prev_resultfiles -> or at least update it

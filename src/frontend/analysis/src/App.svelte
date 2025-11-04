@@ -353,6 +353,7 @@ async function fetchWorkflow() {
       config.inputparams[x.id] = false;
     });
   }
+  avail_servers = result.wf.servers;
   updateResultfiles();
   if (Object.keys(dsnames).length) {
     await fetchDatasetDetails(false);
