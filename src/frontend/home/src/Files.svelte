@@ -72,7 +72,7 @@ async function refreshFile(fnid) {
 
 async function archiveFiles() {
   for (let fnid of selectedFiles) {
-    await treatItems('files/archive/', 'file','archiving', fnid, notif);
+    await treatItems('files/delete/', 'file','archiving', fnid, notif);
     refreshFile(fnid);
   }
   updateNotif();
@@ -89,7 +89,6 @@ function purgeFiles() {
 <a class="button is-small" title="Move files to cold storage (admins only)" on:click={archiveFiles}>Archive files</a>
 {:else}
 <a class="button is-small" title="Move files to cold storage (admins only)" disabled>Archive files</a>
-<a class="button is-small" title="PERMANENTLY delete files from active and cold storage (admins only)" disabled>Purge files</a>
 {/if}
   
 <Table tab="Files" bind:items={files} bind:notif={notif} bind:selected={selectedFiles} fetchUrl="/show/files" findUrl="/find/files" getdetails={getFileDetails} fields={tablefields} inactive={['deleted']} on:detailview={showDetails} />
