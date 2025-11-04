@@ -223,6 +223,7 @@ class PsetComponent(models.Model):
         PREFRAC = 6, 'Prefractionated MS data'
         HIRIEF_STRIP_TOLERANCE = 7, 'HiRIEF strip tolerance'
         REMOVE_CHANNEL = 8, 'Remove channel from experiment set'
+        NO_DATASETS = 9, 'No datasets in analysis (e.g. static/external input file)'
         # DSET_NAMES ?
 
     pset = models.ForeignKey(ParameterSet, on_delete=models.CASCADE)

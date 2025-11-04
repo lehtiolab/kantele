@@ -119,7 +119,7 @@ function validate() {
   if (!config.wfversion && !config.external_results) {
 		notif.errors['You must select a workflow version'] = 1;
 	}
-  if (!Object.keys(dsets).length && !config.external_results) {
+  if (!Object.keys(dsets).length && !config.external_results && !('NO_DATASETS' in wf.components)) {
     notif.errors['No datasets are in this analysis, maybe they need some editing'] = 1;
   }
   Object.values(dsets).forEach(ds => {
@@ -803,6 +803,7 @@ onMount(async() => {
   {/if}
   </div>
 
+  {#if wf && !('NO_DATASETS' in wf.components)}
   <div class="box">
     <h5 class="title is-5">Datasets selected</h5>
     <DynamicSelect placeholder='Find dataset to add' bind:selectval={dsetToAdd} on:selectedvalue={addDataset} niceName={x => x.name} fetchUrl="/analysis/find/datasets/" />
@@ -834,6 +835,7 @@ onMount(async() => {
     {/if}
     </div>
   </div>
+  {/if}
 
 
   <div class="box">
