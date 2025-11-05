@@ -385,7 +385,7 @@ def restore_file_pdc_runtask(sfloc):
     fnpath = os.path.join(sfloc.path, sfloc.sfile.filename)
     yearmonth = datetime.strftime(sfloc.sfile.regdate, '%Y%m')
     fss = rm.FileserverShare.objects.filter(server__can_backup=True,
-            share__function=rm.ShareFunction.INBOX).values('path').first()
+            share=sfloc.servershare).values('path').first()
     return (fss['path'], fnpath, backupfile.pdcpath, sfloc.id, backupfile.is_dir)
 
 
