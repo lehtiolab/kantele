@@ -1128,8 +1128,13 @@ def update_sfile_storage(request):
             # QC raw files
             dstpath = settings.QC_STORAGE_DIR
         elif sfile.rawfile.usetype in [UploadFileType.LIBRARY, UploadFileType.USERFILE]:
-            # Library/user files
-            dstpath = settings.LIBRARY_FILE_PATH
+            # Library/user files, if they go to raw file storage (e.g. on remote server)
+            # make sure they get special __library path
+            dstsharefun = ServerShare.objects.values('function').get(pk=dstshare_id)['function']
+            if dstsharefun == ShareFunction.LIBRARY:
+                dstpath = settings.LIBRARY_FILE_PATH
+            else:
+                dstpath = settings.LIBRARY_FILE_PATH_INBOX
         elif analysis:
             # Analysis results but not those from mzML converter/refiner
             dstshare = ServerShare.objects.values('function').get(pk=dstshare_id)
@@ -1253,8 +1258,8 @@ def update_sfile_storage(request):
                 dstpath=dstpath)
 
     # Delete files from excluded shares
-    rm_sfls = sfile.storedfileloc_set.filter(active=True).exclude(servershare__in=share_ids)
-    create_job('purge_files', sfloc_ids=[x['pk'] for x in rm_sfls.values('pk')])
+    if rm_sfls := sfile.storedfileloc_set.filter(active=True).exclude(servershare__in=share_ids):
+        create_job('purge_files', sfloc_ids=[x['pk'] for x in rm_sfls.values('pk')])
     inbox_rm_count = rm_sfls.filter(servershare__function=ShareFunction.INBOX).count()
     del_count = rm_sfls.update(active=False) - inbox_rm_count
     # del_count is for user, do subtract the "deleted from inbox after retrieve from backup"
