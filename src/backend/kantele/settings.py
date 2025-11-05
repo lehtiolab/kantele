@@ -107,7 +107,7 @@ EXTERNAL_PRODUCER_IDS = [int(x) for x in os.environ.get('EXTERNAL_PRODUCER_IDS',
 NXF_COMMAND = os.environ.get('NXF_COMMAND', 'nextflow run').split(' ')
 
 LIBRARY_FILE_PATH = ''
-LIBRARY_FILE_PATH_INBOX = 'library'
+LIBRARY_FILE_PATH_INBOX = '__kantele_library'
 
 # Should correspond to server's sharepath for output files also
 NF_RUNDIR = os.environ.get('NEXTFLOW_RUNDIR', 'nf_runs')

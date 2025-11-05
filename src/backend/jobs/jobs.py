@@ -222,7 +222,7 @@ class BaseJob:
                 blankpathshares = [ShareFunction.LIBRARY, ShareFunction.INBOX]
                 if extra_sfl['servershare__function'] in blankpathshares and dstsharefun not in blankpathshares:
                     # e.g. libfile from path '' needs a path in the dst if that is rawdata!
-                    path = '__kantele_library'
+                    path = settings.LIBRARY_FILE_PATH_INBOX
                 else:
                     path = extra_sfl['path']
                 newjobs.append({'name': 'rsync_otherfiles_to_servershare',
