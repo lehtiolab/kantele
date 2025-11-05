@@ -259,15 +259,19 @@ def populate_files(dbfns):
             filedate = fn.rawfile.date
         else:
             filedate = fn.regdate 
+        currentjobs = filemodels.FileJob.objects.filter(rawfile=fn.rawfile).exclude(
+                job__state__in=jj.JOBSTATES_DONE).values('job_id', 'job__state')
+        ana_afv = anmodels.Analysis.objects.filter(analysisfilevalue__sfile=fn)
+        ana_adsi = anmodels.Analysis.objects.filter(datasetanalysis__analysisdsinputfile__sfile=fn)
         it = {'id': fn.id,
               'name': fn.filename,
               'date': datetime.strftime(fn.rawfile.date, '%Y-%m-%d %H:%M'),
               'size': getxbytes(fn.rawfile.size) if not is_mzml else '-',
               'ftype': fn.filetype.name,
-              'analyses': [],
+              'analyses': [x['pk'] for x in ana_afv.union(ana_adsi).values('pk')],
               'dataset': [],
-              'jobstate': [],
-              'job_ids': [],
+              'jobstate': [x['job__state'] for x in currentjobs],
+              'job_ids': [x['job_id'] for x in currentjobs],
               'deleted': fn.deleted,
               'smallstatus': [],
              }
@@ -285,13 +289,6 @@ def populate_files(dbfns):
             it['owner'] = fn.rawfile.datasetrawfile.dataset.datasetowner_set.select_related('user').first().user.username
             dsrf = fn.rawfile.datasetrawfile
             it['dataset'] = dsrf.dataset_id
-            currentjobs = filemodels.FileJob.objects.filter(rawfile=fn.rawfile).exclude(
-                    job__state__in=jj.JOBSTATES_DONE).values('job_id', 'job__state')
-            it['job_ids'] = [x['job_id'] for x in currentjobs]
-            it['jobs'] = [x['job__state'] for x in currentjobs]
-            ana_afv = anmodels.Analysis.objects.filter(analysisfilevalue__sfile=fn)
-            ana_adsi = anmodels.Analysis.objects.filter(datasetanalysis__analysisdsinputfile__sfile=fn)
-            it['analyses'].extend([x['pk'] for x in ana_afv.union(ana_adsi).values('pk')])
         elif arfs := anmodels.AnalysisResultFile.objects.filter(sfile=fn):
             arfs = arfs.values('analysis_id', 'analysis__user__username')
             it['owner'] = arfs.first()['analysis__user__username']

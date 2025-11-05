@@ -20,6 +20,20 @@ $: {
   cleanFetchDetails(fnIds);
 }
 
+
+function updateNotif() {
+  // This does not work if we import it from e.g. util.js, svelte wont update the components
+  // showing the notifications
+  Object.entries(notif.errors)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg));
+  Object.entries(notif.messages)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg));
+  notif = notif;
+}
+
+
 async function renameFile(newname, fnid) {
   if (newname !== items[fnid].filename) {
     const resp = await postJSON('/files/rename/', {
@@ -28,12 +42,12 @@ async function renameFile(newname, fnid) {
     if (!resp.ok) {
       const msg = `Something went wrong trying to rename the file: ${resp.error}`;
       notif.errors[msg] = 1;
-      setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg);
+      updateNotif();
     } else {
       items[fnid].filename = newname;
       const msg = `Queued file for renaming to ${newname}`;
       notif.messages[msg] = 1;
-      setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg);
+      updateNotif();
     }
   }
 }
@@ -48,7 +62,7 @@ async function fetchDetails(ids) {
     if (!resp.ok) {
       const msg = `Something went wrong fetching file info: ${resp.error}`;
       notif.errors[msg] = 1;
-      setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg);
+      updateNotif();
     } else {
       fetched[singleId] = resp;
       newname[singleId] = resp.filename;
@@ -68,18 +82,20 @@ function cleanFetchDetails(ids) {
 async function deleteFile(fnid, force) {
   const resp = await postJSON('files/delete/', {item_id: fnid, force: force});
   if (!resp.ok) {
-    console.log(resp);
     if (resp.status == 402) {
       const msg = resp.error;
       notif.messages[msg] = 1;
+      updateNotif();
       items[fnid].ask_force_delete = true;
     } else {
       const msg = `Something went wrong deleting file id ${fnid}: ${resp.error}`;
       notif.errors[msg] = 1;
+      updateNotif();
     }
   } else {
     const msg = `Deleting file with id ${fnid} queued`;
     notif.messages[msg] = 1;
+    updateNotif();
     dispatch('refresh', {fnid: fnid});
     cleanFetchDetails(fnIds);
   }
@@ -91,9 +107,11 @@ async function updateStorage(fnid) {
   if (!resp.ok) {
     const msg = `Something went wrong updating storage for file id ${fnid}: ${resp.error}`;
     notif.errors[msg] = 1;
+    updateNotif();
   } else {
     const msg = resp.msg;
     notif.messages[msg] = 1;
+    updateNotif();
     dispatch('refresh', {fnid: fnid});
     cleanFetchDetails(fnIds);
   }
