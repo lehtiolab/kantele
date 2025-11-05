@@ -1107,6 +1107,16 @@ def update_sfile_storage(request):
         return JsonResponse({'error': 'File does not exist'}, status=404)
     except KeyError:
         return JsonResponse({'error': 'Parameters not passed'}, status=400)
+    if not share_ids:
+        return JsonResponse({'error': 'Must select shares to update to, please select '
+            'at least one or press delete instead'}, status=403)
+
+    existing_sfl = sfile.storedfileloc_set.filter(active=True).values('pk', 'servershare_id')
+    existing_shares = [(x['pk'], x['servershare_id']) for x in existing_sfl]
+    if not set(x[1] for x in existing_shares).symmetric_difference(share_ids):
+        return JsonResponse({'error': f'File with ID {data["item_id"]} is already '
+            'on the server shares you want'}, status=400)
+
 
     def get_path(sfile, dstshare_id, dss, analysis):
         # Get dst path depending on file and share
@@ -1144,8 +1154,6 @@ def update_sfile_storage(request):
         return JsonResponse({'error': 'No server available to transfer file, likely '
             'an incorrect configuration, please contact admin'}, status=400)
 
-    existing_sfl = sfile.storedfileloc_set.filter(active=True).values('pk', 'servershare_id')
-    existing_shares = [(x['pk'], x['servershare_id']) for x in existing_sfl]
     deleted = sfile.deleted and not len(existing_shares)
     dset_id, analysis, dss = False, False, False
     if deleted and not PDCBackedupFile.objects.filter(storedfile=sfile, success=True,
@@ -1175,6 +1183,7 @@ def update_sfile_storage(request):
 
         dset_id = dss.values('dataset_id').first()['dataset_id']
 
+    retrieve_count = 0
     if deleted:
         # Select a place to do restore to, then start restore job:
         sfloc_q = sfile.storedfileloc_set.filter(servershare__fileservershare__server__can_backup=True,
@@ -1182,6 +1191,7 @@ def update_sfile_storage(request):
         if sfl_bup_q := sfloc_q.filter(servershare_id__in=share_ids):
             # determine where to back up to, preferably a place the user wants to
             src_sfl = sfl_bup_q.first()
+            retrieve_count = 1
         elif sfl_inbox_q := sfloc_q.filter(servershare__function=ShareFunction.INBOX):
             # if that is not avail, pick inbox
             src_sfl = sfl_inbox_q.first()
@@ -1234,14 +1244,23 @@ def update_sfile_storage(request):
                     dstshare_id=rs_src_dstshare_id, dstpath=rs_src_dstpath)
         src_sfl_id = rs_src_job['kwargs']['dstsfloc_id']
         remaining_share_ids = [x for x in share_ids if x != rs_src_job['kwargs']['dstshare_id']]
-      
+
     # Now distribute to remaining dst shares
-    for share_id in [x for x in remaining_share_ids if x not in [x[1] for x in existing_shares]]:
+    rsync_shares =  [x for x in remaining_share_ids if x not in [x[1] for x in existing_shares]]
+    for share_id in rsync_shares:
         dstpath = get_path(sfile, share_id, dss, analysis)
         create_job('rsync_otherfiles_to_servershare', sfloc_id=src_sfl_id, dstshare_id=share_id,
                 dstpath=dstpath)
 
-    return JsonResponse({'state': 'ok'})
+    # Delete files from excluded shares
+    rm_sfls = sfile.storedfileloc_set.filter(active=True).exclude(servershare__in=share_ids)
+    create_job('purge_files', sfloc_ids=[x['pk'] for x in rm_sfls.values('pk')])
+    inbox_rm_count = rm_sfls.filter(servershare__function=ShareFunction.INBOX).count()
+    del_count = rm_sfls.update(active=False) - inbox_rm_count
+    # del_count is for user, do subtract the "deleted from inbox after retrieve from backup"
+
+    return JsonResponse({'state': 'ok', 'msg': f'File with ID {data["item_id"]} queued for syncing '
+        f'to {len(rsync_shares) + retrieve_count} shares, and deletion from {del_count} shares'})
 
 
 @login_required

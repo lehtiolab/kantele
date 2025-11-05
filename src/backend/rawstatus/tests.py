@@ -1193,12 +1193,13 @@ class TestUpdateStorageFile(BaseFilesTest):
         # Delete jobs to have fresh count
         jm.Job.objects.all().delete()
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'item_id': self.anasfile.pk, 'share_ids': [self.ssana.pk]})
+                data={'item_id': self.anasfile.pk, 'share_ids': [self.ssana.pk, self.ssanaruns.pk]})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(jm.Job.objects.filter(funcname='restore_from_pdc_archive').exists())
         self.assertEqual(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare').count(), 1)
 
         # Analysis file on rundir to other rundir, is on remote and will go through inbox
+        # set anasfile_sfl on self.ssana to active=False, so it is only on ssanaruns
         self.anasfile_sfl.active, self.anasfile_sfl.purged = False, True
         self.anasfile_sfl.save()
         # Delete jobs to have fresh count
@@ -1244,7 +1245,7 @@ class TestUpdateStorageFile(BaseFilesTest):
         self.assertFalse(rsjobs.exists())
         self.assertEqual(resp.status_code, 200)
 
-        # From inbox to remote (first retrieve, then rsync)
+        # From inbox to remote analocalstor (first retrieve, then rsync)
         jm.Job.objects.all().delete()
         self.f3sf.storedfileloc_set.update(active=False, purged=True)
         self.f3sf.deleted = True
@@ -1256,14 +1257,14 @@ class TestUpdateStorageFile(BaseFilesTest):
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.f3sf.pk, 'share_ids': [self.analocalstor.pk]})
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(sfls.count(), 2)
-        insfl = sfls.filter(servershare=self.ssinbox)
-        self.assertTrue(insfl.exists())
+        # Only one since the inbox one will have been deleted in the update
+        self.assertEqual(sfls.count(), 1)
         self.assertTrue(sfls.filter(servershare=self.analocalstor).exists())
-        srcsflid = insfl.get().pk
+        srcsflid = self.f3sf.storedfileloc_set.filter(active=False, servershare=self.ssinbox).get().pk
         self.assertTrue(bupjobs.filter(kwargs__sfloc_id=srcsflid).exists())
         self.assertTrue(rsjobs.filter(kwargs__sfloc_id=srcsflid).exists())
-        self.assertEqual(jm.Job.objects.count(), 2)
+        self.assertTrue(jm.Job.objects.filter(funcname='purge_files', kwargs__sfloc_ids=[srcsflid]).exists())
+        self.assertEqual(jm.Job.objects.count(), 3)
 
 
 class TestDeleteFile(BaseFilesTest):

@@ -89,10 +89,10 @@ async function updateStorage(fnid) {
   const resp = await postJSON('files/storage/', {item_id: fnid,
     share_ids: new_storage_shares[fnid]});
   if (!resp.ok) {
-    const msg = `Something went wrong restoring file id ${fnid} from backup: ${resp.error}`;
+    const msg = `Something went wrong updating storage for file id ${fnid}: ${resp.error}`;
     notif.errors[msg] = 1;
   } else {
-    const msg = `Restore file with id ${fnid} from backup queued`;
+    const msg = resp.msg;
     notif.messages[msg] = 1;
     dispatch('refresh', {fnid: fnid});
     cleanFetchDetails(fnIds);
@@ -151,7 +151,7 @@ onMount(async() => {
       {:else}
         <button on:click={e => deleteFile(fnid, false)} class="button is-small is-danger">Delete file</button>
       {/if}
-      <button class="button is-small is-primary" disabled>Restore file</button>
+      <button on:click={e => updateStorage(fnid)} class="button is-small is-primary">Update storage</button>
   {/if}
   {/each}
 </DetailBox>
