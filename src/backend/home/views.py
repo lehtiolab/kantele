@@ -9,7 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_GET, require_POST
 from django.contrib.auth.models import User
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
-from django.db.models import Q, Sum, Count, F, Value
+from django.db.models import Q, Sum, Count, F, Value, Min
 from django.db.models.functions import Trunc
 from collections import OrderedDict, defaultdict
 
@@ -826,7 +826,17 @@ def get_file_info(request, file_id):
         'rawfile__datasetrawfile', 'mzmlfile', 'rawfile__producer__msinstrument', 'libraryfile',
         'userfile').get()
     is_mzml = hasattr(sfile, 'mzmlfile')
-    historical_shares = filemodels.ServerShare.objects.filter(storedfileloc__sfile=sfile)
+    historical_shares = filemodels.ServerShare.objects.filter(storedfileloc__sfile=sfile).exclude(
+            function=filemodels.ShareFunction.INBOX).values('function', 'max_security')
+    functions_allowed = [x['function'] for x in historical_shares]
+    if filemodels.ShareFunction.ANALYSIS_DELIVERY in functions_allowed:
+        functions_allowed.append(filemodels.ShareFunction.ANALYSISRESULTS)
+    current_lowest_security = filemodels.ServerShare.objects.filter(storedfileloc__sfile=sfile,
+            storedfileloc__active=True).aggregate(Min('max_security'))
+    allowed_shares = filemodels.ServerShare.objects.filter(active=True,
+            function__in=functions_allowed,
+            max_security__lte=current_lowest_security['max_security__min'])
+
     info = {'analyses': [], 'servers': [], 'storage_shares': [],
             'producer': sfile.rawfile.producer.name,
             'filename': sfile.filename,
@@ -835,10 +845,7 @@ def get_file_info(request, file_id):
             'ask_force_delete': False,
             'restorable': hasattr(sfile, 'pdcbackedupfile') and sfile.pdcbackedupfile.success,
             'all_storlocs': {x.id: {'name': x.name, 'id': x.pk, 'description': x.description}
-                for x in filemodels.ServerShare.objects.filter(active=True,
-                    function__in=[x['function'] for x in historical_shares.values('function')]
-                    ).exclude(function=filemodels.ShareFunction.INBOX)
-                },
+                for x in allowed_shares}
             }
     for x in sfile.storedfileloc_set.filter(servershare__active=True, active=True).exclude(
             servershare__function=filemodels.ShareFunction.INBOX).distinct(
