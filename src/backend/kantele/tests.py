@@ -236,6 +236,8 @@ class BaseTest(TestCase):
         self.uft = rm.StoredFileType.objects.create(name='ufileft', filetype='tst', is_rawdata=False)
 
         # Analysis files
+        ana = am.Analysis.objects.create(name='anatesttest', user=self.user, base_rundir='fakerundir',
+                securityclass=rm.DataSecurityClass.NOSECURITY)
         anaft = rm.StoredFileType.objects.create(name=settings.ANALYSIS_FT_NAME, filetype='ana',
                 is_rawdata=False)
         self.anaprod = rm.Producer.objects.create(name='analysisprod', client_id=settings.ANALYSISCLIENT_APIKEY, shortname=settings.PRODUCER_ANALYSIS_NAME)
@@ -245,6 +247,8 @@ class BaseTest(TestCase):
         self.anasfile = rm.StoredFile.objects.create(rawfile=self.ana_raw, filetype=anaft,
 
                 filename=self.ana_raw.name, md5=self.ana_raw.source_md5)
+        am.AnalysisResultFile.objects.create(analysis=ana, sfile=self.anasfile)
+        
         self.anasfile_sfl = rm.StoredFileLoc.objects.create(sfile=self.anasfile,
                 servershare=self.ssana, path='', active=True, purged=False)
         self.ana_raw2 = rm.RawFile.objects.create(name='ana_file2', producer=self.anaprod,

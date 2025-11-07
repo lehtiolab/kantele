@@ -237,6 +237,36 @@ class StoredFile(models.Model):
     def __str__(self):
         return self.rawfile.name
 
+    def get_allowed_shares(self):
+        possible_shares = ServerShare.objects.filter(active=True)
+        match self.rawfile.usetype:
+            case UploadFileType.RAWFILE:
+                # FIXME filter on accepted dsetrawfile? are we going to use that?
+                if hasattr(self.rawfile, 'datasetrawfile'):
+                    allowed_shares = possible_shares.filter(function=ShareFunction.RAWDATA,
+                            max_security__lte=self.rawfile.datasetrawfile.dataset.securityclass)
+                else:
+                    # if not in dset, raw is inbox file, cant be moved
+                    allowed_shares = possible_shares.filter(function=ShareFunction.INBOX)
+
+            case UploadFileType.ANALYSIS:
+                if ana := self.analysisresultfile_set.values('analysis__securityclass').first():
+                    allowed_shares = possible_shares.filter(
+                            function__in=[ShareFunction.ANALYSIS_DELIVERY,
+                                ShareFunction.ANALYSISRESULTS],
+                            max_security__lte=ana['analysis__securityclass'])
+                else:
+                    oldsfl = self.storedfileloc_set.values('servershare__function').distinct()
+                    allowed_shares = possible_shares.filter(
+                            function__in=[x['servershare__function'] for x in oldsfl])
+
+            case UploadFileType.LIBRARY | UploadFileType.USERFILE:
+                allowed_shares = possible_shares.filter(function=ShareFunction.LIBRARY)
+
+            case UploadFileType.QC:
+                allowed_shares = possible_shares.filter(function=ShareFunction.RAWDATA)
+        return allowed_shares
+
 
 class StoredFileLoc(models.Model):
     '''This should be an up-to-date table for file locations, so while a record here is always

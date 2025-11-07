@@ -1147,11 +1147,7 @@ def update_sfile_storage(request):
             raise RuntimeError('Cannot determine path to update file to')
         return dstpath
 
-    # Files can only be on those share types where they have once been, except INBOX
-    historical_shares = ServerShare.objects.filter(storedfileloc__sfile=sfile)
-    if ServerShare.objects.filter(pk__in=share_ids, active=True, function__in=[x['function']
-        for x in historical_shares.values('function')]).exclude(function=ShareFunction.INBOX
-            ).count() < len(share_ids):
+    if sfile.get_allowed_shares().filter(pk__in=share_ids).count() < len(share_ids):
         return JsonResponse({'error': 'Invalid share requested to move file to'}, status=400)
 
     if rsync_server := FileServer.objects.filter(can_rsync_remote=True, active=True):
