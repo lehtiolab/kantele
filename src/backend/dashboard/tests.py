@@ -7,6 +7,7 @@ from jobs import models as jm
 from jobs import jobs as jj
 from dashboard import models as dm
 from datasets import models as dam
+from rawstatus import models as rm
 
 
 class QCBase(BaseTest):
@@ -115,7 +116,8 @@ class QCBase(BaseTest):
 
     def setUp(self):
         super().setUp()
-        self.diaana = am.Analysis.objects.create(user=self.user, name='dia ana qc', base_rundir='testdirqc')
+        self.diaana = am.Analysis.objects.create(user=self.user, name='dia ana qc',
+                base_rundir='testdirqc', securityclass=rm.DataSecurityClass.NOSECURITY)
         self.diaqc = dm.QCRun.objects.create(rawfile=self.tmpraw, analysis=self.diaana, is_ok=False,
                 message='', runtype=dam.AcquisistionMode.DIA)
 
@@ -148,7 +150,8 @@ class QCSave(QCBase):
         self.assertIn('Missing parameter', resp.json()['msg'])
 
     def test_save_qcrun_dia(self):
-        self.diaana = am.Analysis.objects.create(user=self.user, name='testana_qc', base_rundir='testdirqc')
+        self.diaana = am.Analysis.objects.create(user=self.user, name='testana_qc',
+                base_rundir='testdirqc', securityclass=rm.DataSecurityClass.NOSECURITY)
         post = {'client_id': settings.ANALYSISCLIENT_APIKEY, 'qcrun_id': self.diaqc.pk,
                 'analysis_id': self.diaana.pk, 'state': 'ok', 'msg': 'test ok',
                 'plots': self.diaplots}

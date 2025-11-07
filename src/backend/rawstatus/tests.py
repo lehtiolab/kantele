@@ -530,7 +530,8 @@ class TestUploadScript(BaseIntegrationTest):
         self.uploadtoken = rm.UploadToken.objects.create(user=self.user, token=self.token,
                 expires=timezone.now() + timedelta(settings.TOKEN_RENEWAL_WINDOW_DAYS + 1), expired=False,
                 producer=self.anaprod, filetype=anaft, uploadtype=rm.UploadFileType.ANALYSIS)
-        ana = am.Analysis.objects.create(user=self.user, name='testana', base_rundir='testdir_iso')
+        ana = am.Analysis.objects.create(user=self.user, name='testana', base_rundir='testdir_iso',
+                securityclass=rm.DataSecurityClass.NOSECURITY)
         exta = am.ExternalAnalysis.objects.create(analysis=ana, description='bla', last_token=self.uploadtoken)
         need_desc = 0
         self.user_token = b64encode(f'{self.token}|{self.live_server_url}|{need_desc}'.encode('utf-8')).decode('utf-8')
@@ -1175,7 +1176,8 @@ class TestUpdateStorageFile(BaseFilesTest):
 
     def test_analysis(self):
         # Analysis file on delivery to rundir, push directly to rsync capable dest
-        self.ana = am.Analysis.objects.create(user=self.user, name='test', base_rundir='testdir')
+        self.ana = am.Analysis.objects.create(user=self.user, name='test', base_rundir='testdir',
+                securityclass=rm.DataSecurityClass.NOSECURITY)
         self.resultfn = am.AnalysisResultFile.objects.create(analysis=self.ana,
                 sfile=self.anasfile)
         # Create inactive copy to see there is an historical copy in an nfrundir
@@ -1353,7 +1355,8 @@ class TestDeleteFile(BaseFilesTest):
 
     def test_analysisfile(self):
         otheruser = User.objects.create(username='other', email='email')
-        ana = am.Analysis.objects.create(user=otheruser, name='ana1', base_rundir='ana1')
+        ana = am.Analysis.objects.create(user=otheruser, name='ana1', base_rundir='ana1',
+                securityclass=rm.DataSecurityClass.NOSECURITY)
         am.AnalysisResultFile.objects.create(analysis=ana, sfile=self.sfile)
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.sfile.pk})
         self.assertEqual(resp.status_code, 403)
@@ -1671,7 +1674,8 @@ class TestAutoDelete(BaseIntegrationTest):
         rm.StoredFileLoc.objects.filter(pk=expreportsfl.pk).update(last_date_used=exp_ldu)
 
         # Analysis files not expired, one shared
-        ana1 = am.Analysis.objects.create(user=self.user, name='ana1', base_rundir='ana1')
+        ana1 = am.Analysis.objects.create(user=self.user, name='ana1', base_rundir='ana1',
+                securityclass=rm.DataSecurityClass.NOSECURITY)
         anaraw = rm.RawFile.objects.create(name='ana1.html', producer=self.prod,
                 source_md5='ana1md5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.ANALYSIS)
@@ -1692,7 +1696,8 @@ class TestAutoDelete(BaseIntegrationTest):
                 servershare=self.ssanaruns, path=ana1.base_rundir, active=True, purged=False)
 
         # Analysis files expired
-        ana2 = am.Analysis.objects.create(user=self.user, name='ana2', base_rundir='ana2')
+        ana2 = am.Analysis.objects.create(user=self.user, name='ana2', base_rundir='ana2',
+                securityclass=rm.DataSecurityClass.NOSECURITY)
         anaraw3 = rm.RawFile.objects.create(name='ana3.html', producer=self.prod,
                 source_md5='ana3md5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.ANALYSIS)
@@ -1708,7 +1713,8 @@ class TestAutoDelete(BaseIntegrationTest):
         am.AnalysisResultFile.objects.create(analysis=ana2, sfile=anasf2)
 
         # Analysis without shared files expired
-        ana3 = am.Analysis.objects.create(user=self.user, name='ana3', base_rundir='ana3')
+        ana3 = am.Analysis.objects.create(user=self.user, name='ana3', base_rundir='ana3',
+                securityclass=rm.DataSecurityClass.NOSECURITY)
         anaraw4 = rm.RawFile.objects.create(name='ana4.html', producer=self.prod,
                 source_md5='ana4md5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.ANALYSIS)

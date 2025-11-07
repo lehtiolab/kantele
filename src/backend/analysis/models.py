@@ -275,9 +275,7 @@ class Analysis(models.Model):
     purged = models.BooleanField(default=False)
     base_rundir = models.TextField()
     editable = models.BooleanField(default=True)
-    #  to make sure that we dont accidentally put sens output on a public server
-    # using rsync
-    #securityclass = models.IntegerField(choices=dsmodels.DataSecurityClass.choices)
+    securityclass = models.IntegerField(choices=filemodels.DataSecurityClass.choices)
 
     def get_fullname(self, wftype=False):
         if wftype:

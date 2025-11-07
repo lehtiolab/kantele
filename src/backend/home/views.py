@@ -1217,7 +1217,7 @@ def refine_mzmls(request):
     # Always create new analysis - some kind of trail, otherwise you get same analysis for each
     # refining in time
     analysis = anmodels.Analysis.objects.create(user=request.user, name=f'refine_dataset_{dset.pk}',
-            editable=False)
+            editable=False, securityclass=filemodels.DataSecurityClass.NOSECURITY)
 
     dss_id, source_ssid = srcdss['pk'], srcdss['storageshare_id']
     srcsfl_pk = [x['pk'] for x in mzmlsfl.filter(servershare_id=source_ssid).exclude(

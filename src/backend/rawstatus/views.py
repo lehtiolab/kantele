@@ -26,7 +26,7 @@ from celery import states as taskstates
 from kantele import settings
 from rawstatus.models import (RawFile, Producer, StoredFile, FileServer, ServerShare, StoredFileLoc,
         ShareFunction, FileserverShare, StoredFileType, UserFile, MSFileData, PDCBackedupFile, 
-        UploadToken, UploadFileType)
+        UploadToken, UploadFileType, DataSecurityClass)
 from rawstatus import jobs as rsjobs
 from rawstatus.tasks import search_raws_downloaded
 from analysis.models import Analysis, LibraryFile, AnalysisResultFile, UniProtFasta, EnsemblFasta
@@ -902,7 +902,8 @@ def run_singlefile_qc(sfloc, server_id, user_op, acqtype):
             f'--{acqtype.name.lower()}']
     analysis, _ = Analysis.objects.update_or_create(user_id=user_op.user_id,
             name=f'{rawfile.producer.name}_{rawfile.name}_{rawfile.date}', defaults={
-                'log': [], 'deleted': False, 'purged': False, 'base_rundir': '', 'editable': False})
+                'log': [], 'deleted': False, 'purged': False, 'base_rundir': '', 'editable': False,
+                'securityclass': DataSecurityClass.NOSECURITY})
     qcrun, _ = dashmodels.QCRun.objects.update_or_create(rawfile=rawfile, defaults={'is_ok': False,
         'message': '', 'runtype': acqtype, 'analysis': analysis})
     tps = dashmodels.TrackedPeptideSet.objects.filter(active=True, acqmode=acqtype).order_by('-date').first()

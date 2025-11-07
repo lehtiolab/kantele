@@ -1006,7 +1006,9 @@ def store_analysis(request):
             for dsid in set(dsids).difference({x.dataset_id for x in dsa})])
         dsa_map = {x.dataset_id: x.pk for x in [*dsa, *newdss]}
     else:
-        analysis = am.Analysis.objects.create(name=req['analysisname'], user_id=request.user.id)
+        # FIXME securityclass dynamic
+        analysis = am.Analysis.objects.create(name=req['analysisname'], user_id=request.user.id,
+                securityclass=rm.DataSecurityClass.NOSECURITY)
         dsa = am.DatasetAnalysis.objects.bulk_create([am.DatasetAnalysis(dataset_id=dsid,
             analysis=analysis) for dsid in dsids])
         dsa_map = {x.dataset_id: x.pk for x in dsa}

@@ -106,7 +106,8 @@ class AnalysisPageTest(BaseIntegrationTest):
                 share=self.ssweb, path=os.path.join(self.rootdir, 'web'))
 
         # Create analysis for isoquant:
-        self.ana = am.Analysis.objects.create(user=self.user, name='testana_iso', base_rundir='testdir_iso')
+        self.ana = am.Analysis.objects.create(user=self.user, name='testana_iso',
+                base_rundir='testdir_iso', securityclass=rm.DataSecurityClass.NOSECURITY)
         self.dsa = am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.ds)
         self.anajob = jm.Job.objects.create(funcname='testjob', kwargs={'fserver_id': self.anaserver.pk}, state=jj.Jobstates.WAITING,
                 timestamp=timezone.now())
@@ -127,7 +128,8 @@ class AnalysisPageTest(BaseIntegrationTest):
                 sfile=self.anasfile)
 
         # Create analysis for LF
-        self.analf = am.Analysis.objects.create(user=self.user, name='testana_lf', base_rundir='testdirlf')
+        self.analf = am.Analysis.objects.create(user=self.user, name='testana_lf',
+                base_rundir='testdirlf', securityclass=rm.DataSecurityClass.NOSECURITY)
         self.dsalf = am.DatasetAnalysis.objects.create(analysis=self.analf, dataset=self.oldds)
         self.anajoblf = jm.Job.objects.create(funcname='testjob', kwargs={}, state=jj.Jobstates.WAITING,
                 timestamp=timezone.now())
@@ -187,7 +189,8 @@ class LoadBaseAnaTestIso(AnalysisPageTest):
     def setUp(self):
         super().setUp()
         # create "added_results", i.e. a param in analysis which uses results from another ana
-        self.newana = am.Analysis.objects.create(user=self.user, name='testana_iso', base_rundir='testdir_iso')
+        self.newana = am.Analysis.objects.create(user=self.user, name='testana_iso',
+                base_rundir='testdir_iso', securityclass=rm.DataSecurityClass.NOSECURITY)
         job = jm.Job.objects.create(funcname='testjob', kwargs={}, state=jj.Jobstates.WAITING,
                 timestamp=timezone.now())
         am.NextflowSearch.objects.create(analysis=self.newana, nfwfversionparamset=self.nfwf,
@@ -1198,7 +1201,8 @@ class TestDeleteAnalysis(BaseTest):
 
     def setUp(self):
         super().setUp()
-        self.ana = am.Analysis.objects.create(user=self.user, name='test', base_rundir='testdir')
+        self.ana = am.Analysis.objects.create(user=self.user, name='test', base_rundir='testdir',
+                securityclass=rm.DataSecurityClass.NOSECURITY)
 
     def test_fail_request(self):
         resp = self.cl.get(self.url)
@@ -1244,7 +1248,8 @@ class TestPurgeAnalysis(BaseIntegrationTest):
 
     def setUp(self):
         super().setUp()
-        self.ana = am.Analysis.objects.create(user=self.user, name='test', base_rundir='testdir', deleted=True)
+        self.ana = am.Analysis.objects.create(user=self.user, name='test', base_rundir='testdir',
+                deleted=True, securityclass=rm.DataSecurityClass.NOSECURITY)
         self.user.is_staff = True
         self.user.save()
 
