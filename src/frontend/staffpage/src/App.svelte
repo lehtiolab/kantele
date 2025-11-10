@@ -215,9 +215,23 @@ function activateRunButton(openthis) {
 
 
 function addServer() {
-  let server = {pk: false, name: '', uri: '', fqdn: '', active: true, can_backup: false, can_rsync_remote: false,
-    rsyncusername: '', rsynckeyfile: '', show_analysis_profile: false}
+  const server = {pk: false, name: '', uri: '', fqdn: '', active: true, can_backup: false,
+    can_rsync_remote: false, rsyncusername: '', rsynckeyfile: '', show_analysis_profile: false,
+    mounted: [],
+  }
   servers = [server, ...servers];
+}
+
+function addStorageShare() {
+  const share = {pk: false, name: '', max_security: 1, description: '', active: true,
+    function: 1, maxdays_data: 0
+  }
+  shares = [share, ...shares]
+}
+
+function addStorageShareToServer(server) {
+  server.mounted = [...server.mounted, {share: false, path: ''}];
+  servers = servers;
 }
 
 async function toggleServerActive(server) {
@@ -598,6 +612,7 @@ async function saveShare(share) {
             </div>
           </div>
         {/each}
+        <button class="button is-small is-info has-text-weight-bold mt-1" on:click={e => addStorageShareToServer(server)}>Add share</button>
       </div>
       {/each}
 
@@ -606,7 +621,7 @@ async function saveShare(share) {
     <div class="box has-background-link-light">
       <h4 class="title is-4">
         Storage shares
-        <button class="button is-small is-info has-text-weight-bold mt-1" on:click={addServer}>Add</button>
+        <button class="button is-small is-info has-text-weight-bold mt-1" on:click={addStorageShare}>Add</button>
       </h4>
       {#each shares.filter(x => x.active).concat(shares.filter(x => !x.active)) as share}
       <div class="box">
