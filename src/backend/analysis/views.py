@@ -24,7 +24,7 @@ from rawstatus.views import create_upload_token
 from home import views as hv
 from jobs import jobs as jj
 from jobs import views as jv
-from jobs.jobutil import create_job
+from jobs.jobutil import create_job, jobmap
 from jobs import models as jm
 
 
@@ -1236,6 +1236,9 @@ def store_analysis(request):
         kwargs = {'analysis_id': analysis.id, 'wfv_id': req['nfwfvid'], 'inputs': jobinputs,
                 **data_args}
         if req['analysis_id'] and hasattr(analysis, 'nextflowsearch'):
+            jwrap = jobmap[fname](False)
+            for extrajob in jwrap.on_create_prep_rsync_jobs(**kwargs):
+                create_job(extrajob['name'], **extrajob['kwargs'])
             jobq = jm.Job.objects.filter(nextflowsearch__analysis=analysis)
             jobq.update(kwargs=kwargs, state=jj.Jobstates.WAITING)
             jobid = jobq.values('pk').get()['pk']

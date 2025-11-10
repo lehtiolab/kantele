@@ -839,6 +839,10 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
 
     def test_existing_analysis(self):
         quant = self.ds.quantdataset.quanttype
+        remotedss = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.analocalstor,
+                storage_loc_ui=self.storloc, storage_loc=self.storloc, startdate=timezone.now())
+        remotemzml = rm.StoredFileLoc.objects.create(sfile=self.f3sfmz,
+                servershare=self.analocalstor, path=self.storloc, active=True, purged=False)
         params = {'flags': {self.param1.pk: True},
                 # str(self.popt4.pk) is because it is a key in a select param (value is its name)
                 # and in JSON keys are not ints
@@ -875,7 +879,7 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
                 'resultfiles': [],
                 },
             'wfid': self.wf.pk,
-            'analysisserver_id': self.anaserver.pk,
+            'analysisserver_id': self.remoteanaserver.pk,
             }
         prenow = datetime.now()
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
@@ -916,9 +920,9 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
           'filefields': {},
           'filesamples': {self.f3sfmz.pk: 'setA'},
           'infiles': {self.f3sfmz.pk: 1},
-          'fserver_id': self.anaserver.pk,
-          'dss_ids': [self.dss.pk],
-          'sfloc_ids': [self.f3mzsss.pk],
+          'fserver_id': self.remoteanaserver.pk,
+          'dss_ids': [remotedss.pk],
+          'sfloc_ids': [remotemzml.pk],
           'inputs': {'components': {c_ch.INPUTDEF.name: self.inputdef.value,
               c_ch.PREFRAC.name: '.*fr([0-9]+).*mzML$', c_ch.ISOQUANT.name: {},
               c_ch.ISOQUANT_SAMPLETABLE.name: [[self.qch.name, 'setA', 'samplename', 'groupname']],
@@ -933,6 +937,8 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
               'singlefiles': {f'{self.pfn2.nfparam}': self.sflib.pk}},
               'platenames': {}, 'wfv_id': self.nfwf.pk}
 
+        self.assertTrue(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
+            kwargs__sfloc_id=self.sflibloc.pk, kwargs__dstshare_id=self.analocalstor.pk).exists())
         self.assertJSONEqual(json.dumps(self.anajob.kwargs), json.dumps(job_check_kwargs))
         checkjson = {'errmsg': False, 'multierror': [], 'analysis_id': self.ana.pk, 'token': False}
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)

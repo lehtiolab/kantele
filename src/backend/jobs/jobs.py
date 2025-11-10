@@ -172,12 +172,12 @@ class BaseJob:
             if extra_sfl_q.distinct('sfile').count() < len(all_exfiles_sfpk):
                 raise RuntimeError('Not all parameter files could be found on disk, make sure they exist')
             elif 'fserver_id' in kwargs:
-                # Job has no sfloc_ids, but an fserver_id so we can pick raw file share here
+                # Job independent on sfloc_ids has fserver_id so we can pick raw file share here
                 # and rsync extra files to there if needed
                 ready_sfls = extra_sfl_q.filter(
                         servershare__fileservershare__server_id=kwargs['fserver_id']
                         ).distinct('sfile_id')
-                if ready_sfls.count() < len(all_exfiles_sfpk):
+                if ready_sfls.distinct('sfile').count() < len(all_exfiles_sfpk):
                     if dstfss_q := FileserverShare.objects.filter(server_id=kwargs['fserver_id'],
                             share__function=ShareFunction.RAWDATA).values('share_id', 'share__function'):
                         # Enforce raw data share or error
