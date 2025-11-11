@@ -798,7 +798,16 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.assertEqual(reports.count(), 3) # analysisruns, web, analysis storage
         nfrunsfl = reports.filter(servershare=self.ssanaruns, path=ana.get_run_base_dir()).get()
         nfrunfn = os.path.join(self.nfrunshare.path, nfrunsfl.path, 'report.html')
-        self.assertTrue(os.path.exists(nfrunfn))
+        # NF run dumps inputdef into report.html
+        lines = []
+        fnpath = os.path.join(self.f3path, self.f3mzsss.sfile.filename)
+        with open(nfrunfn) as fp:
+            header = next(fp).strip().split('\t')
+            self.assertEqual(header, self.inputdef.value)
+            for line in fp:
+                lines.append(line.strip().split('\t'))
+            self.assertEqual(len(lines), 1)
+            self.assertEqual(lines[0], [fnpath, '', 'setA', self.msit.name, 'yes'])
 
         anasfl = reports.filter(servershare=self.ssana, path=ana.get_public_output_dir()).get()
         anadir = os.path.join(self.anashare.path, anasfl.path)

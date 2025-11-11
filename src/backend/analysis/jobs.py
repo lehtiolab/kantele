@@ -370,25 +370,28 @@ class RunNextflowWorkflow(MultiDatasetJob):
         infiles = []
         # INPUTDEF is either False or [fn, set, fraction, etc]
         if inputdef_fields := run['components']['INPUTDEF']:
+            specialfields = set(settings.INPUTDEF_FIELDS).intersection(inputdef_fields)
+            # Examples of querying specialfields:
+            # infile['setname'] = kwargs['filesamples'].get(str(fn['sfile_id']), '')
+            # infile['channel'] = fn['sfile__rawfile__datasetrawfile__quantfilechannel__channel__channel__name']
             for fn in sflocs_passed:
                 infile = {'path': os.path.join(sharemap[fn['servershare_id']], fn['path']),
                         'fn': fn['sfile__filename']}
-                if 'setname' in inputdef_fields:
-                    infile['setname'] = kwargs['filesamples'].get(str(fn['sfile_id']), '')
-                if 'plate' in inputdef_fields:
-                    infile['plate'] = kwargs['platenames'].get(str(fn['sfile__rawfile__datasetrawfile__dataset_id']), '')
-                if 'sampleID' in inputdef_fields:
-                    # sampleID is for pgt / dbgenerator
-                    # No fallback, is required if in header
-                    infile['sampleID'] = kwargs['filesamples'][str(fn['sfile_id'])]
-                if 'fraction' in inputdef_fields:
-                    infile['fraction'] = kwargs['infiles'].get(str(fn['sfile_id']), {}).get('fr') 
-                if 'instrument' in inputdef_fields:
-                    # No fallback, instrument in header cannot be ''
-                    infile['instrument'] = fn['sfile__rawfile__producer__msinstrument__instrumenttype__name'] 
-                if 'channel' in inputdef_fields:
-                    # For non-pooled labelcheck, cannot be ''
-                    infile['channel'] = fn['sfile__rawfile__datasetrawfile__quantfilechannel__channel__channel__name']
+                for specf in specialfields:
+                    keys = settings.INPUTDEF_FIELDS[specf]
+                    if keys[0]:
+                        val = kwargs[keys[0]]
+                        if keys[2] is not False:
+                            val = val.get(str(fn[keys[1]]), keys[2])
+                        else:
+                            # Fail on unspecified key in input
+                            # when inputdef stipulates no fallback
+                            val = val[str(fn[keys[1]])]
+                    else:
+                        val = fn[keys[1]]
+                    if keys[3]:
+                        val = val.get(keys[3])
+                    infile[specf] = val
                 # Dynamic fields
                 infile.update(kwargs['filefields'].get(str(fn['sfile_id']), {}))
                 infiles.append(infile)

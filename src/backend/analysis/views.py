@@ -475,8 +475,7 @@ def get_datasets(request, wfversion_id):
     wfcomponents = {allcomponents[x.component].name: x.value
             for x in am.PsetComponent.objects.filter(pset__nextflowwfversionparamset=wfversion_id)}
     inputcomps = wfcomponents.get('INPUTDEF', [])
-    non_fields = {'setname', 'sampleID', 'instrument', 'channel', 'plate', 'fraction'}
-    fields = {x: '' for x in inputcomps[1:] if not x in non_fields}
+    fields = {x: '' for x in inputcomps[1:] if not x in settings.INPUTDEF_FIELDS}
     field_order = [x for x in fields.keys()]
 
     # Get analysis filesamples for later use

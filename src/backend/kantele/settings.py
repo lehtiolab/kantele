@@ -109,6 +109,24 @@ NXF_COMMAND = os.environ.get('NXF_COMMAND', 'nextflow run').split(' ')
 LIBRARY_FILE_PATH = ''
 LIBRARY_FILE_PATH_INBOX = '__kantele_library'
 
+# Inputdef special field lookup, used in analysis.jobs
+# for each key, a tuple:
+# (kwargskey, fnkey or sfile-for-kwargs-values-key, fallback, third get (fractions)
+INPUTDEF_FIELDS = {
+        # dda, pgt id, etc
+        'setname': ('filesamples', 'sfile_id', '', False),
+        'instrument': (False, 'sfile__rawfile__producer__msinstrument__instrumenttype__name', False, False),
+        'plate': ('platenames', 'sfile__rawfile__datasetrawfile__dataset_id', '', False),
+        'fraction': ('infiles', 'sfile_id', {}, 'fr'),
+        # pgt dbgen
+        'sampleID': ('filesamples', 'sfile_id', False, False),
+        # spectronaut
+        'condition': ('filesamples', 'sfile_id', False, False),
+        # labelcheck non-pooled
+        'channel': (False, 'sfile__rawfile__datasetrawfile__quantfilechannel__channel__channel__name', False, False),
+        }
+
+
 # Should correspond to server's sharepath for output files also
 NF_RUNDIR = os.environ.get('NEXTFLOW_RUNDIR', 'nf_runs')
 

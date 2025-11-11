@@ -32,7 +32,10 @@ with open(args.input) as fp:
         lines.append(line.strip().split('\t'))
 
 with open(os.path.join(args.outdir, 'report.html'), 'w') as fp:
-    pass
+    fp.write(f'{"\t".join(header)}')
+    for line in lines:
+        fp.write('\n')
+        fp.write('\t'.join(line))
 
 
 with open('.nextflow.log', 'w') as fp:
