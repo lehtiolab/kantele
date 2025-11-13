@@ -199,28 +199,42 @@ def show_datasets(request):
     return JsonResponse({'items': dsets, 'order': list(dsets.keys())})
 
 
-@login_required
-@require_GET
-def find_files(request):
-    """Loop through comma-separated q-param in GET, do a lot of OR queries on
-    datasets to find matches. String GET-derived q-params by AND."""
-    if searchterms := [x for x in request.GET['q'].split(',') if x != '']:
-        query = Q(filename__icontains=searchterms[0])
-        query |= Q(rawfile__name__icontains=searchterms[0])
-        query |= Q(rawfile__producer__name__icontains=searchterms[0])
-        query |= Q(storedfileloc__path__icontains=searchterms[0])
-        for term in searchterms[1:]:
-            subquery = Q(filename__icontains=term)
-            subquery |= Q(rawfile__name__icontains=term)
-            subquery |= Q(rawfile__producer__name__icontains=term)
-            subquery |= Q(storedfileloc__path__icontains=term)
-            query &= subquery
-        dbfns = filemodels.StoredFile.objects.filter(query)
-    else:
-        dbfns = filemodels.StoredFile.objects.none()
-    if request.GET['deleted'] == 'false':
-        dbfns = dbfns.filter(deleted=False)
-    return JsonResponse(populate_files(dbfns))
+def find_files(userquery):
+    query = Q()
+    ex_query = Q()
+    searchterms = []
+    for q in [x for x in userquery.split(',') if x != '']:
+        match q.split(':'):
+            case ['from', date]:
+                if dt := parse_userquery(date, 'date'):
+                    query &= Q(rawfile__date__gte=dt)
+            case ['to', date]:
+                if dt := parse_userquery(date, 'date'):
+                    query &= Q(rawfile__date__lte=dt)
+            case ['deleted', 'true']:
+                query &= Q(deleted=True)
+            case ['deleted', 'false']:
+                query &= Q(deleted=False)
+            case ['type', ftype]:
+                match ftype:
+                    case 'qc':
+                        query &= Q(rawfile__usetype=filemodels.UploadFileType.QC)
+                    case 'raw':
+                        query &= Q(rawfile__usetype=filemodels.UploadFileType.RAWFILE)
+                    case 'analysis':
+                        query &= Q(rawfile__usetype=filemodels.UploadFileType.ANALYSIS)
+                    case 'shared':
+                        query &= Q(rawfile__usetype__in=[filemodels.UploadFileType.LIBRARY,
+                            filemodels.UploadFileType.USERFILE])
+            case _:
+                searchterms.append(q)
+    for term in searchterms:
+        subquery = Q(filename__icontains=term)
+        subquery |= Q(rawfile__name__icontains=term)
+        subquery |= Q(rawfile__producer__name__icontains=term)
+        subquery |= Q(storedfileloc__path__icontains=term)
+        query &= subquery
+    return filemodels.StoredFile.objects.filter(query).exclude(ex_query)
 
 
 @login_required
@@ -229,6 +243,8 @@ def show_files(request):
     if 'ids' in request.GET:
         fnids = request.GET['ids'].split(',')
         dbfns = filemodels.StoredFile.objects.filter(pk__in=fnids)
+    elif userq := request.GET.get('q'):
+        dbfns = find_files(userq)
     else:
         # last week files 
         # FIXME this is a very slow query
@@ -247,66 +263,62 @@ def getxbytes(bytes, op=50):
 
 def populate_files(dbfns):
     popfiles = {}
-    for fn in dbfns.select_related(
-            'rawfile__datasetrawfile__dataset', 
-            'rawfile__producer__msinstrument',
-            'mzmlfile',
-            'swestorebackedupfile', 
-            'pdcbackedupfile', 
-            'filetype').filter(checked=True):
-        is_mzml = hasattr(fn, 'mzmlfile')
-        if hasattr(fn.rawfile.producer, 'msinstrument') and not is_mzml:
-            filedate = fn.rawfile.date
-        else:
-            filedate = fn.regdate 
-        currentjobs = filemodels.FileJob.objects.filter(rawfile=fn.rawfile).exclude(
+    for fn in dbfns.values('pk', 'filename', 'deleted', 'rawfile_id', 'rawfile__date',
+            'rawfile__size', 'rawfile__usetype', 'rawfile__claimed', 'rawfile__producer__name',
+            'mzmlfile', 'filetype__name', 'pdcbackedupfile__success', 'rawfile__datasetrawfile',
+            'rawfile__datasetrawfile__dataset'):
+        currentjobs = filemodels.FileJob.objects.filter(rawfile=fn['rawfile_id']).exclude(
                 job__state__in=jj.JOBSTATES_DONE).values('job_id', 'job__state')
-        ana_afv = anmodels.Analysis.objects.filter(analysisfilevalue__sfile=fn)
-        ana_adsi = anmodels.Analysis.objects.filter(datasetanalysis__analysisdsinputfile__sfile=fn)
-        it = {'id': fn.id,
-              'name': fn.filename,
-              'date': datetime.strftime(fn.rawfile.date, '%Y-%m-%d %H:%M'),
-              'size': getxbytes(fn.rawfile.size) if not is_mzml else '-',
-              'ftype': fn.filetype.name,
+        ana_afv = anmodels.Analysis.objects.filter(analysisfilevalue__sfile_id=fn['pk'])
+        ana_adsi = anmodels.Analysis.objects.filter(
+                datasetanalysis__analysisdsinputfile__sfile_id=fn['pk'])
+        it = {'id': fn['pk'],
+              'name': fn['filename'],
+              'date': datetime.strftime(fn['rawfile__date'], '%Y-%m-%d %H:%M'),
+              'size': getxbytes(fn['rawfile__size']) if fn['mzmlfile'] is None else '-',
+              'ftype': fn['filetype__name'],
               'analyses': [x['pk'] for x in ana_afv.union(ana_adsi).values('pk')],
               'dataset': [],
               'jobstate': [x['job__state'] for x in currentjobs],
               'job_ids': [x['job_id'] for x in currentjobs],
-              'deleted': fn.deleted,
+              'deleted': fn['deleted'],
               'smallstatus': [],
              }
-        # TODO make unified backup model?
-        try:
-            it['backup'] = fn.swestorebackedupfile.success
-        except filemodels.SwestoreBackedupFile.DoesNotExist:
-            try:
-                it['backup'] = fn.pdcbackedupfile.success
-            except filemodels.PDCBackedupFile.DoesNotExist:
-                it['backup'] = False
-        if not fn.rawfile.claimed:
-            it['owner'] = fn.rawfile.producer.name
-        elif hasattr(fn.rawfile, 'datasetrawfile'):
-            it['owner'] = fn.rawfile.datasetrawfile.dataset.datasetowner_set.select_related('user').first().user.username
-            dsrf = fn.rawfile.datasetrawfile
-            it['dataset'] = dsrf.dataset_id
-        elif arfs := anmodels.AnalysisResultFile.objects.filter(sfile=fn):
-            arfs = arfs.values('analysis_id', 'analysis__user__username')
-            it['owner'] = arfs.first()['analysis__user__username']
-            it['analyses'].extend([x['analysis_id'] for x in arfs])
+        it['backup'] = fn['pdcbackedupfile__success']
+        if fn['rawfile__usetype'] == filemodels.UploadFileType.QC:
+            it['owner'] = 'QC'
+        elif fn['rawfile__usetype'] in [filemodels.UploadFileType.USERFILE,
+                filemodels.UploadFileType.LIBRARY]:
+            it['owner'] = 'shared'
+        elif fn['rawfile__usetype'] == filemodels.UploadFileType.RAWFILE and not fn['rawfile__claimed']:
+            it['owner'] = fn['rawfile__producer__name']
+        elif fn['rawfile__datasetrawfile']:
+            it['owner'] = dsmodels.DatasetOwner.objects.filter(
+                    dataset__id=fn['rawfile__datasetrawfile__dataset']).values('user__username').first()
+            it['dataset'] = fn['rawfile__datasetrawfile__dataset']
+        elif fn['rawfile__usetype'] == filemodels.UploadFileType.ANALYSIS:
+            anas = anmodels.Analysis.objects.filter(analysisresultfile__sfile_id=fn['pk']
+                    ).values('pk', 'user__username')
+            it['analyses'].extend([x['pk'] for x in anas])
+            it['owner'] = anas.first()['user__username']
         else:
             # Claimed file without datasetrawfile, analysisfile, possibly file is 
-            # QC or pending for dataset
-            inbox_sfl = filemodels.StoredFileLoc.objects.filter(sfile=fn,
-                    servershare__function=filemodels.ShareFunction.INBOX)
-            if inbox_sfl.exists() and jm.Job.objects.filter(state=jj.Jobstates.HOLD,
-                    funcname='rsync_dset_files_to_servershare', 
-                    kwargs__sfloc_ids=[inbox_sfl.get().pk]).exists():
-                # Unknowns: dss_id, dstshare_id, dstsfloc_ids, cant query kwargs for those
-                it['smallstatus'].append({'text': 'dataset pending', 'state': 'active'})
-        popfiles[fn.id] = it
+            # pending for dataset
+            inbox_sfl = filemodels.StoredFileLoc.objects.filter(sfile_id=fn['pk'],
+                    servershare__function=filemodels.ShareFunction.INBOX).values('pk')
+            if inbox_sfl.exists():
+                jobq = jm.Job.objects.filter(state=jj.Jobstates.HOLD,
+                        funcname='rsync_dset_files_to_servershare',
+                        kwargs__sfloc_ids=[inbox_sfl.get()['pk']])
+                if jobq.exists():
+                    dssid = jobq.values('kwargs__dss_id').get()['kwargs__dss_id']
+                    dso = dsmodels.DatasetOwner.objects.filter(dataset__datasetserver__id=dssid
+                            ).values('dataset_id', 'user__username').get()
+                    it.update({'owner': dso['user__username'], 'dataset': dso['dataset_id']})
+                    it['smallstatus'].append({'text': 'dataset pending', 'state': 'active'})
+        popfiles[fn['pk']] = it
     order = [x['id'] for x in sorted(popfiles.values(), key=lambda x: x['date'], reverse=True)]
     return {'items': popfiles, 'order': order}
-
 
 
 @login_required
@@ -358,15 +370,24 @@ def show_jobs(request):
 def parse_userquery(q, qtype):
     match qtype:
         case 'date':
-            match len(q):
-                case 4:
-                    result = datetime.strptime(q, '%Y')
-                case 6:
-                    result = datetime.strptime(q, '%Y%m')
-                case 8:
-                    result = datetime.strptime(q, '%Y%m%d')
+            match q[-1]:
+                case 'd':
+                    try:
+                        days = int(q[:-1])
+                    except ValueError:
+                        result = False
+                    else:
+                        result = datetime.today() - timedelta(days)
                 case _:
-                    result = False
+                    match len(q):
+                        case 4:
+                            result = datetime.strptime(q, '%Y')
+                        case 6:
+                            result = datetime.strptime(q, '%Y%m')
+                        case 8:
+                            result = datetime.strptime(q, '%Y%m%d')
+                        case _:
+                            result = False
     return result
 
 

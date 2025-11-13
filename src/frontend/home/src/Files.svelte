@@ -22,7 +22,7 @@ const tablefields = [
   {id: 'date', name: 'Date', type: 'str', multi: false},
   {id: 'size', name: 'Size', type: 'str', multi: false},
   {id: 'backup', name: 'Backed up', type: 'bool', multi: false},
-  {id: 'owner', name: 'Belongs', type: 'str', multi: false},
+  {id: 'owner', name: 'Owner', type: 'str', multi: false},
   {id: 'ftype', name: 'Type', type: 'str', multi: false},
 ];
 
@@ -91,7 +91,18 @@ function purgeFiles() {
 <a class="button is-small" title="Move files to cold storage (admins only)" disabled>Archive files</a>
 {/if}
   
-<Table tab="Files" bind:items={files} bind:notif={notif} bind:selected={selectedFiles} fetchUrl="/show/files" findUrl="/find/files" getdetails={getFileDetails} fields={tablefields} inactive={['deleted']} on:detailview={showDetails} />
+<Table tab="Files" bind:items={files}
+  bind:notif={notif}
+  bind:selected={selectedFiles}
+  show_deleted_or_q="from:365d, from:yyyymmdd, to:, deleted:true/false, type:raw/analysis/shared/qc"
+  defaultQ="from:30d"
+  fetchUrl="/show/files"
+  findUrl="/show/files"
+  getdetails={getFileDetails}
+  fields={tablefields}
+  inactive={['deleted']}
+  on:detailview={showDetails}
+  />
 
 {#if detailsVisible}
 <Details on:refresh={e => refreshFile(e.detail.fnid)} closeWindow={() => {detailsVisible = false}} fnIds={detailsVisible} />
