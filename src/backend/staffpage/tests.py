@@ -19,8 +19,9 @@ class BaseQCFileTest(BaseTest):
         self.user.is_staff = True
         self.user.save()
 
+
 class QueueNewFile(BaseQCFileTest):
-    url = '/manage/qc/newfile/'
+    url = '/manage/qc/newfiles/'
 
     def test_bad(self):
         getresp = self.cl.get(self.url)
@@ -42,7 +43,7 @@ class QueueNewFile(BaseQCFileTest):
         self.assertEqual(mv_jobs.count(), 0)
         self.assertEqual(mv_jobs.count(), 0)
         resp = self.cl.post(self.url, content_type='application/json', data={
-            'sfid': self.tmpsf.pk, 'acqtype': 'DIA'})
+            'sfids': [self.tmpsf.pk], 'acqtype': 'DIA'})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(mv_jobs.count(), 1)
         qc_jobs = qc_jobs.filter(kwargs__sfloc_id=mv_jobs.first().kwargs['dstsfloc_id'])
@@ -58,30 +59,33 @@ class QueueNewFile(BaseQCFileTest):
         self.assertEqual(mv_jobs.count(), 0)
         self.assertEqual(mv_jobs.count(), 0)
         resp = self.cl.post(self.url, content_type='application/json', data={
-            'sfid': self.tmpsf.pk, 'acqtype': 'DIA'})
+            'sfids': [self.tmpsf.pk], 'acqtype': 'DIA'})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(mv_jobs.count(), 1)
         qc_jobs = qc_jobs.filter(kwargs__sfloc_id=mv_jobs.first().kwargs['dstsfloc_id'])
         self.assertEqual(qc_jobs.count(), 1)
 
 
-class RerunSingleQCTest(BaseQCFileTest):
-    url = '/manage/qc/rerunsingle/'
+class RemoveQCFile(BaseQCFileTest):
+    url = '/manage/qc/remove/'
 
     def setUp(self):
         super().setUp()
-        self.bup_jobs = jm.Job.objects.filter(funcname='restore_from_pdc_archive',
-                kwargs__sfloc_id__in=[x.pk for x in self.oldsf.storedfileloc_set.all()])
-        self.qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow')
-        self.rs_jobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
-                kwargs__sfloc_id__in=[x.pk for x in self.oldsf.storedfileloc_set.all()])
-        ana = am.Analysis.objects.create(name='previousrun', user=self.user, base_rundir='blbala',
+        self.rm_jobs = jm.Job.objects.filter(funcname='purge_files')
+        self.ana = am.Analysis.objects.create(name='previousrun', user=self.user, base_rundir='blbala',
                 securityclass=rm.DataSecurityClass.NOSECURITY)
-        self.qcdata = dashm.QCRun.objects.create(rawfile=self.oldraw, analysis=ana,
+        self.qcdata = dashm.QCRun.objects.create(rawfile=self.oldraw, analysis=self.ana,
                 runtype=dm.AcquisistionMode.DDA)
+        uwf = am.UserWorkflow.objects.create(name='a', wftype=2, public=False)
+        self.job = jm.Job.objects.create(funcname='hej', kwargs={}, timestamp=timezone.now(),
+                state='processing')
+        nfs = am.NextflowSearch.objects.create(nfwfversionparamset=self.nfwv, workflow=uwf,
+                analysis=self.ana, token='abc', job=self.job)
         self.olddsr.delete()
         self.oldraw.usetype = rm.UploadFileType.QC
         self.oldraw.save()
+        self.qcsss = rm.StoredFileLoc.objects.create(sfile=self.oldsf, servershare=self.ssnewstore,
+                path=os.path.join(settings.QC_STORAGE_DIR, 'test'), active=True, purged=False)
 
     def test_fail(self):
         getresp = self.cl.get(self.url)
@@ -89,59 +93,48 @@ class RerunSingleQCTest(BaseQCFileTest):
         noid_resp = self.cl.post(self.url, content_type='application/json', data={})
         self.assertEqual(noid_resp.status_code, 400)
 
-    def test_run(self):
-        # Run single file
-        resp = self.cl.post(self.url, content_type='application/json', data={'sfid': self.oldsf.pk})
+    def test_remove(self):
+        # Remove file
+        resp = self.cl.post(self.url, content_type='application/json', data={'sfids': [self.oldsf.pk]})
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()['msg'], f'Queued {self.oldsf.filename} QC raw for rerun')
-        self.assertEqual(self.bup_jobs.count(), 0)
-        self.assertEqual(self.qc_jobs.count(), 1)
+        self.assertEqual(resp.json()['msg'], f'Removed 1 file from QC')
+        self.assertEqual(self.rm_jobs.count(), 1)
+        self.oldraw.refresh_from_db()
+        self.assertEqual(self.oldraw.usetype, rm.UploadFileType.RAWFILE)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.state, 'revoking')
+        self.assertFalse(am.Analysis.objects.filter(pk=self.ana.pk).exists())
+
+    def test_remove_no_purge(self):
+        self.qcsss.active = False
+        self.qcsss.save()
+        resp = self.cl.post(self.url, content_type='application/json', data={'sfids': [self.oldsf.pk]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['msg'], f'Removed 1 file from QC')
+        self.assertEqual(self.rm_jobs.count(), 0)
+        self.oldraw.refresh_from_db()
+        self.assertEqual(self.oldraw.usetype, rm.UploadFileType.RAWFILE)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.state, 'revoking')
+        self.assertFalse(am.Analysis.objects.filter(pk=self.ana.pk).exists())
         
-        # Run again, dont care about duplicate
-        resp = self.cl.post(self.url, content_type='application/json', data={'sfid': self.oldsf.pk})
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()['msg'], f'Queued {self.oldsf.filename} QC raw for rerun')
-        self.assertEqual(self.qc_jobs.count(), 2)
-
-    def test_run_with_archived_file(self):
-        self.oldsf.deleted, self.oldsss.purged, self.oldsss.active = True, True, False
-        self.oldsf.save()
-        self.oldsss.servershare = self.ssinbox
-        self.oldsss.save()
-        rm.PDCBackedupFile.objects.create(storedfile=self.oldsf, pdcpath='testpath', success=True)
-        resp = self.cl.post(self.url, content_type='application/json', data={'sfid': self.oldsf.pk})
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()['msg'], f'Queued {self.oldsf.filename} QC raw for rerun')
-        self.assertEqual(self.bup_jobs.count(), 1)
-        self.assertEqual(self.rs_jobs.count(), 1)
-        self.assertEqual(self.qc_jobs.count(), 1)
-
-    def test_not_find_archive(self):
-        self.oldsf.deleted, self.oldsss.purged, self.oldsss.active = True, True, False
-        self.oldsf.save()
-        self.oldsss.save()
-        # No backup
-        resp = self.cl.post(self.url, content_type='application/json', data={'sfid': self.oldsf.pk})
+    def test_not_remove(self):
+        self.oldraw.usetype = rm.UploadFileType.RAWFILE
+        self.oldraw.save()
+        self.assertEqual(self.rm_jobs.count(), 0)
+        resp = self.cl.post(self.url, content_type='application/json', data={'sfids': [self.oldsf.pk]})
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.json()['msg'], f'QC file {self.oldsf.filename} is marked as deleted, '
-                'but cannot be restored, contact admin')
-        self.assertEqual(self.bup_jobs.count(), 0)
-        self.assertEqual(self.qc_jobs.count(), 0)
-
-        # backup file deleted
-        rm.PDCBackedupFile.objects.create(storedfile=self.oldsf, pdcpath='testpath', success=True,
-                deleted=True)
-        resp = self.cl.post(self.url, content_type='application/json', data={'sfid': self.oldsf.pk})
-        self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.json()['msg'], f'QC file {self.oldsf.filename} is marked as deleted, '
-                'but cannot be restored, contact admin')
-        self.assertEqual(self.bup_jobs.count(), 0)
-        self.assertEqual(self.qc_jobs.count(), 0)
-
-
+        self.assertEqual(resp.json()['msg'], f'Problem, some files you selected are not QC')
+        self.assertEqual(self.rm_jobs.count(), 0)
+        self.oldraw.refresh_from_db()
+        self.assertEqual(self.oldraw.usetype, rm.UploadFileType.RAWFILE)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.state, 'processing')
+        self.assertTrue(am.Analysis.objects.filter(pk=self.ana.pk).exists())
+        
 
 class RerunManyQCsTest(BaseQCFileTest):
-    url = '/manage/qc/rerunmany/'
+    url = '/manage/qc/rerun/'
 
     def setUp(self):
         super().setUp()
@@ -150,12 +143,14 @@ class RerunManyQCsTest(BaseQCFileTest):
         pset = am.ParameterSet.objects.create()
         uwf = am.UserWorkflow.objects.create(wftype=am.UserWorkflow.WFTypeChoices.QC, public=False)
         uwf.nfwfversionparamsets.create(nfworkflow=nfrepo, paramset=pset)
-        oldana = am.Analysis.objects.create(name='previousrun', user=self.user, base_rundir='blbala',
+        f3ana = am.Analysis.objects.create(name='previousrun', user=self.user, base_rundir='blbala',
                 securityclass=rm.DataSecurityClass.NOSECURITY)
-        dashm.QCRun.objects.create(rawfile=self.oldraw, analysis=oldana, runtype=dm.AcquisistionMode.DDA)
+        dashm.QCRun.objects.create(rawfile=self.f3raw, analysis=f3ana,
+                runtype=dm.AcquisistionMode.DDA)
         tmpana = am.Analysis.objects.create(name='previousrun', user=self.user, base_rundir='blbala3',
                 securityclass=rm.DataSecurityClass.NOSECURITY)
-        dashm.QCRun.objects.create(rawfile=self.tmpraw, analysis=tmpana, runtype=dm.AcquisistionMode.DDA)
+        dashm.QCRun.objects.create(rawfile=self.tmpraw, analysis=tmpana,
+                runtype=dm.AcquisistionMode.DDA)
 
     def test_fail(self):
         getresp = self.cl.get(self.url)
@@ -168,127 +163,77 @@ class RerunManyQCsTest(BaseQCFileTest):
         prod2 = rm.Producer.objects.create(name='prod2', client_id='hfdsioahd', shortname='p2',
                 internal=True)
 
-        days_back = 3
-        # One too-old file:
-        self.olddsr.delete()
-        self.oldraw.date = (timezone.now() - timezone.timedelta(days_back + 1)).date()
-        self.oldraw.save()
-
-        # One just old enough
         self.f3raw.usetype = rm.UploadFileType.QC
-        self.f3sss.save()
         self.f3dsr.delete()
-        self.f3raw.date = (timezone.now() - timezone.timedelta(days_back)).date()
         self.f3raw.save()
 
-        # One somewhat newer (date is already "now")
         self.tmpraw.usetype = rm.UploadFileType.QC
-        self.tmpsss.save()
         self.tmpraw.claimed = True
         self.tmpraw.prod = prod2
         self.tmpraw.save()
 
-        nr_files = 2 # Amount inside date
-        nr_duplicates = 2
-        nr_deleted = 1
-        nr_ignored = 1 # no QC run
-        nr_archived = 1
-        cur_nr_queued = 0
-        confirm_msg = f'You have selected {nr_files - nr_ignored} QC raw files.'
-        dup_msg = (f'{nr_duplicates - nr_ignored} seem to be obsolete reruns ran with the same workflow'
-                ' version as the current latest (Tick the ignore box '
-                'to include these in the analysis.')
-        del_msg = (f'{nr_deleted} seem to be deleted, of which {nr_archived} are '
-            ' in backup. (Tick the retrieve box to include these in the analysis.')
-        queue_msg = f'Queued {nr_files - nr_ignored} QC raw files for running'
+        confirm_msg = f'You have selected 2 QC raw files.'
+        dup_msg = (f'2 seem to be obsolete reruns ran with the same workflow'
+                ' version as the current latest')
+        queue_msg = f'Queued 2 QC raw files for running'
 
         # Get confirm dialog
         resp = self.cl.post(self.url, content_type='application/json', data={
-            'instruments': [self.prod.pk, prod2.pk], 'days': days_back, 'confirm': False,
-            'ignore_obsolete': False, 'retrieve_archive': False})
+            'doConfirm': False, 'sfids': [self.f3sf.pk, self.tmpsf.pk]})
         self.assertEqual(resp.status_code, 200)
         msg = resp.json()['msg']
         self.assertIn(confirm_msg, msg)
         self.assertNotIn(dup_msg, msg)
-        self.assertNotIn(del_msg, msg)
         self.assertEqual(self.qc_jobs.count(), 0)
 
         # Actually confirm
         resp = self.cl.post(self.url, content_type='application/json', data={
-            'instruments': [self.prod.pk, prod2.pk], 'days': days_back, 'confirm': True,
-            'ignore_obsolete': False, 'retrieve_archive': False})
+            'doConfirm': True, 'sfids': [self.f3sf.pk, self.tmpsf.pk]})
         self.assertEqual(resp.status_code, 200)
         msg = resp.json()['msg']
-        self.assertEqual(self.qc_jobs.count(), nr_files - nr_ignored)
+        self.assertEqual(self.qc_jobs.count(), 2)
         self.assertEqual(self.qc_jobs.filter(kwargs__sfloc_id__in=[x.pk for x in self.tmpsf.storedfileloc_set.all()]).count(), 1)
         self.assertEqual(self.qc_jobs.filter(kwargs__sfloc_id=[x.pk for x in self.f3sf.storedfileloc_set.all()]).count(), 0)
         self.assertIn(queue_msg, msg)
-        cur_nr_queued += nr_files - nr_ignored
 
         # Identical rerun which gets warning since they already been ran
         resp = self.cl.post(self.url, content_type='application/json', data={
-            'instruments': [self.prod.pk, prod2.pk], 'days': days_back, 'confirm': False,
-            'ignore_obsolete': False, 'retrieve_archive': False})
+            'doConfirm': False, 'sfids': [self.f3sf.pk, self.tmpsf.pk]})
         self.assertEqual(resp.status_code, 200)
         msg = resp.json()['msg']
         self.assertIn(confirm_msg, msg)
         self.assertIn(dup_msg, msg)
         self.assertNotIn(queue_msg, msg)
-        self.assertNotIn(del_msg, msg)
-        self.assertEqual(self.qc_jobs.count(), cur_nr_queued)
+        # qc jobs still 2
+        self.assertEqual(self.qc_jobs.count(), 2)
 
         # Identical rerun confirm to do it
         resp = self.cl.post(self.url, content_type='application/json', data={
-            'instruments': [self.prod.pk, prod2.pk], 'days': days_back, 'confirm': True,
-            'ignore_obsolete': True, 'retrieve_archive': False})
+            'doConfirm': True, 'sfids': [self.f3sf.pk, self.tmpsf.pk]})
         self.assertEqual(resp.status_code, 200)
         msg = resp.json()['msg']
         self.assertIn(queue_msg, msg)
-        cur_nr_queued += nr_files - nr_ignored
-        self.assertEqual(self.qc_jobs.count(), cur_nr_queued)
+        self.assertEqual(self.qc_jobs.count(), 4)
 
-        # Identical rerun do not confirm to do it - reply with no files are run
-        resp = self.cl.post(self.url, content_type='application/json', data={
-            'instruments': [self.prod.pk, prod2.pk], 'days': days_back, 'confirm': True,
-            'ignore_obsolete': False, 'retrieve_archive': False})
-        self.assertEqual(resp.status_code, 200)
-        msg = resp.json()['msg']
-        self.assertIn(f'Queued {nr_files - nr_duplicates} QC raw files for running', msg)
-        self.assertEqual(self.qc_jobs.count(), cur_nr_queued)
-
-        # Rerun with backed up files asks for confirm
+        # Rerun with backed up files will retrieve first
+        # Only one file has a backed up, so the other one will not be done 
         rm.PDCBackedupFile.objects.create(storedfile=self.tmpsf, success=True, deleted=False)
         self.f3sf.deleted = True
         self.f3sf.save()
         self.tmpsf.deleted = True
         self.tmpsf.save()
         resp = self.cl.post(self.url, content_type='application/json', data={
-            'instruments': [self.prod.pk, prod2.pk], 'days': days_back, 'confirm': False,
-            'ignore_obsolete': False, 'retrieve_archive': False})
+            'doConfirm': True, 'sfids': [self.f3sf.pk, self.tmpsf.pk]})
         self.assertEqual(resp.status_code, 200)
         msg = resp.json()['msg']
-        self.assertIn(confirm_msg, msg)
-        self.assertIn(dup_msg, msg)
-        self.assertNotIn(queue_msg, msg)
-        self.assertIn(del_msg, msg)
-        self.assertEqual(self.qc_jobs.count(), cur_nr_queued)
+        self.assertNotIn(confirm_msg, msg)
+        self.assertIn('Queued 1 QC raw files for running', msg)
+        self.assertEqual(self.qc_jobs.count(), 5)
 
-        # Confirm to also retrieve files
-        resp = self.cl.post(self.url, content_type='application/json', data={
-            'instruments': [self.prod.pk, prod2.pk], 'days': days_back, 'confirm': True,
-            'ignore_obsolete': True, 'retrieve_archive': True})
-        self.assertEqual(resp.status_code, 200)
-        msg = resp.json()['msg']
-        self.assertIn(f'Queued {nr_files - nr_ignored - nr_deleted + nr_archived} QC raw files for running', msg)
-        self.assertIn(f'Queued {nr_archived} QC raw files for retrieval from archive', msg)
-        cur_nr_queued += nr_files - nr_ignored - nr_deleted + nr_archived
-
-        self.assertEqual(self.qc_jobs.count(), cur_nr_queued)
         bup_jobs = jm.Job.objects.filter(funcname='restore_from_pdc_archive',
                 kwargs__sfloc_id__in=[x.pk for x in self.tmpsf.storedfileloc_set.all()])
-        self.assertEqual(bup_jobs.count(), nr_archived)
-        self.assertEqual(jm.Job.objects.filter(funcname='restore_from_pdc_archive').count(),
-                nr_archived)
+        self.assertEqual(bup_jobs.count(), 1)
+        self.assertEqual(jm.Job.objects.filter(funcname='restore_from_pdc_archive').count(), 1)
 
 
 class TestSaveTrackPeptides(BaseQCFileTest):

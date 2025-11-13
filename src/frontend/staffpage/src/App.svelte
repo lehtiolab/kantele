@@ -3,28 +3,15 @@
 import { postJSON } from '../../datasets/src/funcJSON.js'
 import DynamicSelect from '../../datasets/src/DynamicSelect.svelte';
 import { flashtime } from '../../util.js'
+import Table from '../../home/src/Table.svelte';
 
 let notif = {errors: {}, messages: {}, links: {}};
 // pre-existing variables:
-// qc_instruments = {id: name}
 // selectedTrackedPeptidesInit
 // trackedPeptideSetsInit
 
 let servers = init_servers;
 let shares = init_shares;
-
-let qc_reruns = Object.fromEntries(
-    Object.keys(instruments)
-    .map(k => [k, false])
-    );
-let rerunAllInstruments = false;
-let rerunNumberDays = 0;
-let rerunFromDate = 'today';
-let showConfirm = false;
-
-let selectedSingle = '';
-let selectedNewfile = '';
-let acqtype = [];
 
 let newPeptideSetName = '';
 let editingTrackedPeptides = true;
@@ -39,90 +26,71 @@ if (selectedTrackedPeptides) {
   trackedPeptidesName = trackedPeptides.name;
 }
 
+/////// QC table stuff
+let showConfirm = false;
+let loadedFiles = {};
+let selectedFiles = [];
 
-const runButtons = {
-  single: false,
-  new: false,
+const tablefields = [
+  {id: 'jobstate', name: '__hourglass-half', type: 'state', multi: true},
+  {id: 'name', name: 'File', type: 'str', multi: false},
+  {id: 'smallstatus', name: '', type: 'smallcoloured', multi: true},
+  {id: 'dataset', name: '', type: 'icon', help: 'Dataset', icon: 'clipboard-list', multi: false},
+  {id: 'date', name: 'Date', type: 'str', multi: false},
+  {id: 'size', name: 'Size', type: 'str', multi: false},
+  {id: 'backup', name: 'Backed up', type: 'bool', multi: false},
+  {id: 'owner', name: 'Owner', type: 'str', multi: false},
+  {id: 'ftype', name: 'Type', type: 'str', multi: false},
+];
+const inactive = ['inactive'];
+
+function updateNotif() {
+  Object.entries(notif.errors)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg));
+  Object.entries(notif.messages)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg));
+  notif = notif;
 }
 
-let ignoreObsolete = false;
-let retrieveBackups = false;
+
+async function runNewQCs(acqtype) {
+  const resp = await postJSON('/manage/qc/newfiles/', {sfids: selectedFiles, acqtype: acqtype});
+  if (resp.state === 'ok') {
+    notif.messages[resp.msg] = 1;
+  } else if (resp.state === 'error') {
+    notif.errors[resp.msg] = 1;
+  }
+  updateNotif();
+}
 
 
-function getRerunFromDate() {
+async function removeFromQCs() {
+  const resp = await postJSON('/manage/qc/remove/', {sfids: selectedFiles});
+  if (resp.state === 'ok') {
+    notif.messages[resp.msg] = 1;
+  } else if (resp.state === 'error') {
+    notif.errors[resp.msg] = 1;
+  }
+  updateNotif();
+}
+
+async function reRunQCs() {
+  const resp = await postJSON('/manage/qc/rerun/', {sfids: selectedFiles, doConfirm: showConfirm});
+  if (resp.state === 'confirm') {
+    showConfirm = true;
+    notif.messages[resp.msg] = 1;
+    setTimeout(function() { showConfirm = false } , flashtime);
+  } else if (resp.state === 'ok') {
     showConfirm = false;
-    if (!rerunNumberDays) {
-      rerunFromDate = 'today';
-    } else if (rerunNumberDays === 1) {
-      rerunFromDate = 'yesterday';
-    } else {
-      const today = new Date();
-      today.setDate(today.getDate() - rerunNumberDays);
-      rerunFromDate = today.toLocaleDateString();
-    }
-  }
-
-
-function toggleRerunAll() {
-    rerunAllInstruments = rerunAllInstruments === false;
-    Object.keys(qc_reruns)
-      .forEach(k => { qc_reruns[k] = rerunAllInstruments;
-        });
-  }
-
-function checkRerun() {
-  postRerun(false);
-}
-
-function confirmRerun() {
-  postRerun(true);
-}
-
-async function runNewSingleFile() {
-  const resp = await postJSON('/manage/qc/newfile/', {sfid: selectedNewfile, acqtype: acqtype});
-  if (resp.state === 'ok') {
     notif.messages[resp.msg] = 1;
-    setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, resp.msg);
   } else if (resp.state === 'error') {
     notif.errors[resp.msg] = 1;
-    setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, resp.msg);
   }
+  updateNotif();
 }
 
-async function runSingleFile() {
-  const resp = await postJSON('/manage/qc/rerunsingle/', {sfid: selectedSingle});
-  if (resp.state === 'ok') {
-    notif.messages[resp.msg] = 1;
-    setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, resp.msg);
-  } else if (resp.state === 'error') {
-    notif.errors[resp.msg] = 1;
-    setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, resp.msg);
-  }
-}
-
-async function postRerun(confirm) {
-    const rerun_ids = Object.entries(qc_reruns)
-      .filter(([k,v]) => v)
-      .map(([k,v]) => k);
-    const data = {days: rerunNumberDays, instruments: rerun_ids, confirm: confirm,
-        ignore_obsolete: ignoreObsolete, retrieve_archive: retrieveBackups,
-      };
-    const resp = await postJSON('/manage/qc/rerunmany/', data);
-    if (resp.state === 'confirm') {
-      showConfirm = true;
-      notif.messages[resp.msg] = 1;
-      setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, resp.msg);
-    } else if (resp.state === 'error') {
-      notif.errors[resp.msg] = 1;
-      setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, resp.msg);
-    } else {
-      showConfirm = false;
-      notif.messages[resp.msg] = 1;
-      setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, resp.msg);
-      ignoreObsolete = false;
-      retrieveBackups = false;
-    }
-  }
 
 function addTrackedPeptide() {
   let new_ix = 0;
@@ -205,13 +173,6 @@ function newPepsetBlank() {
   selectedTrackedPeptides = false;
   editingTrackedPeptides = true;
 }
-
-
-function activateRunButton(openthis) {
-  // Somehow selectedSingle will not update in the UI even if it is updated in the code?
-  // V. strange
-  runButtons[openthis] = true;
-} 
 
 
 function addServer() {
@@ -297,84 +258,42 @@ async function saveShare(share) {
 {/if}
 </div>
 
+<div class="box">
+  {#if selectedFiles.length}
+  <a class="button is-small" title="Add files to QC, they must be DDA" on:click={e => runNewQCs('DDA')}>Add DDA file to QC</a>
+  <a class="button is-small" title="Add files to QC, they must be DIA" on:click={e => runNewQCs('DIA')}>Add DIA file to QC</a>
+  <a class="button is-small" title="Move datasets to cold storage (delete)" on:click={removeFromQCs}>Remove from QC</a>
+  {#if showConfirm}
+    <a class="button is-small is-danger" title="Rerun QCs for selected files" on:click={reRunQCs}>Yes, rerun!</a>
+  {:else}
+    <a class="button is-small" title="Rerun QCs for selected files" on:click={reRunQCs}>Rerun QCs</a>
+  {/if}
+  {:else}
+    <a class="button is-small" title="Add files to QC, they must be DDA" disabled>Add DDA file to QC</a>
+  <a class="button is-small" title="Add files to QC, they must be DIA" disabled>Add DIA file to QC</a>
+    <a class="button is-small" title="Move datasets to cold storage (delete)" disabled>Remove from QC</a>
+  <a class="button is-small" title="Rerun QCs for selected files" disabled>Rerun QCs</a>
+  {/if}
+  <h4 class="title is-4">QC files</h4>
+  <Table tab="Files"
+    bind:notif={notif}
+    bind:selected={selectedFiles}
+    bind:items={loadedFiles}
+    fetchUrl="/show/files/"
+    findUrl="/show/files/"
+    show_deleted_or_q="from:365d, from:yyyymmdd, to:, deleted:true/false, type:raw/analysis/shared/qc"
+    defaultQ="type:qc from:30d"
+    getdetails={() => 'cannot show details'}
+    fixedbuttons={[]}
+    fields={tablefields}
+    inactive={inactive}
+    allowedActions={[]}
+    />
+</div>
+
 <div class="columns">
   <div class="column">
     <div class="box has-background-link-light">
-      <h4 class="title is-4">QC</h4>
-      <h5 class="title is-5">Rerun a batch of files with latest QC workflow</h5>
-      <h5 class="subtitle is-5">Excludes deleted </h5>
-      <div class="columns">
-        <div class="column">
-          <div class="field">
-            <label class="checkbox">
-              <input on:click={toggleRerunAll} bind:checked={rerunAllInstruments} type="checkbox"> All instruments
-            </label>
-          </div>
-          {#each Object.entries(instruments) as [id, name]}
-          <div class="field">
-            <label class="checkbox">
-              <input on:click={e => showConfirm = false} bind:checked={qc_reruns[id]} type="checkbox"> {name}
-            </label>
-          </div>
-          {/each}
-        </div>
-        <div class="column">
-          <div class="field">
-            <label class="label">How many days ago to rerun from</label>
-            <input type="number" class="input" on:change={getRerunFromDate} bind:value={rerunNumberDays} />
-            Rerun from {rerunFromDate}
-          </div>
-          {#if Object.entries(qc_reruns).filter(([k,v]) => v).length}
-          <button on:click={checkRerun} class="button">Check reruns</button>
-          {:else}
-          <button on:click={checkRerun} class="button" disabled>Check reruns</button>
-          {/if}
-          {#if showConfirm}
-          <button on:click={confirmRerun} class="button">Confirm</button>
-          {:else}
-          <button on:click={confirmRerun} class="button" disabled>Confirm</button>
-          {/if}
-          <div class="field mt-4">
-            <label class="checkbox">
-              <input bind:checked={ignoreObsolete} type="checkbox"> Ignore obsolete warning
-            </label>
-          </div>
-          <div class="field mt-4">
-            <label class="checkbox">
-              <input bind:checked={retrieveBackups} type="checkbox"> Retrieve archived files from backup 
-            </label>
-          </div>
-
-        </div>
-      </div>
-      <h5 class="title is-5">... or select a single rerun</h5>
-      <DynamicSelect bind:selectval={selectedSingle} on:selectedvalue={e => activateRunButton('single')} niceName={x => x.name} fetchUrl="/manage/qc/searchfiles/" placeholder="instrument name, date" />
-      {#if runButtons.single}
-      <button on:click={runSingleFile} class="button">Run</button>
-      {:else}
-      <button class="button" disabled>Run</button>
-      {/if}
-      <hr>
-
-      <h5 class="title is-5">... or designate a new file to QC</h5>
-      <DynamicSelect bind:selectval={selectedNewfile} on:selectedvalue={e => activateRunButton('new')} niceName={x => x.name} fetchUrl="/manage/qc/searchnewfiles/" placeholder="instrument name, date" />
-      <div class="control">
-        <label class="radio">
-          <input bind:group={acqtype} value="DDA" name="acqtype" type="radio" />
-          DDA
-        </label>
-        <label class="radio">
-          <input bind:group={acqtype} value="DIA" name="acqtype" type="radio" />
-          DIA
-        </label>
-        </div>
-      {#if runButtons.new}
-      <button on:click={runNewSingleFile} class="button">Run</button>
-      {:else}
-      <button class="button" disabled>Run</button>
-      {/if}
-      <hr />
-
       <h5 class="title is-5">QC tracked peptides</h5>
       <h5 class="subtitle is-5">As of date</h5>
       <span class="has-text-weight-bold is-size-6">
