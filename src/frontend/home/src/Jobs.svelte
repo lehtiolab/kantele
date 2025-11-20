@@ -19,7 +19,7 @@ const tablefields = [
   {id: 'datasets', name: '', help: 'Datasets', type: 'icon', icon: 'clipboard-list', multi: false, links: 'dset_ids', linkroute: '#/datasets'},
   {id: 'usr', name: 'Users', type: 'str', multi: false},
   {id: 'date', name: 'Date', type: 'str', multi: false},
-  {id: 'actions', name: 'Actions', type: 'button', multi: true, confirm: ['delete']},
+  {id: 'actions', name: 'Actions', type: 'button', multi: true, confirm: ['delete', 'force delete']},
 ];
 
 const fixedbuttons = [
@@ -64,6 +64,7 @@ const actionmap = {
   pause: pauseJob,
   resume: resumeJob,
   delete: deleteJob,
+  'force delete': deleteJob,
 }
 
 async function refreshJob(jobid) {

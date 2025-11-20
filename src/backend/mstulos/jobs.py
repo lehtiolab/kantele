@@ -18,6 +18,7 @@ from rawstatus import models as rm
 class ProcessAnalysis(BaseJob): 
     refname = 'ingest_search_results'
     task = mt.summarize_result_peptable
+    can_be_canceled = True
     queue = settings.QUEUE_SEARCH_INBOX
 
     """

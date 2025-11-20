@@ -18,6 +18,7 @@ class DownloadFastaFromRepos(BaseJob):
     '''Checks ENSEMBL and uniprot if they have new versions of fasta proteome databases 
     that we havent downloaded  yet. If so, queue tasks'''
     refname = 'download_fasta_repos'
+    can_be_canceled = True
     task = tasks.check_ensembl_uniprot_fasta_download
     
     def process(self, **kwargs):

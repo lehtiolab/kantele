@@ -432,6 +432,8 @@ def get_job_actions(job, ownership):
             actions.append('force retry')
         if jwrap.can_be_canceled and job.state not in jj.JOBSTATES_DONE:
             actions.append('delete')
+        elif job.state not in jj.JOBSTATES_DONE:
+            actions.append('force delete')
     return actions
 
 

@@ -149,6 +149,10 @@ class RsyncFileTransferFromWeb(SingleFileJob):
 
     refname = 'rsync_transfer_fromweb'
     task = tasks.rsync_transfer_file_web
+    # This task can be canceled if there is an error, because
+    # it does not create new files in itself TODO maybe put an
+    # addkwargs on this?
+    can_be_canceled = True
     queue = False
 
     def getfiles_query(self, **kwargs):
@@ -282,6 +286,7 @@ class RenameFile(SingleFileJob):
 
 class ClassifyMSRawFile(SingleFileJob):
     refname = 'classify_msrawfile'
+    can_be_canceled = True # No consequences for file integrity when deleting
     task = tasks.classify_msrawfile
 
     def process(self, **kwargs):
