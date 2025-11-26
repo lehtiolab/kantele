@@ -1,7 +1,7 @@
 --- 
-# Prepare server for Kantele on Ubuntu 22.04 LTS
-# All things to install but not the actually system which gets regular updates
-# Run again when e.g. SSH key rotate
+# Prepare server for Kantele on Ubuntu 24.04 LTS
+# All things to install but not the actual kantele deploy
+# Run again when e.g. TLS cert, apt updates
 # TODO: configure rsyslog to listen on TCP/UDP
 
 - hosts: kantele

@@ -29,7 +29,7 @@
     owner: "{{ kanteleuser }}"
     group: "{{ kanteleuser }}"
     mode: '400'
-  loop: rsync_keys_storage
+  loop: '{{ rsync_keys_storage }}'
 
 - name: Get tivoli backup client from IBM
   become: yes

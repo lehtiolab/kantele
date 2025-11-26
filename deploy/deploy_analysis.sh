@@ -12,14 +12,14 @@ then
     exit 1
 fi
 
+source .ansible-env
+
 echo Preparing ssh-agent with key
 eval $(ssh-agent)
-ssh-add
+ssh-add $LOCAL_SSH_KEY
 
 python3 -m venv .venv-ansible
 source .venv-ansible/bin/activate
 pip install "ansible >2.9"
-
-source .ansible-env
 
 ansible-playbook -i default_inventory -i "${INVENTORY_PATH}" --extra-vars "analysis_connect_user=${ANALYSIS_USER}" analysis_deploy.yml -K
