@@ -510,7 +510,7 @@ def classify_msrawfile(self, token, fnid, ftypename, sharepath, path, fname):
     # TODO remove token
     path = os.path.join(sharepath, path)
     fpath = os.path.join(path, fname)
-    val = False
+    val, error, mstime_min = False, False, False
     if ftypename == settings.THERMORAW:
         with TemporaryDirectory() as tmpdir:
             cmd = ['docker', 'run', '-v', f'{fpath}:/rawfile/{fname}', '-v', f'{tmpdir}:/outdir',
@@ -518,25 +518,25 @@ def classify_msrawfile(self, token, fnid, ftypename, sharepath, path, fname):
                     '-i', f'/rawfile/{fname}', '-o', f'/outdir/outfn']
             subprocess.run(cmd)
             # TODO which errors do we get here?
-            with open(os.path.join(tmpdir, 'outfn.sum.csv')) as fp:
-                header = next(fp).strip().split(',')
-                line = next(fp).strip().split(',')
             try:
-                val = line[header.index(settings.THERMOKEY)]
-            except IndexError:
-                print(f'File {fname} of type {ftypename} parsed, could not find key: '
-                        f'{settings.THERMOKEY}')
-
-            with open(os.path.join(tmpdir, 'outfn.methods.txt'), encoding='utf-16') as fp:
-                for line in fp:
-                    if line[:9] == 'Run time:':
-                        break
-            try:
-                mstime_min = float(re.match('Run time: ([0-9]+\.[0-9]+) \[min\]', line).group(1))
-            except (ValueError, AttributeError):
-                msg = 'Could not determine MS time for raw file'
-                taskfail_update_db(self.request.id, msg=msg)
-                raise
+                with open(os.path.join(tmpdir, 'outfn.sum.csv')) as fp:
+                    header = next(fp).strip().split(',')
+                    line = next(fp).strip().split(',')
+            except FileNotFoundError:
+                error = 'File reader did not generate report'
+            else:
+                try:
+                    val = line[header.index(settings.THERMOKEY)]
+                except IndexError:
+                    error = f'Key {settings.THERMOKEY} not found in file read report'
+                try:
+                    with open(os.path.join(tmpdir, 'outfn.methods.txt'), encoding='utf-16') as fp:
+                        for line in fp:
+                            if line[:9] == 'Run time:':
+                                break
+                    mstime_min = float(re.match('Run time: ([0-9]+\.[0-9]+) \[min\]', line).group(1))
+                except (FileNotFoundError, ValueError, AttributeError):
+                    error = 'Could not determine MS time from file read report'
         
     elif ftypename == settings.BRUKERRAW:
         # Get classification (dataset, QC) from XML metadata
@@ -544,22 +544,16 @@ def classify_msrawfile(self, token, fnid, ftypename, sharepath, path, fname):
         try:
             root = ET.parse(metafile).getroot()
         except FileNotFoundError:
-            msg = 'Could not find HyStarMetadata.xml file to determine MS classification'
-            taskfail_update_db(self.request.id, msg=msg)
-            raise
+            error = 'File reader did not generate report'
         except xml.etree.ElementTree.ParseError:
-            msg = 'File HyStarMetadata.xml does not contain valid XML'
-            taskfail_update_db(self.request.id, msg=msg)
-            raise
+            error = 'File reader report not valid XML'
 
         ns = 'https://www.bruker.com/compass/metadata'
         try:
             sample_el = root.find(f'./{{{ns}}}Sample/SampleTable/Sample')
             val = sample_el.attrib['Description']
         except AttributeError:
-            msg = 'Could not find Sample element in HyStarMetadata, check if file is OK'
-            taskfail_update_db(self.request.id, msg=msg)
-            raise
+            error = 'No Sample element in file metadata'
         except KeyError:
             # In case Hystarmetadata has been changed to no longer include Description
             val = False
@@ -573,56 +567,49 @@ def classify_msrawfile(self, token, fnid, ftypename, sharepath, path, fname):
             try:
                 con = sqlite3.Connection(fp.name)
             except sqlite3.OperationalError:
-                taskfail_update_db(self.request.id, msg='Cannot open database file, is the '
-                        f'categorization as {settings.BRUKERRAW} of the file correct?')
-                raise
+                error = f'Cannot read {settings.BRUKERRAW} file spectra, perhaps wrong filetype'
             try:
                 # Find last frame time (gradient length)
                 cur = con.execute('SELECT Time FROM Frames ORDER BY ROWID DESC LIMIT 1')
             except sqlite3.DatabaseError as e:
                 if str(e) == 'file is not a database':
-                    msg = 'This raw file is not a database, possibly it is corrupted'
+                    error = f'Cannot read {settings.BRUKERRAW} file spectra, file corrupt?'
+                    
                 elif str(e) == 'no such table: Frames':
-                    msg = 'Could not find correct DB table Frames in raw file, contact admin'
+                    error = 'Could not find correct DB table Frames in raw file'
                 else:
-                    msg = str(e)
-                taskfail_update_db(self.request.id, msg=msg)
-                raise
+                    error = f'Unexpected error reading file: {str(e)}'
             try:
                 mstime_min = float(cur.fetchone()[0])
             except (TypeError, ValueError):
-                msg = 'Could not determine MS time for raw file'
-                taskfail_update_db(self.request.id, msg=msg)
-                raise
+                error = 'Could not determine MS time for raw file'
             con.close()
 
-    # Parse what was found
-    # FIXME invalid dataset ID needs logging!
-    if val == 'DIAQC':
-        is_qc, dset_id = 'DIA', False
-    elif val == 'DDAQC':
-        is_qc, dset_id = 'DDA', False
-    elif val:
-        is_qc = False
-        try:
-            dset_id = int(val)
-        except ValueError:
-            dset_id = False
+    is_qc, dset_id = False, False
+    if error:
+        print(f'Error found parsing file {fname}: {error}')
     else:
-        # FIXME test also non-classified files
-        is_qc, dset_id = False, False
+        # Parse what was found
+        # FIXME invalid dataset ID needs logging!
+        if val == 'DIAQC':
+            is_qc, dset_id = 'DIA', False
+        elif val == 'DDAQC':
+            is_qc, dset_id = 'DDA', False
+        elif val:
+            is_qc = False
+            try:
+                dset_id = int(val)
+            except ValueError:
+                dset_id = False
+        print(f'File {fname} of type {ftypename} parsed, result: dset_id={dset_id}, is_qc={is_qc}, '
+                f'mstime={mstime_min}')
 
     url = urljoin(settings.KANTELEHOST, reverse('files:classifiedraw'))
-    print(f'File {fname} of type {ftypename} parsed, result: dset_id={dset_id}, is_qc={is_qc}, '
-            f'mstime={mstime_min}')
     postdata = {'token': token, 'fnid': fnid, 'qc': is_qc, 'dset_id': dset_id, 'mstime': mstime_min,
-            'task_id': self.request.id}
+            'error': error, 'task_id': self.request.id}
     try:
         update_db(url, json=postdata)
     except RuntimeError:
-        try:
-            self.retry(countdown=60)
-        except MaxRetriesExceededError:
-            raise
+        taskfail_update_db(self.request.id, msg='Could not update database after reading raw file')
 
 

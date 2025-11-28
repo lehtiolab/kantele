@@ -467,7 +467,7 @@ def classified_rawfile_treatment(request):
         return HttpResponseForbidden()
     try:
         token, fnid, is_qc_acqtype, dsid = data['token'], data['fnid'], data['qc'], data['dset_id']
-        mstime = data['mstime']
+        mstime, error = data['mstime'], data['error']
     except KeyError as error:
         return JsonResponse({'error': 'Bad request'}, status=400)
     upload = UploadToken.validate_token(token, [])
@@ -476,11 +476,17 @@ def classified_rawfile_treatment(request):
     sfloc = StoredFileLoc.objects.select_related('sfile__rawfile__producer',
             'sfile__filetype').get(pk=fnid)
 
-    MSFileData.objects.get_or_create(rawfile_id=sfloc.sfile.rawfile_id, defaults={'mstime': mstime})
-    already_classified_or_error = False
+    mstime = mstime if mstime else 0
+    success = not error
+    msf, cr = MSFileData.objects.get_or_create(rawfile_id=sfloc.sfile.rawfile_id,
+            defaults={'mstime': mstime, 'errmsg': error, 'success': success})
+    if not cr:
+        # Somehow script has already run! Maybe retried classify job
+        print(f'File {sfloc.sfile.filename} already classified')
+
     if sfloc.sfile.rawfile.claimed:
         # This file has already been classified or otherwise picked up by a fast user
-        already_classified_or_error = True
+        pass
     elif is_qc_acqtype:
         sfloc.sfile.rawfile.claimed = True
         sfloc.sfile.rawfile.usetype = UploadFileType.QC
@@ -498,19 +504,16 @@ def classified_rawfile_treatment(request):
                         pk=qc_mvjob['kwargs']['dstsfloc_id'])
         run_singlefile_qc(dst_sfloc, fss['server_id'], user_op, dsmodels.AcquisistionMode[is_qc_acqtype])
     elif dsid:
-        # Backup also done 
-        #process_new_nonqc_rawfile(sfn, dsid)
         # Make sure dataset exists
-        dsq = dsmodels.Dataset.objects.filter(pk=dsid)
+        dsq = dsmodels.Dataset.objects.filter(pk=dsid, locked=False)
         if not dsq.exists():
             # TODO this needs error logging? For now this is fine
             # File will not be classified and kept on upload
-            print(f'Classify task error for task {data["task_id"]} - dsid {dsid} doesnt exist')
-            already_classified_or_error = True
+            print(f'Classify task error for task {data["task_id"]} - dsid {dsid} doesnt exist '
+                    'or is locked')
         elif dsq.filter(datasetcomponentstate__dtcomp__component=dsmodels.DatasetUIComponent.FILES,
                 datasetcomponentstate__state=dsmodels.DCStates.NEW).exists():
             # Only accept files if file component state is NEW
-            # FIXME add dataset locked as criterion
             # Make sure users cant use this file for something else:
             sfloc.sfile.rawfile.claimed = True
             sfloc.sfile.rawfile.save()
@@ -522,14 +525,14 @@ def classified_rawfile_treatment(request):
                 mvjob_kw = {'dss_id': dss['pk'], 'sfloc_ids': [sfloc.pk],
                         'dstshare_id': dss['storageshare_id']}
                         
-                if error := check_job_error('rsync_dset_files_to_servershare', **mvjob_kw):
+                if rsjob_error := check_job_error('rsync_dset_files_to_servershare', **mvjob_kw):
                     # TODO this needs logging
-                    print(f'Classify task error for task {data["task_id"]} trying to queue rsync_dset_files_to_servershare - {error}')
-                    already_classified_or_error = True
+                    print(f'Classify task error for task {data["task_id"]} trying to queue '
+                            f'rsync_dset_files_to_servershare - {rsjob_error}')
                 else:
                     dss_mvjobs.append(mvjob_kw)
 
-            if not already_classified_or_error:
+            if not rsjob_error:
                 for mvkw in dss_mvjobs:
                     jwrap = jobmap['rsync_dset_files_to_servershare'](False)
                     # Calling job creation directly because creating a HOLD job
@@ -537,18 +540,14 @@ def classified_rawfile_treatment(request):
                     job, _cr = jm.Job.objects.get_or_create(state=jj.Jobstates.HOLD,
                             funcname='rsync_dset_files_to_servershare', kwargs=mvkw,
                             timestamp=timezone.now())
-                if not _cr:
-                    # Somehow script has already run!
-                    already_classified_or_error = True
         else:
             print(f'Classify task error for task {data["task_id"]} - dataset {dsid} already has '
                     'files, more files cannot be added automatically via rawfile classification')
-            already_classified_or_error = True
-    # FIXME the already classified thing does nothing??
 
-    # For all files, even those not assoc to QC/Dset
-    # FIXME the already classified thing does nothing??, handle errors
-    create_job('create_pdc_archive', sfloc_id=sfloc.pk, isdir=sfloc.sfile.filetype.is_folder)
+    if not error:
+        # Errored classify-file task has possibly corrupt file, manual check required so no
+        # backup yet
+        create_job('create_pdc_archive', sfloc_id=sfloc.pk, isdir=sfloc.sfile.filetype.is_folder)
     updated = jm.Task.objects.filter(asyncid=data['task_id']).update(state=taskstates.SUCCESS)
     return HttpResponse()
 
