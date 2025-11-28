@@ -313,7 +313,7 @@ def populate_files(dbfns):
                 if jobq.exists():
                     dssid = jobq.values('kwargs__dss_id').get()['kwargs__dss_id']
                     dso = dsmodels.DatasetOwner.objects.filter(dataset__datasetserver__id=dssid
-                            ).values('dataset_id', 'user__username').get()
+                            ).values('dataset_id', 'user__username').first()
                     it.update({'owner': dso['user__username'], 'dataset': dso['dataset_id']})
                     it['smallstatus'].append({'text': 'dataset pending', 'state': 'active'})
         popfiles[fn['pk']] = it
