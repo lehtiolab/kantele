@@ -510,7 +510,7 @@ def classify_msrawfile(self, token, fnid, ftypename, sharepath, path, fname):
     # TODO remove token
     path = os.path.join(sharepath, path)
     fpath = os.path.join(path, fname)
-    val, error, mstime_min = False, False, False
+    val, errors, mstime_min = False, [], False
     if ftypename == settings.THERMORAW:
         with TemporaryDirectory() as tmpdir:
             cmd = ['docker', 'run', '-v', f'{fpath}:/rawfile/{fname}', '-v', f'{tmpdir}:/outdir',
@@ -523,20 +523,20 @@ def classify_msrawfile(self, token, fnid, ftypename, sharepath, path, fname):
                     header = next(fp).strip().split(',')
                     line = next(fp).strip().split(',')
             except FileNotFoundError:
-                error = 'File reader did not generate report'
+                errors.append('File reader did not generate report')
             else:
                 try:
                     val = line[header.index(settings.THERMOKEY)]
                 except IndexError:
-                    error = f'Key {settings.THERMOKEY} not found in file read report'
-                try:
-                    with open(os.path.join(tmpdir, 'outfn.methods.txt'), encoding='utf-16') as fp:
-                        for line in fp:
-                            if line[:9] == 'Run time:':
-                                break
-                    mstime_min = float(re.match('Run time: ([0-9]+\.[0-9]+) \[min\]', line).group(1))
-                except (FileNotFoundError, ValueError, AttributeError):
-                    error = 'Could not determine MS time from file read report'
+                    errors.append(f'Key {settings.THERMOKEY} not found in file read report')
+            try:
+                with open(os.path.join(tmpdir, 'outfn.methods.txt'), encoding='utf-16') as fp:
+                    for line in fp:
+                        if line[:9] == 'Run time:':
+                            break
+                mstime_min = float(re.match('Run time: ([0-9]+\.[0-9]+) \[min\]', line).group(1))
+            except (FileNotFoundError, ValueError, AttributeError):
+                errors.append('Could not determine MS time from file read report')
         
     elif ftypename == settings.BRUKERRAW:
         # Get classification (dataset, QC) from XML metadata
@@ -544,50 +544,53 @@ def classify_msrawfile(self, token, fnid, ftypename, sharepath, path, fname):
         try:
             root = ET.parse(metafile).getroot()
         except FileNotFoundError:
-            error = 'File reader did not generate report'
+            errors.append('File reader did not generate report')
         except xml.etree.ElementTree.ParseError:
-            error = 'File reader report not valid XML'
-
-        ns = 'https://www.bruker.com/compass/metadata'
-        try:
-            sample_el = root.find(f'./{{{ns}}}Sample/SampleTable/Sample')
-            val = sample_el.attrib['Description']
-        except AttributeError:
-            error = 'No Sample element in file metadata'
-        except KeyError:
-            # In case Hystarmetadata has been changed to no longer include Description
-            val = False
-        if not val:
-            val = False
+            errors.append('File reader report not valid XML')
+        else:
+            ns = 'https://www.bruker.com/compass/metadata'
+            try:
+                sample_el = root.find(f'./{{{ns}}}Sample/SampleTable/Sample')
+                val = sample_el.attrib['Description']
+            except AttributeError:
+                errors.append('No Sample element in file metadata')
+            except KeyError:
+                # In case Hystarmetadata has been changed to no longer include Description
+                val = False
+            if not val:
+                val = False
 
         # Get MS time
         # Copy analysis tdf to tmpfile to prevent CIFS file locking issue
         with NamedTemporaryFile(mode='wb+') as fp:
-            shutil.copy(os.path.join(fpath, 'analysis.tdf'), fp.name)
             try:
+                shutil.copy(os.path.join(fpath, 'analysis.tdf'), fp.name)
                 con = sqlite3.Connection(fp.name)
+            except FileNotFoundError:
+                errors.append(f'Cannot find {settings.BRUKERRAW} file analysis.tdf')
             except sqlite3.OperationalError:
-                error = f'Cannot read {settings.BRUKERRAW} file spectra, perhaps wrong filetype'
-            try:
-                # Find last frame time (gradient length)
-                cur = con.execute('SELECT Time FROM Frames ORDER BY ROWID DESC LIMIT 1')
-            except sqlite3.DatabaseError as e:
-                if str(e) == 'file is not a database':
-                    error = f'Cannot read {settings.BRUKERRAW} file spectra, file corrupt?'
-                    
-                elif str(e) == 'no such table: Frames':
-                    error = 'Could not find correct DB table Frames in raw file'
-                else:
-                    error = f'Unexpected error reading file: {str(e)}'
-            try:
-                mstime_min = float(cur.fetchone()[0])
-            except (TypeError, ValueError):
-                error = 'Could not determine MS time for raw file'
-            con.close()
+                errors.append(f'Cannot read {settings.BRUKERRAW} file spectra, perhaps wrong filetype')
+            else:
+                try:
+                    # Find last frame time (gradient length)
+                    cur = con.execute('SELECT Time FROM Frames ORDER BY ROWID DESC LIMIT 1')
+                except sqlite3.DatabaseError as e:
+                    if str(e) == 'file is not a database':
+                        errors.append(f'Cannot read {settings.BRUKERRAW} file spectra, file corrupt?')
+                        
+                    elif str(e) == 'no such table: Frames':
+                        errors.append('Could not find correct DB table Frames in raw file')
+                    else:
+                        errors.append(f'Unexpected error reading file: {str(e)}')
+                try:
+                    mstime_min = float(cur.fetchone()[0])
+                except (TypeError, ValueError):
+                    errors.append('Could not determine MS time for raw file')
+                con.close()
 
     is_qc, dset_id = False, False
-    if error:
-        print(f'Error found parsing file {fname}: {error}')
+    if len(errors):
+        print(f'Errors found parsing file {fname}: {"; ".join(errors)}')
     else:
         # Parse what was found
         # FIXME invalid dataset ID needs logging!
@@ -606,7 +609,7 @@ def classify_msrawfile(self, token, fnid, ftypename, sharepath, path, fname):
 
     url = urljoin(settings.KANTELEHOST, reverse('files:classifiedraw'))
     postdata = {'token': token, 'fnid': fnid, 'qc': is_qc, 'dset_id': dset_id, 'mstime': mstime_min,
-            'error': error, 'task_id': self.request.id}
+            'error': '; '.join(errors), 'task_id': self.request.id}
     try:
         update_db(url, json=postdata)
     except RuntimeError:
