@@ -1390,7 +1390,7 @@ class TestDeleteFile(BaseFilesTest):
                 md5=self.registered_raw.source_md5, filetype_id=self.ft.id)
         self.sfloc = rm.StoredFileLoc.objects.create(sfile=self.sfile, servershare_id=self.sstmp.id,
                 path='', purged=False, active=True)
-        rm.PDCBackedupFile.objects.create(success=True, storedfile=self.sfile, pdcpath='')
+        self.pdcf = rm.PDCBackedupFile.objects.create(success=True, storedfile=self.sfile, pdcpath='')
 
     def test_fails(self):
         resp = self.cl.get(self.url)
@@ -1400,6 +1400,22 @@ class TestDeleteFile(BaseFilesTest):
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': -1})
         self.assertEqual(resp.status_code, 404)
         self.assertEqual(resp.json()['error'], 'File does not exist, maybe it is deleted?')
+
+    def test_noarchive_badfile(self):
+        self.pdcf.delete()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.sfile.pk, 'noarchive': True})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'You are not authorized to remove files of type '
+                f'{rm.UploadFileType.RAWFILE.label}')
+        self.user.is_staff = True
+        self.user.save()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.sfile.pk, 'noarchive': True})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(jm.Job.objects.filter(funcname='create_pdc_archive').exists())
+        self.assertTrue(jm.Job.objects.filter(funcname='purge_files',
+            kwargs__sfloc_ids=[self.sfloc.pk]).exists())
 
     def test_backup_delete_dset_file(self):
         '''File is in a dataset and on remote, so is not on backup capable server'''
@@ -1872,3 +1888,62 @@ class TestAutoDelete(BaseIntegrationTest):
         self.assertFalse(ana3.deleted)
         ana3.refresh_from_db()
         self.assertTrue(ana3.deleted)
+
+
+class TestArchiveFile(BaseFilesTest):
+    url = '/files/archive/'
+
+    def setUp(self):
+        super().setUp()
+        self.sfile = rm.StoredFile.objects.create(rawfile=self.registered_raw, filename=self.registered_raw.name,
+                md5=self.registered_raw.source_md5, filetype_id=self.ft.id)
+        self.sfloc = rm.StoredFileLoc.objects.create(sfile=self.sfile, servershare_id=self.sstmp.id,
+                path='', purged=False, active=True)
+
+    def test_fails(self):
+        resp = self.cl.get(self.url)
+        self.assertEqual(resp.status_code, 405)
+        resp = self.cl.post(self.url, content_type='application/json', data={'hello': 'test'})
+        self.assertEqual(resp.status_code, 400)
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': -1})
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()['error'], 'File does not exist')
+
+
+class TestArchiveFileWithJob(BaseIntegrationTest):
+    url = '/files/archive/'
+
+    def setUp(self):
+        super().setUp()
+        self.registered_raw = rm.RawFile.objects.create(name='file1', producer=self.prod,
+                source_md5='b7d55c322fa09ecd8bea141082c5419d', size=100, date=timezone.now(),
+                claimed=False, usetype=rm.UploadFileType.RAWFILE)
+        self.sfile = rm.StoredFile.objects.create(rawfile=self.registered_raw, filename=self.registered_raw.name,
+                md5=self.registered_raw.source_md5, filetype_id=self.ft.id)
+        self.sfloc = rm.StoredFileLoc.objects.create(sfile=self.sfile, servershare_id=self.sstmp.id,
+                path='', purged=False, active=True)
+
+    def test_archive(self):
+        # Archive a file
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.sfile.pk})
+        self.assertEqual(resp.status_code, 200)
+        job = jm.Job.objects.get(funcname='create_pdc_archive', kwargs__sfloc_id=self.sfloc.pk)
+        self.assertTrue(job.state, jj.Jobstates.PENDING)
+        self.run_job()
+        job.refresh_from_db()
+        self.assertTrue(job.state, jj.Jobstates.PROCESSING)
+
+        # Already archived
+        rm.PDCBackedupFile.objects.filter(storedfile=self.sfile).update(success=True)
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.sfile.pk})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'File is already in archive')
+        # File is deleted
+        rm.PDCBackedupFile.objects.all().delete()
+        self.sfloc.delete()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.sfile.pk})
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()['error'], 'Cannot find copy of file on disk to archive')

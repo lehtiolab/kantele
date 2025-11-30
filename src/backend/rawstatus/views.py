@@ -682,6 +682,27 @@ def file_uploaded(request):
         'path': sfl.path})
 
 
+@login_required
+@require_POST
+def archive_file(request):
+    data = json.loads(request.body.decode('utf-8'))
+    try:
+        sfid = data['item_id']
+    except KeyError:
+        return JsonResponse({'error': 'Parameters not passed'}, status=400)
+    if sf := StoredFile.objects.filter(pk=sfid):
+        if sf.filter(pdcbackedupfile__success=True):
+            return JsonResponse({'error': 'File is already in archive'}, status=400)
+        elif sfl := StoredFileLoc.objects.filter(sfile_id=sfid, active=True).values('pk'):
+            isdir = sf.values('filetype__is_folder').get()['filetype__is_folder']
+            create_job('create_pdc_archive', sfloc_id=sfl.get()['pk'], isdir=isdir)
+            return JsonResponse({})
+        else:
+            return JsonResponse({'error': 'Cannot find copy of file on disk to archive'}, status=404)
+    else:
+        return JsonResponse({'error': 'File does not exist'}, status=404)
+
+
 def process_file_confirmed_ready(rfn, sfn, sfloc, upload, desc):
     """Processing of backup, QC, library/userfile after transfer has succeeded
     (MD5 checked) for newly arrived MS other raw data files (not for analysis etc)
@@ -1313,9 +1334,8 @@ def delete_file(request):
         return JsonResponse({'error': f'You are not authorized to remove files of type {ft}'},
                 status=403)
 
-
     missing_backup = (not hasattr(sfile, 'pdcbackedupfile') or not sfile.pdcbackedupfile.success or 
-            sfile.pdcbackedupfile.deleted)
+            sfile.pdcbackedupfile.deleted) and not data.get('noarchive', False)
     if not hasattr(sfile, 'mzmlfile') and missing_backup:
         if sfl_q_bup := sfloc_q.filter(servershare__fileservershare__server__can_backup=True,
                 servershare__active=True, servershare__fileservershare__server__active=True):

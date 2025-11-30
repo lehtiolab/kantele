@@ -14,6 +14,7 @@ urlpatterns = [
    path('rename/', views.rename_file),
    path('external/scan/', views.scan_raws_tmp),
    path('external/import/', views.import_external_data),
+   path('archive/', views.archive_file),
    path('delete/', views.delete_file),
    path('storage/', views.update_sfile_storage),
    path('datainflow/', views.inflow_page, name='inflow'),
