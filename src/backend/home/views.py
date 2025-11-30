@@ -319,7 +319,7 @@ def populate_files(dbfns):
                     it['smallstatus'].append({'text': 'dataset pending', 'state': 'active'})
 
         if fn['rawfile__usetype'] == filemodels.UploadFileType.RAWFILE:
-            if filemodels.MSFileData.objects.filter(rawfile=fn['rawfile_id'], success=False):
+            if filemodels.MSFileData.objects.filter(rawfile_id=fn['rawfile_id'], success=False):
                 it['smallstatus'].append({'text': 'reading failed'})
                 it['actions'].extend(['purge', 'keep'])
             elif not fn['pdcbackedupfile__success']:
@@ -877,6 +877,10 @@ def get_file_info(request, file_id):
         desc = sfile.libraryfile.description
     elif hasattr(sfile, 'userfile'):
         desc = sfile.userfile.description
+    elif msferr := filemodels.MSFileData.objects.filter(rawfile=sfile.rawfile_id, success=False):
+        desc = msferr.errmsg
+    elif msf := filemodels.MSFileData.objects.filter(rawfile=sfile.rawfile_id, success=True):
+        desc = f'MS time: {msf.get().mstime}'
     else:
         desc = False
     info['description'] = desc
