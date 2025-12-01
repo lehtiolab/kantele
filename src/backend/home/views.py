@@ -283,6 +283,7 @@ def populate_files(dbfns):
               'job_ids': [x['job_id'] for x in currentjobs],
               'deleted': fn['deleted'],
               'smallstatus': [],
+              'actions': [],
              }
         it['backup'] = fn['pdcbackedupfile__success']
         if fn['rawfile__usetype'] == filemodels.UploadFileType.QC:
@@ -316,6 +317,14 @@ def populate_files(dbfns):
                             ).values('dataset_id', 'user__username').first()
                     it.update({'owner': dso['user__username'], 'dataset': dso['dataset_id']})
                     it['smallstatus'].append({'text': 'dataset pending', 'state': 'active'})
+
+        if fn['rawfile__usetype'] == filemodels.UploadFileType.RAWFILE:
+            if filemodels.MSFileData.objects.filter(rawfile_id=fn['rawfile_id'], success=False):
+                it['smallstatus'].append({'text': 'reading failed'})
+                it['actions'].extend(['purge', 'keep'])
+            elif not fn['pdcbackedupfile__success']:
+                it['actions'].extend(['backup'])
+
         popfiles[fn['pk']] = it
     order = [x['id'] for x in sorted(popfiles.values(), key=lambda x: x['date'], reverse=True)]
     return {'items': popfiles, 'order': order}
@@ -868,6 +877,10 @@ def get_file_info(request, file_id):
         desc = sfile.libraryfile.description
     elif hasattr(sfile, 'userfile'):
         desc = sfile.userfile.description
+    elif msferr := filemodels.MSFileData.objects.filter(rawfile=sfile.rawfile_id, success=False):
+        desc = msferr.errmsg
+    elif msf := filemodels.MSFileData.objects.filter(rawfile=sfile.rawfile_id, success=True):
+        desc = f'MS time: {msf.get().mstime}'
     else:
         desc = False
     info['description'] = desc

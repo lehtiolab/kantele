@@ -24,7 +24,15 @@ const tablefields = [
   {id: 'backup', name: 'Backed up', type: 'bool', multi: false},
   {id: 'owner', name: 'Owner', type: 'str', multi: false},
   {id: 'ftype', name: 'Type', type: 'str', multi: false},
+  {id: 'actions', name: 'Actions', type: 'button', multi: true},
 ];
+
+
+const actionmap = {
+  purge: deleteFileNoarchive,
+  keep: keepFile,
+  backup: keepFile,
+}
 
 //const statecolors = {
 //  stored: false,
@@ -70,6 +78,29 @@ async function refreshFile(fnid) {
   files = files;
 }
 
+
+async function deleteFileNoarchive(sfid) {
+  const url = 'files/delete/';
+  const resp = await postJSON(url, {sfid: sfid, noarchive: true});
+  if (!resp.ok) {
+    const msg = `Something went wrong deleting file ${sfid}: ${resp.error}`;
+    notif.errors[msg] = 1;
+  } else {
+    const msg = `File ${itemid} queued for deleting`;
+    notif.messages[msg] = 1;
+  }
+  refreshFile(sfid);
+  updateNotif();
+}
+
+
+async function keepFile(fnid) {
+  await treatItems('files/archive/', 'file', 'backing up', fnid, notif);
+  refreshFile(fnid);
+  updateNotif();
+}
+
+
 async function archiveFiles() {
   for (let fnid of selectedFiles) {
     await treatItems('files/delete/', 'file','archiving', fnid, notif);
@@ -78,9 +109,6 @@ async function archiveFiles() {
   updateNotif();
 }
 
-
-function purgeFiles() {
-}
 
 </script>
 
@@ -101,6 +129,8 @@ function purgeFiles() {
   getdetails={getFileDetails}
   fields={tablefields}
   inactive={['deleted']}
+  allowedActions={Object.keys(actionmap)}
+  on:rowAction={e => actionmap[e.detail.action](e.detail.id)}
   on:detailview={showDetails}
   />
 

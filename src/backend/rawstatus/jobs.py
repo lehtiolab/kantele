@@ -188,6 +188,23 @@ class CreatePDCArchive(SingleFileJob):
     task = tasks.pdc_archive
     queue = settings.QUEUE_BACKUP
 
+    def on_create_addkwargs(self, **kwargs):
+        '''Create Archive entries'''
+        if sfloc_q := self.oncreate_getfiles_query(**kwargs).exclude(sfile__mzmlfile__isnull=False
+                ).exclude(sfile__pdcbackedupfile__success=True, sfile__pdcbackedupfile__deleted=False):
+            sfloc = sfloc_q.values('sfile_id', 'sfile__rawfile__producer__msinstrument',
+                    'servershare_id', 'sfile__filetype__is_folder').get()
+            if fss := rm.FileserverShare.objects.filter(server__can_backup=True,
+                    share=sfloc['servershare_id']).values('path').first():
+                isdir = (sfloc['sfile__rawfile__producer__msinstrument'] is not None and
+                        sfloc['sfile__filetype__is_folder'])
+                rm.PDCBackedupFile.objects.get_or_create(storedfile_id=sfloc['sfile_id'],
+                        is_dir=isdir, defaults={'pdcpath': '', 'success': False})
+            else:
+                raise RuntimeError('Cannot find server to backup file from, please'
+                        'configure system for backups')
+        return {}
+
     def process(self, **kwargs):
         taskargs = upload_file_pdc_runtask(self.getfiles_query(**kwargs).get(), isdir=kwargs['isdir'])
         if taskargs:
@@ -220,12 +237,26 @@ class RestoreFromPDC(SingleFileJob):
 
 
 class BackupPDCDataset(DatasetJob):
-    # Deprecate, files are backed up when incoming
+    # Deprecate, files are backed up when incoming, otherwise we can mass backup
+    # them individually
     """Transfers all raw files in dataset to backup"""
     refname = 'backup_dataset'
     task = tasks.pdc_archive
     queue = settings.QUEUE_BACKUP
     
+    def on_create_addkwargs(self, **kwargs):
+        for sfloc in self.oncreate_getfiles_query(**kwargs).exclude(sfile__mzmlfile__isnull=False
+                ).exclude(sfile__pdcbackedupfile__success=True, sfile__pdcbackedupfile__deleted=False):
+            fss = rm.FileserverShare.objects.filter(server__can_backup=True,
+                    share=sfloc.servershare).values('path').first()
+            if not fss:
+                raise RuntimeError('Cannot find server to backup file from, please'
+                        'configure system for backups')
+            isdir = (hasattr(sfloc.sfile.rawfile.producer, 'msinstrument') and sfloc.sfile.filetype.is_folder)
+            pdcfile, _cr = rm.PDCBackedupFile.objects.get_or_create(storedfile_id=sfloc.sfile_id,
+                    is_dir=isdir, defaults={'pdcpath': '', 'success': False})
+            return {}
+
     def process(self, **kwargs):
         for fn in self.getfiles_query(**kwargs).exclude(sfile__mzmlfile__isnull=False).exclude(
                 sfile__pdcbackedupfile__success=True, sfile__pdcbackedupfile__deleted=False):

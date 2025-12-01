@@ -300,6 +300,8 @@ class StoredFileLoc(models.Model):
 
 class MSFileData(models.Model):
     rawfile = models.OneToOneField(RawFile, on_delete=models.CASCADE)
+    success = models.BooleanField(default=True)
+    errmsg = models.TextField()
     mstime = models.FloatField()
 
 

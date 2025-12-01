@@ -435,7 +435,6 @@ class TestUploadScript(BaseIntegrationTest):
             meta_xml = template.substitute({'BRUKEY': settings.BRUKERKEY, 'DESC': 'DIAQC'})
         with open(os.path.join(fullp, 'HyStarMetadata.xml'), 'w') as fp: 
             fp.write(meta_xml)
-        old_raw = rm.RawFile.objects.last()
         tmpdir = mkdtemp()
         outbox = os.path.join(tmpdir, 'testoutbox')
         os.makedirs(outbox, exist_ok=True)
@@ -761,6 +760,119 @@ class TestUploadScript(BaseIntegrationTest):
         self.oldds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles).update(
                 state=dm.DCStates.NEW)
         self.do_transfer_dset_assoc(ds_exists=True, ds_hasfiles=False)
+
+    def test_classify_fail_nometadata(self):
+        # This file is of filetype self.ft which is is_folder
+        self.f3raw.delete()
+        self.get_token()
+        fpath = os.path.join(self.rootdir, self.newstorctrl.path, self.f3sss.path) 
+        fullp = os.path.join(fpath, self.f3sf.filename)
+        old_raw = rm.RawFile.objects.last()
+        sp = self.run_script(fullp)
+        # Give time for running script, so job is created before running it etc
+        sleep(2)
+        new_raw = rm.RawFile.objects.last() # FIXME
+        sf = rm.StoredFile.objects.last()
+        sss = sf.storedfileloc_set.get()
+        # Run rsync
+        self.run_job()
+        sf.refresh_from_db()
+        # Delete classify input xml and run classify
+        os.unlink(os.path.join(self.rootdir, self.inboxctrl.path, sss.path, sf.filename, 'HyStarMetadata.xml'))
+        self.run_job()
+        try:
+            spout, sperr = sp.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            sp.terminate()
+            # Properly kill children since upload.py uses multiprocessing
+            os.killpg(os.getpgid(sp.pid), signal.SIGTERM)
+            spout, sperr = sp.communicate()
+            self.fail()
+        cjob = jm.Job.objects.filter(funcname='classify_msrawfile', kwargs__sfloc_id=sss.pk).get()
+        new_raw.refresh_from_db()
+        self.assertEqual(cjob.task_set.get().state, states.SUCCESS)
+        classifytask = jm.Task.objects.filter(job__funcname='classify_msrawfile', job__kwargs__sfloc_id=sss.pk)
+        self.assertEqual(classifytask.filter(state=states.SUCCESS).count(), 1)
+        self.assertFalse(new_raw.claimed) # not QC
+        self.assertFalse(jm.Job.objects.filter(funcname='create_pdc_archive').exists())
+        self.assertTrue(sf.checked)
+        self.assertTrue(rm.MSFileData.objects.filter(rawfile=new_raw, mstime=123.456, success=False,
+            errmsg='File reader did not generate report').exists())
+
+        zipboxpath = os.path.join(os.getcwd(), 'zipbox', f'{self.f3sf.filename}.zip')
+        explines = [f'Token OK, expires on {self.token["expires"]}',
+                'Registering 1 new file(s)', 
+                f'File {new_raw.name} has ID {new_raw.pk}, instruction: transfer',
+                f'Uploading {zipboxpath} to {self.live_server_url}',
+                f'Succesful transfer of file {zipboxpath}',
+                ]
+        outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
+                if 'invalid escape sequence' not in x and 'r' in x]
+        for out, exp in zip(outlines, explines):
+            out = re.sub('.* - INFO - .producer.main - ', '', out)
+            out = re.sub('.* - INFO - .producer.worker - ', '', out)
+            out = re.sub('.* - INFO - root - ', '', out)
+            self.assertEqual(out, exp)
+        lastexp = f'File {new_raw.name} has ID {new_raw.pk}, instruction: done'
+        self.assertEqual(re.sub('.* - INFO - .producer.worker - ', '', outlines[-1]), lastexp)
+
+    def test_classify_fail_corrupt(self):
+        # This file is of filetype self.ft which is is_folder
+        # Delete metadata and also analysis.tdf to simulate a "bad" raw file
+        self.f3raw.delete()
+        self.get_token()
+        fpath = os.path.join(self.rootdir, self.newstorctrl.path, self.f3sss.path) 
+        fullp = os.path.join(fpath, self.f3sf.filename)
+        old_raw = rm.RawFile.objects.last()
+        sp = self.run_script(fullp)
+        # Give time for running script, so job is created before running it etc
+        sleep(2)
+        new_raw = rm.RawFile.objects.last() # FIXME
+        sf = rm.StoredFile.objects.last()
+        sss = sf.storedfileloc_set.get()
+        # Run rsync
+        self.run_job()
+        sf.refresh_from_db()
+        # Delete classify input xml and run classify
+        os.unlink(os.path.join(self.rootdir, self.inboxctrl.path, sss.path, sf.filename, 'HyStarMetadata.xml'))
+        os.unlink(os.path.join(self.rootdir, self.inboxctrl.path, sss.path, sf.filename, 'analysis.tdf'))
+        self.run_job()
+        try:
+            spout, sperr = sp.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            sp.terminate()
+            # Properly kill children since upload.py uses multiprocessing
+            os.killpg(os.getpgid(sp.pid), signal.SIGTERM)
+            spout, sperr = sp.communicate()
+            self.fail()
+        cjob = jm.Job.objects.filter(funcname='classify_msrawfile', kwargs__sfloc_id=sss.pk).get()
+        new_raw.refresh_from_db()
+        self.assertEqual(cjob.task_set.get().state, states.SUCCESS)
+        classifytask = jm.Task.objects.filter(job__funcname='classify_msrawfile', job__kwargs__sfloc_id=sss.pk)
+        self.assertEqual(classifytask.filter(state=states.SUCCESS).count(), 1)
+        self.assertFalse(new_raw.claimed) # not QC/dset
+        self.assertFalse(jm.Job.objects.filter(funcname='create_pdc_archive').exists())
+        self.assertTrue(sf.checked)
+        self.assertTrue(rm.MSFileData.objects.filter(rawfile=new_raw, mstime=0, success=False,
+            errmsg=f'File reader did not generate report; Cannot find {settings.BRUKERRAW} file '
+            'analysis.tdf').exists())
+
+        zipboxpath = os.path.join(os.getcwd(), 'zipbox', f'{self.f3sf.filename}.zip')
+        explines = [f'Token OK, expires on {self.token["expires"]}',
+                'Registering 1 new file(s)', 
+                f'File {new_raw.name} has ID {new_raw.pk}, instruction: transfer',
+                f'Uploading {zipboxpath} to {self.live_server_url}',
+                f'Succesful transfer of file {zipboxpath}',
+                ]
+        outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
+                if 'invalid escape sequence' not in x and 'r' in x]
+        for out, exp in zip(outlines, explines):
+            out = re.sub('.* - INFO - .producer.main - ', '', out)
+            out = re.sub('.* - INFO - .producer.worker - ', '', out)
+            out = re.sub('.* - INFO - root - ', '', out)
+            self.assertEqual(out, exp)
+        lastexp = f'File {new_raw.name} has ID {new_raw.pk}, instruction: done'
+        self.assertEqual(re.sub('.* - INFO - .producer.worker - ', '', outlines[-1]), lastexp)
 
 #    def test_libfile(self):
 #    
@@ -1278,7 +1390,7 @@ class TestDeleteFile(BaseFilesTest):
                 md5=self.registered_raw.source_md5, filetype_id=self.ft.id)
         self.sfloc = rm.StoredFileLoc.objects.create(sfile=self.sfile, servershare_id=self.sstmp.id,
                 path='', purged=False, active=True)
-        rm.PDCBackedupFile.objects.create(success=True, storedfile=self.sfile, pdcpath='')
+        self.pdcf = rm.PDCBackedupFile.objects.create(success=True, storedfile=self.sfile, pdcpath='')
 
     def test_fails(self):
         resp = self.cl.get(self.url)
@@ -1288,6 +1400,22 @@ class TestDeleteFile(BaseFilesTest):
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': -1})
         self.assertEqual(resp.status_code, 404)
         self.assertEqual(resp.json()['error'], 'File does not exist, maybe it is deleted?')
+
+    def test_noarchive_badfile(self):
+        self.pdcf.delete()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.sfile.pk, 'noarchive': True})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'You are not authorized to remove files of type '
+                f'{rm.UploadFileType.RAWFILE.label}')
+        self.user.is_staff = True
+        self.user.save()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.sfile.pk, 'noarchive': True})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(jm.Job.objects.filter(funcname='create_pdc_archive').exists())
+        self.assertTrue(jm.Job.objects.filter(funcname='purge_files',
+            kwargs__sfloc_ids=[self.sfloc.pk]).exists())
 
     def test_backup_delete_dset_file(self):
         '''File is in a dataset and on remote, so is not on backup capable server'''
@@ -1760,3 +1888,62 @@ class TestAutoDelete(BaseIntegrationTest):
         self.assertFalse(ana3.deleted)
         ana3.refresh_from_db()
         self.assertTrue(ana3.deleted)
+
+
+class TestArchiveFile(BaseFilesTest):
+    url = '/files/archive/'
+
+    def setUp(self):
+        super().setUp()
+        self.sfile = rm.StoredFile.objects.create(rawfile=self.registered_raw, filename=self.registered_raw.name,
+                md5=self.registered_raw.source_md5, filetype_id=self.ft.id)
+        self.sfloc = rm.StoredFileLoc.objects.create(sfile=self.sfile, servershare_id=self.sstmp.id,
+                path='', purged=False, active=True)
+
+    def test_fails(self):
+        resp = self.cl.get(self.url)
+        self.assertEqual(resp.status_code, 405)
+        resp = self.cl.post(self.url, content_type='application/json', data={'hello': 'test'})
+        self.assertEqual(resp.status_code, 400)
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': -1})
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()['error'], 'File does not exist')
+
+
+class TestArchiveFileWithJob(BaseIntegrationTest):
+    url = '/files/archive/'
+
+    def setUp(self):
+        super().setUp()
+        self.registered_raw = rm.RawFile.objects.create(name='file1', producer=self.prod,
+                source_md5='b7d55c322fa09ecd8bea141082c5419d', size=100, date=timezone.now(),
+                claimed=False, usetype=rm.UploadFileType.RAWFILE)
+        self.sfile = rm.StoredFile.objects.create(rawfile=self.registered_raw, filename=self.registered_raw.name,
+                md5=self.registered_raw.source_md5, filetype_id=self.ft.id)
+        self.sfloc = rm.StoredFileLoc.objects.create(sfile=self.sfile, servershare_id=self.sstmp.id,
+                path='', purged=False, active=True)
+
+    def test_archive(self):
+        # Archive a file
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.sfile.pk})
+        self.assertEqual(resp.status_code, 200)
+        job = jm.Job.objects.get(funcname='create_pdc_archive', kwargs__sfloc_id=self.sfloc.pk)
+        self.assertTrue(job.state, jj.Jobstates.PENDING)
+        self.run_job()
+        job.refresh_from_db()
+        self.assertTrue(job.state, jj.Jobstates.PROCESSING)
+
+        # Already archived
+        rm.PDCBackedupFile.objects.filter(storedfile=self.sfile).update(success=True)
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.sfile.pk})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'File is already in archive')
+        # File is deleted
+        rm.PDCBackedupFile.objects.all().delete()
+        self.sfloc.delete()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.sfile.pk})
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()['error'], 'Cannot find copy of file on disk to archive')
