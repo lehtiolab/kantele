@@ -295,7 +295,8 @@ def populate_files(dbfns):
             it['owner'] = fn['rawfile__producer__name']
         elif fn['rawfile__datasetrawfile']:
             it['owner'] = dsmodels.DatasetOwner.objects.filter(
-                    dataset__id=fn['rawfile__datasetrawfile__dataset']).values('user__username').first()
+                    dataset__id=fn['rawfile__datasetrawfile__dataset']).values('user__username'
+                            ).first()['user__username']
             it['dataset'] = fn['rawfile__datasetrawfile__dataset']
         elif fn['rawfile__usetype'] == filemodels.UploadFileType.ANALYSIS:
             anas = anmodels.Analysis.objects.filter(analysisresultfile__sfile_id=fn['pk']
@@ -322,7 +323,7 @@ def populate_files(dbfns):
             if filemodels.MSFileData.objects.filter(rawfile_id=fn['rawfile_id'], success=False):
                 it['smallstatus'].append({'text': 'reading failed'})
                 it['actions'].extend(['purge', 'keep'])
-            elif not fn['pdcbackedupfile__success']:
+            elif fn['pdcbackedupfile__success'] is None:
                 it['actions'].extend(['backup'])
 
         popfiles[fn['pk']] = it
