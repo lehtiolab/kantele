@@ -1763,7 +1763,11 @@ def save_or_update_files(data, user_id):
                 # TODO maybe first rsync them back to tmpshare, in case
                 # they are "released"
                 create_job('remove_dset_files_servershare', dss_id=dss['pk'], sfloc_ids=dssrmsfl)
+        # All files deleted, so mark inactive and deleted (there would not exist files
+        # in INBOX for a dset-associated file)
         rmsfl.update(active=False)
+        filemodels.StoredFile.objects.filter(pk__in=removed_ids, checked=True, rawfile__claimed=True
+                ).update(deleted=True)
         models.DatasetRawFile.objects.filter(
             dataset_id=dset_id, rawfile__storedfile__id__in=removed_ids).delete()
         filemodels.RawFile.objects.filter(storedfile__pk__in=removed_ids).update(

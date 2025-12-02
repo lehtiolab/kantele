@@ -1163,6 +1163,10 @@ def update_sfile_storage(request):
                 dstpath = analysis.get_public_output_dir()
             else:
                 dstpath = analysis.base_rundir
+        elif (ServerShare.objects.values('function').get(pk=dstshare_id)['function'] 
+                == ShareFunction.INBOX and sfile.rawfile.usetype == UploadFileType.RAWFILE):
+            # file without dataset, e.g. from backup to tmp
+            dstpath = ServerShare.get_inbox_path()
         else:
             raise RuntimeError('Cannot determine path to update file to')
         return dstpath
