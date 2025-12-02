@@ -1703,7 +1703,6 @@ def save_or_update_files(data, user_id):
     alldss = dset.datasetserver_set.filter(active=True).values('pk', 'storageshare_id', 'storage_loc_ui')
     addsfl = filemodels.StoredFileLoc.objects.filter(sfile_id__in=added_fnids, sfile__checked=True,
             servershare__function=filemodels.ShareFunction.INBOX)
-    # TODO what if addsfl files no longer on tmpshare? Need to retrieve from backup
     pre_addsfl = addsfl.filter(sfile__rawfile__claimed=False)
     rmsfl = filemodels.StoredFileLoc.objects.filter(sfile_id__in=removed_ids, sfile__checked=True,
             sfile__rawfile__claimed=True)
@@ -1724,6 +1723,11 @@ def save_or_update_files(data, user_id):
                     dstshare_id=dss['storageshare_id']):
                 return {'error': joberr}, 403
 
+        if restore_sfl_q := addsfl.filter(active=False):
+            for restore_sfl in restore_sfl_q.values('pk'):
+                if buperr := check_job_error('restore_from_pdc_archive', sfloc_id=restore_sfl['pk']):
+                    return {'error': buperr}, 403
+
     if removed_ids:
         if len(removed_ids) > filemodels.StoredFile.objects.filter(pk__in=removed_ids,
                 rawfile__datasetrawfile__dataset_id=dset_id).count():
@@ -1733,14 +1737,21 @@ def save_or_update_files(data, user_id):
             return {'error': 'Cannot find some of the files asked to remove on storage. '
                     'This should not happen. Contact admin' }, 403
 
+
     # Errors checked, now store DB records and queue move jobs
     if added_fnids:
+        # First restore from backup
+        addsfiles = filemodels.StoredFile.objects.filter(pk__in=added_fnids)
+        for restore_sfl in restore_sfl_q.values('pk'):
+            create_job_without_check('restore_from_pdc_archive', sfloc_id=restore_sfl['pk'])
+        # Now they are all active and not deleted
+        if restore_sfl_q.update(active=True):
+            addsfiles.update(deleted=False)
+
         # First add datasetrawfile - then create job, since waiting-for-files depends on
         # datasetrawfiles at job creation time
-        models.DatasetRawFile.objects.bulk_create([
-            models.DatasetRawFile(dataset_id=dset_id, rawfile_id=rfnid['rawfile_id'])
-            for rfnid in filemodels.StoredFile.objects.filter(pk__in=added_fnids
-                ).values('rawfile_id')])
+        models.DatasetRawFile.objects.bulk_create([models.DatasetRawFile(dataset_id=dset_id,
+            rawfile_id=rfnid['rawfile_id']) for rfnid in addsfiles.values('rawfile_id')])
         models.ProjectLog.objects.create(project_id=dset.runname.experiment.project_id,
                 level=models.ProjLogLevels.INFO,
                 message=f'User {user_id} added files {",".join([str(x) for x in added_fnids])} '
