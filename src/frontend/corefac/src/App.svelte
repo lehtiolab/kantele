@@ -28,12 +28,10 @@ let all_enzymes = cf_init_data.enzymes;
 let tabshow;
 
 // Proj table
-// let
 let loadedProjects = {};
 $: { Object.keys(loadedProjects).length ? replot() : false ;
 }
 let selectedProjs = false;
-//let notif = {errors: {}, messages: {}};
 let addItem;
 const inactive = ['inactive'];
 const fixedbuttons = [
@@ -233,7 +231,6 @@ async function replot() {
   let individual_proj_plot;
   const url = 'dashboard/projects/'
   const active_projid = Object.entries(loadedProjects)
-    .filter(kv => !kv[1].inactive)
     .map(kv => kv[0]);
   const resp  = await postJSON(url, {proj_ids: active_projid});
   if (!resp.ok) {
@@ -241,12 +238,15 @@ async function replot() {
     return;
   }
 
-  let perProject = resp.per_proj.map(x => Object.assign(x, {start: new Date(x.start), end: new Date(x.end)}))
+  const perProject = resp.per_proj.map(x => Object.assign(x, {start: new Date(x.start), end: new Date(x.end), endts: Date.parse(x.end)}))
+  const today = new Date(resp.today);
+  const firstdate = new Date(resp.firstdate);
 
   try {
     individual_proj_plot = 
       Plot.plot({
-          marginLeft: 130,
+          marginRight: 130,
+          marginRight:150,
           axis: null,
           color: {
                  legend: true,
@@ -262,17 +262,38 @@ async function replot() {
                         x2: "end",
                         y: "dset",
                         fill: "stage",
-                  opacity: 0.3,
-                        //sort: {y: "x1"}
+                        opacity: 0.3,
                       }),
+                Plot.axisY({
+                  text: (y) => perProject.find((d) => d.first && d.dset === y)?.owner,
+                  tickSize: 0,
+                  anchor: 'right',
+                  label: null,
+                }),
                 Plot.text(perProject, {
                   filter: (d) => d.first,
-                        x: "start",
+                        x: firstdate,
                         y: "dset",
-                        text: "proj",
-                        textAnchor: "end",
-                        dx: -3
-                      })
+                        text: 'proj',
+                        textAnchor: "start",
+                        dx: 5,
+                      }),
+
+                Plot.text(perProject, {
+                  filter: (d) => d.first && resp.closedates[d.pid],
+                    x: (d) => new Date(resp.closedates[d.pid]),
+                    y: "dset",
+                    //U+2705
+                    text: (d) => '✅',
+                    }),
+                Plot.text(perProject, {
+                  filter: (d) => d.first && !resp.closedates[d.pid],
+                    x: (d) => today,
+                    y: "dset",
+                    //U+23F1
+                    text: (d) => '⏳',
+                    dx: -10,
+                    }),
               ]
       })
 

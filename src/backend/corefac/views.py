@@ -8,7 +8,8 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.views.decorators.http import require_GET, require_POST
 from django.http import JsonResponse
 from django.shortcuts import render
-from django.db.models import Q
+from django.db.models import Q, Max
+from django.utils import timezone
 
 from corefac import models as cm
 from rawstatus import models as rm
@@ -76,102 +77,141 @@ def get_project_plotdata(request):
 
     data = json.loads(request.body.decode('utf-8'))
 
-    perprojects = []
+    # For all closed projects, get the last log date where the closing happened
+    # last date is done by group by proj_id, annotate Max(date)
+    closeprojdates = {}
     datefmt = '%Y-%m-%dT%H:%M:%S'
-    today = datetime.strftime(datetime.now(), datefmt)
+    for closeplog in dm.ProjectLog.objects.filter(project_id__in=data['proj_ids'],
+            project__active=False, level=dm.ProjLogLevels.CLOSE).values('project_id'
+                    ).annotate(lastclose=Max('date')):
+        closeprojdates[closeplog['project_id']] = datetime.strftime(closeplog['lastclose'], datefmt)
+    #for openproj in dm.Project.objects.filter(pk__in=data['proj_ids'], active=True).values('pk'):
+    #    closeprojdates[openproj['pk']] = False
+
+    perprojects = []
+    firstdate = timezone.now()
+    today = timezone.now()
     for dp in dm.Dataset.objects.filter(runname__experiment__project_id__in=data['proj_ids']
             ).values('pk', 'locked', 'runname__experiment__project__registered',
+                    'runname__name', 'runname__experiment__name',
                     'runname__experiment__project__name', 'runname__experiment__project_id'):
+        bartext = (f'{dp["runname__experiment__project__name"]} / {dp["runname__experiment__name"]} '
+                f'/ {dp["runname__name"]}')
         if anas := am.Analysis.objects.filter(datasetanalysis__dataset_id=dp['pk']).values('date',
                 'pk').order_by('date'):
-            start = datetime.strftime(anas.first()['date'], datefmt)
+            # Create a "search" bar segment
+            anadate = anas.first()['date']
+            if anadate < firstdate:
+                firstdate = anadate
             if jobs := jm.Job.objects.filter(nextflowsearch__analysis_id__in=[x['pk'] for x in anas]):
                 lastjob = jobs.values('state', 'pk', 'timestamp').order_by('timestamp').last()
                 arfs = am.AnalysisResultFile.objects.filter(analysis__nextflowsearch__job_id=lastjob['pk'])
                 if lastjob['state'] == jj.Jobstates.DONE and arfs:
-                    end = datetime.strftime(arfs.values('sfile__regdate').first()['sfile__regdate'], datefmt)
+                    end = arfs.values('sfile__regdate').first()['sfile__regdate']
                 elif lastjob['state'] in jj.JOBSTATES_DONE:
                     # Canceled or done but no files (can be a refine job also)
-                    end = datetime.strftime(lastjob['timestamp'], datefmt)
+                    end = lastjob['timestamp']
                 else:
                     end = today
-                perprojects.append({'proj': dp['runname__experiment__project__name'], 'dset': dp['pk'],
-                    'stage': Stages.SEARCH, 'start': start, 'end': end})
+                perprojects.append({'proj': bartext, 'dset': dp['pk'],
+                    'stage': Stages.SEARCH, 'start': anadate, 'end': end})
 
         # Raws can come way before project opening, so lets start with them
         firstfile_date = False
         if raws := rm.RawFile.objects.filter(datasetrawfile__dataset_id=dp['pk']).order_by('date'
                 ).values('date', 'pk'):
             firstfile_date = raws.first()['date']
-            rawpp = {'proj': dp['runname__experiment__project__name'], 'dset': dp['pk'],
-                    'stage': Stages.MS, 'start': datetime.strftime(firstfile_date, datefmt)}
-            if dp['locked']:
+            if firstfile_date < firstdate:
+                firstdate = firstfile_date
+            rawpp = {'proj': bartext, 'dset': dp['pk'], 'stage': Stages.MS, 'start': firstfile_date}
+            if dp['locked'] or anas:
                 sf = rm.StoredFile.objects.values('regdate').get(rawfile_id=raws.last()['pk'],
                         mzmlfile__isnull=True)
                 # Use regdate on last file to include the time spent transferring
-                rawpp['end'] = datetime.strftime(sf['regdate'], datefmt)
+                rawpp['end'] = sf['regdate']
             else:
                 rawpp['end'] = today
 
         openpp = False
+        owner = dm.DatasetOwner.objects.filter(dataset_id=dp['pk']).values('user__username').first()
         if firstfile_date and (opendate := dp['runname__experiment__project__registered']) < firstfile_date:
-
-            openpp = {'proj': dp['runname__experiment__project__name'], 'dset': dp['pk'],
-                    'stage': Stages.OPENED, 'start': datetime.strftime(opendate, datefmt),
-                    'first': True}
+            if opendate < firstdate:
+                firstdate = opendate
+            openpp = {'proj': bartext, 'dset': dp['pk'],
+                    'pid': dp['runname__experiment__project_id'],
+                    'stage': Stages.OPENED, 'start': opendate,
+                    'first': True, 'owner': owner['user__username']}
         elif firstfile_date:
-            rawpp['first'] = True
+            # The opening of project was done after acquisition of files
+            rawpp.update({'first': True, 'owner': owner['user__username'],
+                'pid': dp['runname__experiment__project_id']})
+        if raws:
             perprojects.append(rawpp)
 
         track_pipeline = False
         for tr in cm.DatasetPrepTracking.objects.filter(dspipe__dataset_id=dp['pk']).order_by(
                 'timestamp'):
             track_pipeline = True
-            date = datetime.strftime(tr.timestamp, datefmt)
             if tr.stage == cm.TrackingStages.SAMPLESREADY and openpp:
-                openpp['end'] = date
-                pp = {'proj': dp['runname__experiment__project__name'], 'dset': dp['pk'],
-                        'stage': Stages.SAMPLES, 'start': date}
+                openpp['end'] = tr.timestamp
+                pp = {'proj': bartext, 'dset': dp['pk'],
+                        'stage': Stages.SAMPLES, 'start': tr.timestamp}
+
+            elif tr.stage == cm.TrackingStages.SAMPLESREADY and tr.timestamp < (firstfile_date or firstdate):
+                pp = {'proj': bartext, 'dset': dp['pk'],
+                        'stage': Stages.SAMPLES, 'start': tr.timestamp}
 
             elif tr.stage == cm.TrackingStages.PREPSTARTED and pp['stage'] == Stages.SAMPLES:
-                pp['end'] = date
+                pp['end'] = tr.timestamp
                 perprojects.append(pp)
-                pp = {'proj': dp['runname__experiment__project__name'], 'dset': dp['pk'],
-                        'stage': Stages.PREP, 'start': date}
+                pp = {'proj': bartext, 'dset': dp['pk'],
+                        'stage': Stages.PREP, 'start': tr.timestamp}
             elif tr.stage == cm.TrackingStages.PREPFINISHED and pp['stage'] == Stages.PREP:
-                pp['end'] = date
+                pp['end'] = tr.timestamp
                 perprojects.append(pp)
 
             elif tr.stage == cm.TrackingStages.MSQUEUED:
-                pp = {'proj': dp['runname__experiment__project__name'], 'dset': dp['pk'],
-                        'stage': Stages.QUEUE, 'start': date}
+                pp = {'proj': bartext, 'dset': dp['pk'],
+                        'stage': Stages.QUEUE, 'start': tr.timestamp}
 
         if track_pipeline:
             if pp['stage'] == Stages.QUEUE:
                 if firstfile_date:
-                    pp['end'] = datetime.strftime(firstfile_date, datefmt)
+                    pp['end'] = firstfile_date
                 else:
                     pp['end'] = today
             elif 'end' not in pp:
                 if dp['locked']:
                     lockdate = dm.ProjectLog.objects.filter(project_id=dp['runname__experiment__project_id'],
                             level=dm.ProjLogLevels.INFO, message__endswith=f'locked dataset {dp["pk"]}')
-                    pp['end'] = lockdate
+                    pp['end'] = lockdate.values('date').last()['date']
                 else:
                     pp['end'] = today
                 perprojects.append(pp)
 
         if openpp and not openpp.get('end'):
             if firstfile_date:
-                openpp['end'] = datetime.strftime(firstfile_date, datefmt)
+                openpp['end'] = firstfile_date
             else:
                 openpp['end'] = today
         if openpp:
             perprojects.append(openpp)
 
-        [x.update({'stage': str(x['stage'])}) for x in perprojects]
+    lastdates = {}
+    for pp in perprojects:
+        if not (ld := lastdates.get(pp['dset'])) or ld < pp['end']:
+            if ld:
+                print(ld < pp['end'])
+            lastdates[pp['dset']] = pp['end']
+    for pp in perprojects:
+        if lastdates[pp['dset']] == pp['end']:
+            pp['last'] = True
 
-    return JsonResponse({'per_proj': perprojects})
+    [x.update({'stage': str(x['stage']), 'start': datetime.strftime(x['start'], datefmt),
+        'end': datetime.strftime(x['end'], datefmt)}) for x in perprojects]
+
+    return JsonResponse({'per_proj': perprojects, 'closedates': closeprojdates, 'today': today,
+        'firstdate': datetime.strftime(firstdate, datefmt)})
 
 @staff_member_required
 @login_required
