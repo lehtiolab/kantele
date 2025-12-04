@@ -928,7 +928,7 @@ def move_project_cold(request):
     else:
         projquery.update(active=False)
         models.ProjectLog.objects.create(project_id=data['item_id'],
-                level=models.ProjLogLevels.INFO, message=f'User {request.user.id} closed project')
+                level=models.ProjLogLevels.CLOSE, message=f'User {request.user.id} closed project')
         return JsonResponse({})
 
 
