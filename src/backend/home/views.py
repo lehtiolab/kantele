@@ -47,40 +47,37 @@ def home(request):
 
 def find_projects(userquery):
     searchterms = []
-    query = Q()
+    parsed_query = Q()
     for q in [x for x in userquery.split(',') if x != '']:
         match q.split(':'):
             case ['from', date]:
                 if dt := parse_userquery(date, 'date'):
-                    query &= Q(registered__gte=dt)
+                    parsed_query &= Q(registered__gte=dt)
             case ['to', date]:
                 if dt := parse_userquery(date, 'date'):
-                    query &= Q(registered__lte=dt)
+                    parsed_query &= Q(registered__lte=dt)
             case ['type', projtype]:
                 ptypename = {'cf': settings.CF_PTYPE_NAME}.get(projtype) or projtype
-                query &= Q(ptype__name__iexact=ptypename)
+                parsed_query &= Q(ptype__name__iexact=ptypename)
             case ['name', name]:
-                query &= Q(name=name)
+                parsed_query &= Q(name=name)
             case ['active', yesno]:
-                query &= Q(active={'yes': True, 'true': True, 'no': False, 'false': False}[yesno])
+                parsed_query &= Q(active={'yes': True, 'true': True, 'no': False, 'false': False}[yesno])
+            case ['user', username]:
+                parsed_query &= Q(experiment__runname__dataset__datasetowner__user__username=username)
             case _:
                 searchterms.append(q)
+    projects = dsmodels.Project.objects.filter(parsed_query)
 
     if searchterms:
-        dsquery = Q(runname__name__icontains=searchterms[0])
-        dsquery |= Q(runname__experiment__name__icontains=searchterms[0])
-        dsquery |= Q(runname__experiment__project__name__icontains=searchterms[0])
-        query = Q(name__icontains=searchterms[0])
-        for term in searchterms[1:]:
-            dssubquery = Q(runname__name__icontains=term)
-            dssubquery |= Q(runname__experiment__name__icontains=term)
-            dssubquery |= Q(runname__experiment__project__name__icontains=term)
-            subquery = Q(name__icontains=term)
-            query &= subquery
-            dsquery &= dssubquery
-        dbdsets = dsmodels.Dataset.objects.filter(dsquery).select_related('runname__experiment__project').values('runname__experiment__project').distinct()
-        query |= Q(pk__in=dbdsets)
-    return dsmodels.Project.objects.filter(query)
+        freetextq = Q()
+        for term in searchterms:
+            subq = Q(experiment__runname__name__icontains=term)
+            subq |= Q(experiment__name__icontains=term)
+            subq |= Q(name__icontains=term)
+            freetextq &= subq
+        projects = projects.filter(freetextq)
+    return projects
 
 
 def dataset_query_creator(searchterms):

@@ -206,6 +206,9 @@ div.spinner {
             </a>
             {/if}
 
+          {:else if field.type === 'count'}
+            <TableItem value={row[field.count].length} rowid={rowid} inactive={inactive.some(x=>row[x])} help={field.help} icon={field.icon} field={field} on:rowAction allowedActions={allowedActions} />
+   
           {:else}
             {#if field.multi}
             {#each row[field.id] as item}

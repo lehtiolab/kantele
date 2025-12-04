@@ -72,6 +72,7 @@ async function getProjDetails(projid) {
 const tablefields = [
   {id: 'name', name: 'Name', type: 'str', multi: false},
   {id: 'ptype', name: 'Type', type: 'str', multi: false},
+  {id: 'dsets', name: 'Datasets', type: 'count', count: 'dset_ids', multi: false},
   {id: 'start', name: 'Registered', type: 'str', multi: false},
   {id: 'lastactive', name: 'Last active', type: 'str', multi: false},
   {id: 'actions', name: '', type: 'button', multi: true, confirm: ['close']},
@@ -462,7 +463,6 @@ async function openDash() {
 	</ul>
 </div>
 
-<div class="content">
   {#if tabshow === 'admin'}
   <div class="columns">
     <div class="column">
@@ -564,7 +564,7 @@ async function openDash() {
   bind:items={loadedProjects}
   fetchUrl="/show/projects"
   findUrl="/show/projects"
-  show_deleted_or_q="cf:true/false, from:yyyymmdd, to:, active:true/false"
+  show_deleted_or_q="type:cf, from:2025, to:20250801, from:202504, active:true/false/yes/no, user:username"
   defaultQ="type:cf active:true"
   getdetails={getProjDetails}
   fixedbuttons={fixedbuttons}
@@ -583,4 +583,3 @@ async function openDash() {
   </div>
   {/if}
 
-</div>
