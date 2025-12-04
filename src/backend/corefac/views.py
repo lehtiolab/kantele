@@ -85,18 +85,20 @@ def get_project_plotdata(request):
             project__active=False, level=dm.ProjLogLevels.CLOSE).values('project_id'
                     ).annotate(lastclose=Max('date')):
         closeprojdates[closeplog['project_id']] = datetime.strftime(closeplog['lastclose'], datefmt)
-    #for openproj in dm.Project.objects.filter(pk__in=data['proj_ids'], active=True).values('pk'):
-    #    closeprojdates[openproj['pk']] = False
 
     perprojects = []
     firstdate = timezone.now()
     today = timezone.now()
+    ds_owners = {}
     for dp in dm.Dataset.objects.filter(runname__experiment__project_id__in=data['proj_ids']
             ).values('pk', 'locked', 'runname__experiment__project__registered',
                     'runname__name', 'runname__experiment__name',
-                    'runname__experiment__project__name', 'runname__experiment__project_id'):
+                    'runname__experiment__project__name', 'runname__experiment__project_id',
+                    'runname__experiment__project__active'):
         bartext = (f'{dp["runname__experiment__project__name"]} / {dp["runname__experiment__name"]} '
                 f'/ {dp["runname__name"]}')
+        owner_q = dm.DatasetOwner.objects.filter(dataset_id=dp['pk']).values('user__username')
+        ds_owners[dp['pk']] = owner_q.first()['user__username']
         if anas := am.Analysis.objects.filter(datasetanalysis__dataset_id=dp['pk']).values('date',
                 'pk').order_by('date'):
             # Create a "search" bar segment
@@ -123,7 +125,8 @@ def get_project_plotdata(request):
             firstfile_date = raws.first()['date']
             if firstfile_date < firstdate:
                 firstdate = firstfile_date
-            rawpp = {'proj': bartext, 'dset': dp['pk'], 'stage': Stages.MS, 'start': firstfile_date}
+            rawpp = {'proj': bartext, 'dset': dp['pk'], 'stage': Stages.MS, 'start': firstfile_date,
+                    }
             if dp['locked'] or anas:
                 sf = rm.StoredFile.objects.values('regdate').get(rawfile_id=raws.last()['pk'],
                         mzmlfile__isnull=True)
@@ -133,18 +136,19 @@ def get_project_plotdata(request):
                 rawpp['end'] = today
 
         openpp = False
-        owner = dm.DatasetOwner.objects.filter(dataset_id=dp['pk']).values('user__username').first()
         if firstfile_date and (opendate := dp['runname__experiment__project__registered']) < firstfile_date:
             if opendate < firstdate:
                 firstdate = opendate
             openpp = {'proj': bartext, 'dset': dp['pk'],
+                    'open': dp['runname__experiment__project__active'],
                     'pid': dp['runname__experiment__project_id'],
                     'stage': Stages.OPENED, 'start': opendate,
-                    'first': True, 'owner': owner['user__username']}
+                    'first': True}
         elif firstfile_date:
             # The opening of project was done after acquisition of files
-            rawpp.update({'first': True, 'owner': owner['user__username'],
-                'pid': dp['runname__experiment__project_id']})
+            rawpp.update({'first': True, 'pid': dp['runname__experiment__project_id'],
+                    'open': dp['runname__experiment__project__active'],
+                })
         if raws:
             perprojects.append(rawpp)
 
@@ -197,15 +201,21 @@ def get_project_plotdata(request):
         if openpp:
             perprojects.append(openpp)
 
-    lastdates = {}
+    firstdates_open, lastdates = {}, {}
     for pp in perprojects:
         if not (ld := lastdates.get(pp['dset'])) or ld < pp['end']:
-            if ld:
-                print(ld < pp['end'])
             lastdates[pp['dset']] = pp['end']
     for pp in perprojects:
+        if pp.get('first'):
+            firstdates_open[pp['dset']] = (pp['start'], pp['open'])
+            pp['duration'] = (lastdates[pp['dset']] - pp['start']).days
+    for pp in perprojects:
+        # Mark last segments in dset, add open/owner and start of dset there
         if lastdates[pp['dset']] == pp['end']:
             pp['last'] = True
+            pp['startdset'] = firstdates_open[pp['dset']][0]
+            pp['open'] = firstdates_open[pp['dset']][1]
+            pp['owner'] = ds_owners[pp['dset']]
 
     [x.update({'stage': str(x['stage']), 'start': datetime.strftime(x['start'], datefmt),
         'end': datetime.strftime(x['end'], datefmt)}) for x in perprojects]
