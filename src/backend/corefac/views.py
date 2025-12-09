@@ -18,6 +18,7 @@ from datasets import views as dv
 from analysis import models as am
 from jobs import models as jm
 from jobs import jobs as jj
+from home.views import parse_userquery
 
 
 @staff_member_required
@@ -58,6 +59,8 @@ def corefac_home(request):
 
         context = {'ctx': {'protocols': protos, 'pipelines': pipelines,
             'enzymes': [x for x in enzymes.values()],
+            'ptypes': [{'id': x['pk'], 'name': x['title']} for x in
+                dm.SampleprepParameter.objects.filter(active=True).values('title', 'pk')]
             }}
     return render(request, 'corefac/corefac.html', context)
 
@@ -223,25 +226,96 @@ def get_project_plotdata(request):
     return JsonResponse({'per_proj': perprojects, 'closedates': closeprojdates, 'today': today,
         'firstdate': datetime.strftime(firstdate, datefmt)})
 
+
+@login_required
+def find_sampleprep_method(request):
+    searchterms = []
+    userquery = request.GET.get('q')
+    parsed_query = Q()
+    for q in [x for x in userquery.split(',') if x != '']:
+        match q.split(':'):
+            case ['from', date]:
+                if dt := parse_userquery(date, 'date'):
+                    parsed_query &= Q(registered__gte=dt)
+            case ['to', date]:
+                if dt := parse_userquery(date, 'date'):
+                    parsed_query &= Q(registered__lte=dt)
+            case ['type', ptypename]:
+                parsed_query &= Q(paramopt__param__title__iexact=ptypename)
+            case ['name', name]:
+                parsed_query &= Q(paramopt__value=name)
+            case ['doi', doi]:
+                parsed_query &= Q(doi=doi)
+            case ['active', yesno]:
+                parsed_query &= Q(active={'yes': True, 'true': True, 'no': False, 'false': False}[yesno])
+            case _:
+                searchterms.append(q)
+    protocols = cm.PrepOptionProtocol.objects.filter(parsed_query)
+
+    if searchterms:
+        freetextq = Q()
+        for term in searchterms:
+            subq = Q(doi__icontains=term)
+            subq |= Q(version__icontains=term)
+            subq |= Q(paramopt__value__icontains=term)
+            freetextq &= subq
+        protocols = protocols.filter(freetextq)
+    items, order = populate_protocols(protocols)
+    # FIXME addd empty protocols?
+    return JsonResponse({'items': items, 'order': order})
+
+
+def populate_protocols(dbprotocols):
+    protocols, order = {}, []
+    for prot in dbprotocols.order_by('-registered').values('pk', 'paramopt__value', 'paramopt_id', 'active', 'registered', 'paramopt__param__title', 'version', 'doi'):
+        order.append(prot['pk'])
+        protocols[prot['pk']] = {
+            'id': prot['pk'],
+            'name': prot['paramopt__value'],
+            'protocol_id': prot['paramopt_id'],
+            'version': prot['version'],
+            'doi': prot['doi'],
+            'inactive': prot['active'] == False,
+            'start': datetime.strftime(prot['registered'], '%Y-%m-%d %H:%M'),
+            'ptype': prot['paramopt__param__title'],
+            #'dset_ids': [x.dataset.pk for y in proj.experiment_set.all() for x in y.runname_set.all() if hasattr(x, 'dataset')],
+            'details': False,
+            'selected': False,
+            'actions': ['new version'],
+        }
+        if prot['active']:
+            protocols[prot['pk']]['actions'].append('deactivate')
+        else:
+            protocols[prot['pk']]['actions'].append('reactivate')
+    return protocols, order
+
+
 @staff_member_required
 @login_required
 @require_POST
-def add_sampleprep_method(request):
+def add_protocol(request):
+    '''Creates new protocol and version of it (two tables)'''
     req = json.loads(request.body.decode('utf-8'))
     try:
-        param_id, name = req['param_id'], req['newname']
+        param_id, name, doi, version = req['param_id'], req['name'], req['doi'], req['version']
     except KeyError:
-        return JsonResponse({'error': 'Bad request to add sampleprep method, contact admin'},
+        return JsonResponse({'error': 'Bad request to add protocol method, contact admin'},
+                status=400)
+    if cm.PrepOptionProtocol.objects.filter(doi=doi).exists():
+        return JsonResponse({'error': 'A parameter with this DOI already exists'},
                 status=400)
     spo, cr = dm.SampleprepParameterOption.objects.get_or_create(param_id=param_id, value=name)
     if not cr:
-        return JsonResponse({'error': 'A parameter with this name already exists'}, status=400)
-    return JsonResponse({'id': spo.pk})
+        return JsonResponse({'error': 'A protocol with this name already exists'}, status=400)
+    pop = cm.PrepOptionProtocol.objects.create(paramopt=spo, doi=doi, version=version)
+    newp, _order = populate_protocols(cm.PrepOptionProtocol.objects.filter(pk=pop.pk))
+    return JsonResponse(newp[pop.pk])
 
 
 @staff_member_required
 @login_required
-def add_sampleprep_method_version(request):
+@require_POST
+def add_protocol_version(request):
     req = json.loads(request.body.decode('utf-8'))
     try:
         paramopt_id, doi, version = req['paramopt_id'], req['doi'], req['version']
@@ -254,42 +328,8 @@ def add_sampleprep_method_version(request):
         return JsonResponse({'error': 'A parameter with this version and/or DOI already exists'},
                 status=400)
     pop = cm.PrepOptionProtocol.objects.create(paramopt_id=paramopt_id, doi=doi, version=version)
-    return JsonResponse({'id': pop.pk})
-
-
-@staff_member_required
-@login_required
-@require_POST
-def edit_sampleprep_method(request):
-    req = json.loads(request.body.decode('utf-8'))
-    try:
-        paramopt_id, name = req['paramopt_id'], req['newname']
-    except KeyError:
-        return JsonResponse({'error': 'Bad request to edit sampleprep method, contact admin'},
-                status=400)
-    spo = dm.SampleprepParameterOption.objects.filter(pk=paramopt_id)
-    if not spo.exists():
-        return JsonResponse({'error': 'Could not find method, contact admin'}, status=400)
-    spo.update(value=name)
-    return JsonResponse({})
-
-
-@staff_member_required
-@login_required
-@require_POST
-def edit_sampleprep_method_version(request):
-    req = json.loads(request.body.decode('utf-8'))
-    try:
-        protid, doi, version = req['prepprot_id'], req['doi'], req['version']
-    except KeyError:
-        return JsonResponse({'error': 'Bad request to add sampleprep method, contact admin'},
-                status=400)
-    pop = cm.PrepOptionProtocol.objects.filter(pk=protid, doi=doi)
-    if not pop.exists():
-        return JsonResponse({'error': 'Could not find protocol with that DOI, note that DOIs are '
-            'not changeable'}, status=403)
-    pop.update(version=version)
-    return JsonResponse({})
+    newp, _order = populate_protocols(cm.PrepOptionProtocol.objects.filter(pk=pop.pk))
+    return JsonResponse(newp[pop.pk])
 
 
 @staff_member_required
@@ -357,41 +397,45 @@ def enable_sampleprep_method_version(request):
     return JsonResponse({})
 
 
-
 @staff_member_required
 @login_required
-def delete_sampleprep_method(request):
+@require_POST
+def delete_protocol_version(request):
+    '''Tries to delete protocol versions passed. After that will also, try to
+    delete the protocol, if:
+    - protocol has no more versions
+    - protocol not linked to dataset
+    - protocol not used in pipeline
+    # FIXME protocol that is linked in dataset which gets versions deleted
+    # will be empty - make a method to delete it as it wont show in the table
+    '''
     req = json.loads(request.body.decode('utf-8'))
     try:
-        paramopt_id = req['paramopt_id']
-    except KeyError:
-        return JsonResponse({'error': 'Bad request to delete sampleprep method, contact admin'},
-                status=400)
-    spo = dm.SampleprepParameterOption.objects.filter(pk=paramopt_id)
-    if not spo.count():
-        return JsonResponse({'error': 'Could not find method, contact admin'}, status=400)
-    if dm.SampleprepParameterValue.objects.filter(value_id=paramopt_id).exists():
-        return JsonResponse({'error': 'Datasets exist mapped to this method, we cant delete it!'}, status=403)
-    spo.delete()
-    return JsonResponse({})
-
-
-@staff_member_required
-@login_required
-def delete_sampleprep_method_version(request):
-    req = json.loads(request.body.decode('utf-8'))
-    try:
-        prepprot_id = req['prepprot_id']
+        prepprot_ids = req['prepprot_ids']
     except KeyError:
         return JsonResponse({'error': 'Bad request to delete sampleprep protocol, contact admin'},
                 status=400)
-    pop = cm.PrepOptionProtocol.objects.filter(pk=prepprot_id)
-    if not pop.count():
-        return JsonResponse({'error': 'Could not find sampleprep protocol to delete, contact admin'},
+    spo_ids = [x.pk for x in dm.SampleprepParameterOption.objects.filter(
+            prepoptionprotocol__in=prepprot_ids)]
+    if not (pop := cm.PrepOptionProtocol.objects.filter(pk__in=prepprot_ids)):
+        return JsonResponse({'error': 'Could not find sampleprep protocol(s) to delete, contact admin'},
                 status=400)
-    if cm.DatasetPipeline.objects.filter(pipelineversion__pipelinestep__step_id=prepprot_id).exists():
-        return JsonResponse({'error': 'Datasets exist mapped to this protocol, we cant delete it!'}, status=403)
+    elif cm.PipelineStep.objects.filter(step_id__in=prepprot_ids).exists():
+        return JsonResponse({'error': 'Pipeline(s) exist mapped to this protocol, we can not delete it! Try to inactivate instead'}, status=403)
     pop.delete()
+
+    if spo_ids and (spo := dm.SampleprepParameterOption.objects.filter(pk__in=spo_ids,
+                prepoptionprotocol__isnull=True)):
+        if dm.SampleprepParameterValue.objects.filter(value__in=spo).exists():
+            # Datasets mapped to protocol, so will not delete it
+            pass
+        elif cm.PipelineStep.objects.filter(step__paramopt__in=spo).exists():
+            # Pipeline using some step of mapped to protocol, so will not delete it
+            # FIXME this is already checked above no?
+            pass
+        else:
+            spo.delete()
+    else:
     return JsonResponse({})
 
 

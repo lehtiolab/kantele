@@ -167,7 +167,10 @@ def dataset_files(request, dataset_id=False):
 @login_required
 def dataset_mssampleprep(request, dataset_id=False):
     params = {}
-    for p in models.SampleprepParameterOption.objects.select_related('param'):
+    # only show sample prep methods that have no versioned protocol - to avoid
+    # causing problems when deleting those (will end up with loose methods
+    # without versions as the delete checks for usage by a dataset) 
+    for p in models.SampleprepParameterOption.objects.filter(prepoptionprotocol__isnull=True).select_related('param'):
         fill_sampleprepparam(params, p)
     pipelines = {}
     for ps in cm.PipelineStep.objects.filter(pipelineversion__locked=True,
