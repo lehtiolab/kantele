@@ -1,12 +1,12 @@
 <script>
 
+import { push } from 'svelte-spa-router';
 import * as Plot from '@observablehq/plot';
 import { closeProject } from '../../home/src/util.js'
 import { flashtime } from '../../util.js'
 import { postJSON, getJSON } from '../../datasets/src/funcJSON.js'
 import Table from '../../home/src/Table.svelte';
-
-export let notif;
+import Tabs from '../../home/src/Tabs.svelte'
 
 // Proj table
 let loadedProjects = {};
@@ -17,7 +17,6 @@ $: {
 }
 let selectedProjs = false;
 let addItem;
-const inactive = ['inactive'];
 
 let plots;
 let plot_sort_asc = true;
@@ -58,8 +57,6 @@ function showError(error) {
   notif.errors[error] = 1;
   setTimeout(function(msg) { notif.errors[error] = 0 } , flashtime, error);
 }
-
-
 
 async function getProjDetails(projid) {
 	const resp = await getJSON(`/show/project/${projid}`);
@@ -252,7 +249,11 @@ async function replot(sortkey) {
     plots?.append(aggregate_plot);
   }
 }
+let notif = {errors: {}, messages: {}};
 </script>
+
+
+<Tabs tabs={['Protocols', 'Pipelines', 'Dashboard']} tabshow="Dashboard" notif={notif} />
 
 <div class="box" id="plots">
   <h4 class="title is-4">Projects</h4>
@@ -276,9 +277,8 @@ async function replot(sortkey) {
   getdetails={getProjDetails}
   fixedbuttons={[]}
   fields={tablefields}
-  inactive={inactive}
+  inactive={['inactive']}
   on:detailview={showDetails}
   allowedActions={Object.keys(actionmap)}
   on:rowAction={e => doAction(e.detail.action, e.detail.id)}
   />
-

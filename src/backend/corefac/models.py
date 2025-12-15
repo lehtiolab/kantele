@@ -16,7 +16,7 @@ class SamplePipeline(models.Model):
 
 
 class PipelineVersion(models.Model):
-    pipeline = models.ForeignKey(SamplePipeline, on_delete=models.PROTECT)
+    pipeline = models.ForeignKey(SamplePipeline, on_delete=models.CASCADE)
     version = models.TextField()
     timestamp = models.DateTimeField()
     # Once pipeline locked, it can not be saved anymore, except for delete/inactivation/activation

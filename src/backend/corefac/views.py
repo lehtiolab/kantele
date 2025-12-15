@@ -9,6 +9,7 @@ from django.views.decorators.http import require_GET, require_POST
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.db.models import Q, Max
+from django.db import IntegrityError
 from django.utils import timezone
 
 from corefac import models as cm
@@ -26,47 +27,20 @@ from home.views import parse_userquery
 @require_GET
 def corefac_home(request):
     protos = {}
-    all_doi = defaultdict(list)
-    for pop in cm.PrepOptionProtocol.objects.all():
-        all_doi[pop.paramopt_id].append({'id': pop.pk, 'version': pop.version, 'doi': pop.doi,
-            'active': pop.active})
-        
-    # create following JSON:
-    # {1: { id: 1, title: Cleanup, methods: [{name: SP3, versions: [(v1, doi123), ]}]}
-    for spcat in dm.SampleprepParameter.objects.all().values('title', 'pk', 'active'):
-        protos[spcat['pk']] = {'id': spcat['pk'], 'title': spcat['title'], 'active': spcat['active'],
-                'methods': []}
-    for spo in dm.SampleprepParameterOption.objects.all().values('param__pk', 'value', 'pk', 'active'):
-        versions = all_doi[spo['pk']] if spo['pk'] in all_doi else []
-        protos[spo['param__pk']]['methods'].append({'name': spo['value'], 'id': spo['pk'],
-            'versions': versions, 'active': spo['active']})
-    pipelines = {}
-    
+    for pop in cm.PrepOptionProtocol.objects.filter(active=True).values('pk', 'version', 'doi', 'paramopt__value', 'paramopt__param__title'):
+        protos[pop['pk']] = {'id': pop['pk'],
+                'name': f'{pop["paramopt__value"]} - {pop["paramopt__param__title"]} - {pop["doi"]} - {pop["version"]}'}
     enzymes = {x.id: {'id': x.id, 'name': x.name} for x in dm.Enzyme.objects.all()}
-    for pv in cm.PipelineVersion.objects.all().values('pk', 'pipeline_id', 'pipeline__name',
-            'version', 'active', 'locked', 'timestamp'):
-        pipelines[pv['pk']] = {'id': pv['pk'], 'pipe_id': pv['pipeline_id'], 'active': pv['active'],
-                'locked': pv['locked'], 'name': pv['pipeline__name'], 'version': pv['version'],
-                'enzymes': [x.enzyme_id for x in 
-                    cm.PipelineEnzyme.objects.filter(pipelineversion_id=pv['pk'])],
-                'steps': [{'name': get_pipeline_step_name(x), 'id': x['step_id'], 'ix': x['index']}
-                    for x in  cm.PipelineStep.objects.filter(pipelineversion_id=pv['pk']).values(
-                        'step_id', 'index', 'step__doi',
-                        'step__version', 'step__paramopt__value',
-                        'step__paramopt__param__title')]}
-        if pv['locked']:
-            pipelines[pv['pk']]['timestamp'] = datetime.strftime(pv['timestamp'], '%Y-%m-%d %H:%M')
-
-        context = {'ctx': {'protocols': protos, 'pipelines': pipelines,
-            'enzymes': [x for x in enzymes.values()],
-            'ptypes': [{'id': x['pk'], 'name': x['title']} for x in
-                dm.SampleprepParameter.objects.filter(active=True).values('title', 'pk')]
-            }}
+    context = {'ctx': {'protocols': protos,
+        'enzymes': [x for x in enzymes.values()],
+        'ptypes': [{'id': x['pk'], 'name': x['title']} for x in
+            dm.SampleprepParameter.objects.filter(active=True).values('title', 'pk')]
+        }}
     return render(request, 'corefac/corefac.html', context)
 
 
 def get_pipeline_step_name(stepvals):
-    return f'{stepvals["step__paramopt__param__title"]} - {stepvals["step__paramopt__value"]} - {stepvals["step__doi"]} - {stepvals["step__version"]}'
+    return f'{stepvals["step__paramopt__value"]} - {stepvals["step__paramopt__param__title"]} - {stepvals["step__doi"]} - {stepvals["step__version"]}'
 
 
 def get_project_plotdata(request):
@@ -216,6 +190,7 @@ def get_project_plotdata(request):
         # Mark last segments in dset, add open/owner and start of dset there
         if lastdates[pp['dset']] == pp['end']:
             pp['last'] = True
+            # FIXME this gives KeyError sometimes!
             pp['startdset'] = firstdates_open[pp['dset']][0]
             pp['open'] = firstdates_open[pp['dset']][1]
             pp['owner'] = ds_owners[pp['dset']]
@@ -246,6 +221,8 @@ def find_sampleprep_method(request):
                 parsed_query &= Q(paramopt__value=name)
             case ['doi', doi]:
                 parsed_query &= Q(doi=doi)
+            case ['version', version]:
+                parsed_query &= Q(version=version)
             case ['active', yesno]:
                 parsed_query &= Q(active={'yes': True, 'true': True, 'no': False, 'false': False}[yesno])
             case _:
@@ -261,6 +238,42 @@ def find_sampleprep_method(request):
             freetextq &= subq
         protocols = protocols.filter(freetextq)
     items, order = populate_protocols(protocols)
+    # FIXME addd empty protocols?
+    # empty protocols are not
+    return JsonResponse({'items': items, 'order': order})
+
+
+@login_required
+def find_pipeline(request):
+    searchterms = []
+    userquery = request.GET.get('q')
+    parsed_query = Q()
+    for q in [x for x in userquery.split(',') if x != '']:
+        match q.split(':'):
+            case ['from', date]:
+                if dt := parse_userquery(date, 'date'):
+                    parsed_query &= Q(timestamp__gte=dt)
+            case ['to', date]:
+                if dt := parse_userquery(date, 'date'):
+                    parsed_query &= Q(timestamp__lte=dt)
+            case ['name', name]:
+                parsed_query &= Q(pipeline__name=name)
+            case ['version', version]:
+                parsed_query &= Q(version=version)
+            case ['active', yesno]:
+                parsed_query &= Q(active={'yes': True, 'true': True, 'no': False, 'false': False}[yesno])
+            case _:
+                searchterms.append(q)
+    pipelines = cm.PipelineVersion.objects.filter(parsed_query)
+
+    if searchterms:
+        freetextq = Q()
+        for term in searchterms:
+            subq = Q(pipeline__name__icontains=term)
+            subq |= Q(version__icontains=term)
+            freetextq &= subq
+        pipelines = pipelines.filter(freetextq)
+    items, order = populate_pipelines(pipelines)
     # FIXME addd empty protocols?
     return JsonResponse({'items': items, 'order': order})
 
@@ -278,7 +291,6 @@ def populate_protocols(dbprotocols):
             'inactive': prot['active'] == False,
             'start': datetime.strftime(prot['registered'], '%Y-%m-%d %H:%M'),
             'ptype': prot['paramopt__param__title'],
-            #'dset_ids': [x.dataset.pk for y in proj.experiment_set.all() for x in y.runname_set.all() if hasattr(x, 'dataset')],
             'details': False,
             'selected': False,
             'actions': ['new version'],
@@ -288,6 +300,37 @@ def populate_protocols(dbprotocols):
         else:
             protocols[prot['pk']]['actions'].append('reactivate')
     return protocols, order
+
+
+def populate_pipelines(dbpipelines):
+    pipelines, order = {}, []
+    for pipe in dbpipelines.order_by('-timestamp').values('pk', 'pipeline_id', 'pipeline__name', 'locked', 'active', 'timestamp', 'version'):
+        order.append(pipe['pk'])
+        pipelines[pipe['pk']] = {
+            'id': pipe['pk'],
+            'name': pipe['pipeline__name'],
+            'pipeline_id': pipe['pipeline_id'],
+            'version': pipe['version'],
+            'locked': pipe['locked'],
+            'inactive': pipe['active'] == False,
+            'start': datetime.strftime(pipe['timestamp'], '%Y-%m-%d %H:%M'),
+            'details': False,
+            'selected': False,
+            'actions': ['new version'],
+            'enzymes': [x.enzyme_id for x in
+                cm.PipelineEnzyme.objects.filter(pipelineversion_id=pipe['pk'])],
+            'steps': [{'name': get_pipeline_step_name(x), 'id': x['step_id'], 'ix': x['index']}
+                for x in  cm.PipelineStep.objects.filter(pipelineversion_id=pipe['pk']).values(
+                    'step_id', 'index', 'step__doi', 'step__version', 'step__paramopt__value',
+                    'step__paramopt__param__title')]
+        }
+        if pipe['active']:
+            pipelines[pipe['pk']]['actions'].append('deactivate')
+        else:
+            pipelines[pipe['pk']]['actions'].append('reactivate')
+        if not pipe['locked']:
+            pipelines[pipe['pk']]['actions'].extend(['lock', 'edit'])
+    return pipelines, order
 
 
 @staff_member_required
@@ -334,22 +377,6 @@ def add_protocol_version(request):
 
 @staff_member_required
 @login_required
-def disable_sampleprep_method(request):
-    req = json.loads(request.body.decode('utf-8'))
-    try:
-        paramopt_id = req['paramopt_id']
-    except KeyError:
-        return JsonResponse({'error': 'Bad request to disable sampleprep method, contact admin'},
-                status=400)
-    spo = dm.SampleprepParameterOption.objects.filter(pk=paramopt_id)
-    if not spo.count():
-        return JsonResponse({'error': 'Could not find method, contact admin'}, status=400)
-    spo.update(active=False)
-    return JsonResponse({})
-
-
-@staff_member_required
-@login_required
 def disable_sampleprep_method_version(request):
     req = json.loads(request.body.decode('utf-8'))
     try:
@@ -361,23 +388,6 @@ def disable_sampleprep_method_version(request):
     if not pop.count():
         return JsonResponse({'error': 'Could not find method, contact admin'}, status=400)
     pop.update(active=False)
-    return JsonResponse({})
-
-
-
-@staff_member_required
-@login_required
-def enable_sampleprep_method(request):
-    req = json.loads(request.body.decode('utf-8'))
-    try:
-        paramopt_id = req['paramopt_id']
-    except KeyError:
-        return JsonResponse({'error': 'Bad request to enable sampleprep method, contact admin'},
-                status=400)
-    spo = dm.SampleprepParameterOption.objects.filter(pk=paramopt_id, active=False)
-    if not spo.count():
-        return JsonResponse({'error': 'Could not find method, contact admin'}, status=400)
-    spo.update(active=True)
     return JsonResponse({})
 
 
@@ -435,55 +445,60 @@ def delete_protocol_version(request):
             pass
         else:
             spo.delete()
-    else:
     return JsonResponse({})
 
 
 @staff_member_required
 @login_required
-def add_sampleprep_pipeline(request):
-    req = json.loads(request.body.decode('utf-8'))
-    try:
-        name, version = req['name'], req['version']
-    except KeyError:
-        return JsonResponse({'error': 'Bad request to add sampleprep pipeline, contact admin'},
-                status=400)
-    pipeline, _ = cm.SamplePipeline.objects.get_or_create(name=name)
-    pversion, cr = cm.PipelineVersion.objects.get_or_create(pipeline=pipeline, version=version,
-            defaults={'timestamp': datetime.now()})
-    if not cr:
-        return JsonResponse({'error': 'Pipeline of this version already exists'}, status=400)
-    return JsonResponse({'id': pversion.pk, 'pipe_id': pipeline.pk})
-
-
-@staff_member_required
-@login_required
-def edit_sampleprep_pipeline(request):
+def save_sampleprep_pipeline(request):
     req = json.loads(request.body.decode('utf-8'))
     try:
         pvid, version, pipe_id, steps = req['id'], req['version'], req['pipe_id'], req['steps']
-        enzymes = req['enzymes']
+        pipename, enzymes = req['pipename'], req['enzymes']
     except KeyError:
         return JsonResponse({'error': 'Bad request to edit pipeline method, contact admin'},
                 status=400)
     pvq = cm.PipelineVersion.objects.filter(pk=pvid)
-    if not pvq.exists():
+    if req['id'] and not pvq.exists():
         return JsonResponse({'error': 'Could not find that pipeline, contact admin'}, status=404)
-    elif pvq.filter(locked=True).exists():
+    elif req['id'] and pvq.filter(locked=True).exists():
         return JsonResponse({'error': 'Pipeline is locked, cannot edit it anymore, create a new version instead'}, status=403)
-    # Update version and possibly pipeline FK
-    pvq.filter(locked=False).update(version=version, pipeline_id=pipe_id)
+    elif req['id']:
+        # Update version with steps or version name
+        try:
+            pvq.filter(locked=False).update(version=version, pipeline_id=pipe_id)
+        except IntegrityError:
+            return JsonResponse({'error': 'Pipeline version name already exists for another '
+                'pipeline version, choose a another name'}, status=403)
+            
+        pversion = pvq.get()
+    elif req['pipe_id']:
+        # Creating a new version of this pipeline
+        pversion, cr = cm.PipelineVersion.objects.get_or_create(pipeline_id=req['pipe_id'],
+                version=version, defaults={'timestamp': datetime.now()})
+        if not cr:
+            return JsonResponse({'error': 'Pipeline version name already exists, edit it instead or '
+                'choose another name'}, status=403)
+    else:
+        # no pipe id, no pipeversion id -> new pipeline
+        pipeline, cr = cm.SamplePipeline.objects.get_or_create(name=pipename)
+        if not cr:
+            return JsonResponse({'error': 'Pipeline name already exists, create a new version instead'}, status=403)
+        pversion = cm.PipelineVersion.objects.create(pipeline_id=req['pipe_id'],
+                version=version, defaults={'timestamp': datetime.now()})
+
     # Remove old steps that are not needed if pipeline is shorter, update remaining/new steps
-    cm.PipelineStep.objects.filter(pipelineversion_id=pvid).exclude(
+    cm.PipelineStep.objects.filter(pipelineversion=pversion).exclude(
             index__in=[x['ix'] for x in steps]).delete()
     for step in steps:
-        cm.PipelineStep.objects.update_or_create(pipelineversion_id=pvid, index=step['ix'],
+        cm.PipelineStep.objects.update_or_create(pipelineversion=pversion, index=step['ix'],
                 defaults={'step_id': step['id']})
-    cm.PipelineEnzyme.objects.filter(pipelineversion_id=pvid).delete()
+    cm.PipelineEnzyme.objects.filter(pipelineversion=pversion).delete()
     if len(enzymes):
-        cm.PipelineEnzyme.objects.bulk_create([cm.PipelineEnzyme(pipelineversion_id=pvid,
+        cm.PipelineEnzyme.objects.bulk_create([cm.PipelineEnzyme(pipelineversion=pversion,
             enzyme_id=eid) for eid in enzymes])
-    return JsonResponse({})
+    newpipes, _order = populate_pipelines(cm.PipelineVersion.objects.filter(pk=pversion.pk))
+    return JsonResponse({'pipeline': newpipes[pversion.pk]})
 
 
 @staff_member_required
@@ -540,19 +555,20 @@ def enable_sampleprep_pipeline(request):
 def delete_sampleprep_pipeline(request):
     req = json.loads(request.body.decode('utf-8'))
     try:
-        pvid = req['id']
+        pvids = req['ids']
     except KeyError:
         return JsonResponse({'error': 'Bad request to delete pipeline, contact admin'},
                 status=400)
-    pipeline = cm.PipelineVersion.objects.filter(pk=pvid)
-    if not pipeline.count():
-        return JsonResponse({'error': 'Could not find pipeline, contact admin'}, status=400)
-    if cm.DatasetPipeline.objects.filter(pipelineversion__id=pvid).exists():
-        return JsonResponse({'error': 'Datasets exist mapped to this pipeline, we cant delete it!'}, status=403)
-    motherpipeline = pipeline.values('pipeline_id').get()['pipeline_id']
-    if not cm.PipelineVersion.objects.filter(pipeline_id=motherpipeline).exists():
-        pipeline.delete()
-        cm.SamplePipeline.objects.filter(pk=motherpipeline).delete()
-    else:
-        pipeline.delete()
+    pipelines = cm.PipelineVersion.objects.filter(pk__in=pvids)
+    if not pipelines.count() == len(pvids):
+        return JsonResponse({'error': 'Could not find all pipelines, contact admin'}, status=400)
+    if cm.DatasetPipeline.objects.filter(pipelineversion__id__in=pvids).exists():
+        return JsonResponse({'error': 'Datasets exist mapped to pipelines, we cant delete!'}, status=403)
+    # First delete the parent SamplePipeline where those have no other pipelineversions than
+    # the ones passed. This cascades to those versions
+    for parent in cm.SamplePipeline.objects.filter(pipelineversion__id__in=pvids).values('pk'
+            ).distinct('pk'):
+        if not cm.PipelineVersion.objects.filter(pipeline_id=parent['pk']).exclude(pk__in=pvids):
+            parent.delete()
+    pipelines.delete()
     return JsonResponse({})

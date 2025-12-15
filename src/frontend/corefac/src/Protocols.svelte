@@ -1,35 +1,55 @@
 <script>
-import { createEventDispatcher } from 'svelte';
 import { postJSON } from '../../datasets/src/funcJSON.js'
-import DynamicSelect from '../../datasets/src/DynamicSelect.svelte';
+import { flashtime } from '../../util.js'
 import Table from '../../home/src/Table.svelte';
+import Tabs from '../../home/src/Tabs.svelte'
 
-const dispatch = createEventDispatcher();
+let addItem;
+let selectedProtocols = [];
+let loadedProtocols;
 
-//async function editMethod(name, method) {
-//  const url = 'sampleprep/method/edit/';
-//  const resp = await postJSON(url, {'newname': name, 'paramopt_id': method.id});
-//  if (resp.error) {
-//    dispatch('error', {error: resp.error});
-//  } else {
-//    method.name = name;
-//    dispatch('updateprotocols', {});
-//  }
-//  editing = false;
-//}
-//
+let creatingNewProtocol = false;
+let creatingNewVersion = false;
+let newprotocol_name;
+let newprot_type_id;
+let newprot_version;
+let newprot_doi;
+
+let newver_protocol_name;
+let newver_protocol_id;
+let newver_protocol_type;
+let newver_protocol_version;
+let newver_protocol_doi;
+
+let notif = {errors: {}, messages: {}};
+
+const tablefields = [
+  {id: 'name', name: 'Name', type: 'str', multi: false},
+  {id: 'version', name: 'Version', type: 'str', multi: false},
+  {id: 'doi', name: 'DOI', type: 'str', multi: false},
+  {id: 'ptype', name: 'Type', type: 'str', multi: false},
+  {id: 'start', name: 'Registered', type: 'str', multi: false},
+  {id: 'actions', name: '', type: 'button', multi: true, confirm: ['close']},
+];
+
+const actionmap = {
+  'new version': newProtocolVersion,
+  'reactivate': reactivateProtocolVersion,
+  'deactivate': deactivateProtocolVersion,
+}
 
 async function addProtocol() {
   const url = 'sampleprep/method/add/';
-    console.log(Object.entries(loadedProtocols));
   const resp = await postJSON(url, {name: newprotocol_name, doi: newprot_doi,
     version: newprot_version, param_id: newprot_type_id});
   if (resp.error) {
-    dispatch('error', {error: resp.error});
+    notif.errors[resp.error] = 1;
   } else {
     addItem(resp);
     cancelProtocol();
+
   }
+  updateNotif();
 }
 
 
@@ -38,51 +58,28 @@ async function addProtocolVersion() {
   const resp = await postJSON(url, {'doi': newver_protocol_doi,
     'version': newver_protocol_version, 'paramopt_id': newver_protocol_id});
   if (resp.error) {
-    dispatch('error', {error: resp.error});
+    notif.errors[resp.error] = 1;
   } else {
     addItem(resp);
     cancelProtocol();
+    cf_init_data.protocols[resp.id] = {
+      name: `${resp.name} - ${resp.ptype} - ${resp.doi} - ${resp.version}`, id: resp.id
+    } 
   }
+  updateNotif();
 }
 
 
-//async function editProtocol() {
-//  const url = 'sampleprep/version/edit/';
-//  const resp = await postJSON(url, {'doi': newDOI, 'version': newVersion, 'prepprot_id': selectedProtocol.id});
-//  if (resp.error) {
-//    dispatch('error', {error: resp.error});
-//  } else {
-//    selectedProtocol.version = newVersion;
-//    selectedProtocol.doi = newDOI;
-//    dispatch('updateprotocols', {});
-//  }
-//  cancelProtocol();
-//}
-//
-//
-//async function archiveProtocol() {
-//  const url = 'sampleprep/version/disable/';
-//  const resp = await postJSON(url, {'prepprot_id': selectedProtocol.id});
-//  if (resp.error) {
-//    dispatch('error', {error: resp.error});
-//  } else {
-//    selectedProtocol.active = false;
-//    meth.versions = meth.versions;
-//    selectedProtocol = false;
-//    dispatch('updateprotocols', {});
-//  }
-//  cancelProtocol();
-//}
-//
 async function reactivateProtocolVersion(pver_id) {
   const url = 'sampleprep/version/enable/';
   const resp = await postJSON(url, {'prepprot_id': pver_id});
   if (resp.error) {
-    dispatch('error', {error: resp.error});
+    notif.errors[resp.error] = 1;
   } else {
     loadedProtocols[pver_id].inactive = false;
     loadedProtocols[pver_id].actions = ['new version', 'deactivate'];
   }
+  updateNotif();
 }
 
 
@@ -90,11 +87,12 @@ async function deactivateProtocolVersion(pver_id) {
   const url = 'sampleprep/version/disable/';
   const resp = await postJSON(url, {'prepprot_id': pver_id});
   if (resp.error) {
-    dispatch('error', {error: resp.error});
+    notif.errors[resp.error] = 1;
   } else {
     inactivate(pver_id);
     loadedProtocols[pver_id].actions = ['reactivate'];
   }
+  updateNotif();
 }
 
 
@@ -102,11 +100,12 @@ async function deleteProtocol() {
   const url = 'sampleprep/version/delete/';
   const resp = await postJSON(url, {'prepprot_ids': selectedProtocols});
   if (resp.error) {
-    dispatch('error', {error: resp.error});
+    notif.errors[resp.error] = 1;
   } else {
     selectedProtocols.forEach(x => inactivate(x));
     selectedProtocols = [];
   }
+  updateNotif();
 }
 
 
@@ -130,41 +129,20 @@ function cancelProtocol() {
   creatingNewVersion = false;
 }
 
-
-//function startEditProtocol() {
-//  newVersion = selectedProtocol.version;
-//  newDOI = selectedProtocol.doi;
-//}
-
-let addItem;
-let selectedProtocols = [];
-let loadedProtocols;
-
-function getProtocolDetails() {
-  // TODO
-}
-
-
-const tablefields = [
-  {id: 'name', name: 'Name', type: 'str', multi: false},
-  {id: 'version', name: 'Version', type: 'str', multi: false},
-  {id: 'doi', name: 'DOI', type: 'str', multi: false},
-  {id: 'ptype', name: 'Type', type: 'str', multi: false},
-  {id: 'start', name: 'Registered', type: 'str', multi: false},
-  {id: 'actions', name: '', type: 'button', multi: true, confirm: ['close']},
-];
-
-const actionmap = {
-  'new version': newProtocolVersion,
-  'reactivate': reactivateProtocolVersion,
-  'deactivate': deactivateProtocolVersion,
+function updateNotif() {
+  Object.entries(notif.errors)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg));
+  Object.entries(notif.messages)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg));
+  notif = notif;
 }
 
 async function doAction(action, protver_id) {
-  await actionmap[action](protver_id, loadedProtocols);
-  // TODO Update notifs
+  await actionmap[action](protver_id);
   loadedProtocols = loadedProtocols;
-  //updateNotif();
+  updateNotif();
 }
 
 function newProtocolVersion(protver_id) {
@@ -174,28 +152,11 @@ function newProtocolVersion(protver_id) {
   creatingNewVersion = true;
 }
 
-function showDetails(event) {
-  detailsVisible = event.detail.ids;
-}
-
-let creatingNewProtocol = false;
-let creatingNewVersion = false;
-let newprotocol_name;
-let newprot_type_id;
-let newprot_version;
-let newprot_doi;
-
-let newver_protocol_name;
-let newver_protocol_id;
-let newver_protocol_type;
-let newver_protocol_version;
-let newver_protocol_doi;
-
 </script>
 
-<div>
-Deactivated protocols can not be added to pipelines
-</div>
+<Tabs tabs={['Protocols', 'Pipelines', 'Dashboard']} tabshow="Protocols" notif={notif} />
+
+<div>Deactivated protocols can not be added to pipelines</div>
 
 
 {#if !creatingNewProtocol && !creatingNewVersion}
@@ -213,13 +174,11 @@ Deactivated protocols can not be added to pipelines
     </h5>
   
     <div class="field">
-      <label class="label">Protocol name: </label>
-{newver_protocol_name}
+      <label class="label">Protocol name: </label> {newver_protocol_name}
     </div>
   
     <div class="field">
-      <label class="label">Type: </label>
-{newver_protocol_type}
+      <label class="label">Type: </label> {newver_protocol_type}
     </div>
   
     <div class="field">
@@ -276,16 +235,14 @@ Deactivated protocols can not be added to pipelines
 <Table tab="Protocols" bind:addItem={addItem}
   bind:selected={selectedProtocols}
   bind:items={loadedProtocols}
+  bind:notif={notif}
   fetchUrl="sampleprep/method/find/"
   findUrl="sampleprep/method/find/"
   show_deleted_or_q="from:2025, to:20250801, from:202504, active:true/false/yes/no"
   defaultQ="active:true"
-  getdetails={getProtocolDetails}
   fixedbuttons={[]}
   fields={tablefields}
   inactive={['inactive']}
-  on:detailview={showDetails}
   allowedActions={Object.keys(actionmap)}
   on:rowAction={e => doAction(e.detail.action, e.detail.id)}
   />
-
