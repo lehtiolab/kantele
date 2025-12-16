@@ -614,7 +614,7 @@ def file_uploaded(request):
     sf, _ = StoredFile.objects.get_or_create(rawfile=rfn, filetype=filetype, md5=rfn.source_md5,
             defaults={'filename': fn, 'checked': True})
     sfl, _ = StoredFileLoc.objects.get_or_create(sfile=sf, servershare_id=share_id,
-            path=sfl_path, defaults={'purged': False})
+            defaults={'path': sfl_path, 'purged': False})
     if not raw_created:
         # If there is a raw, there will also be an SF and SFL if it has been done in this
         # method - so we can safely get_or_create those. The file exists on disk somehwere,
