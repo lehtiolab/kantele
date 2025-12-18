@@ -738,21 +738,21 @@ def save_new_project(request):
 
 def populate_proj(dbprojs, user, showjobs=True, include_db_entry=False):
     projs, order = {}, []
-    dbprojs = dbprojs.annotate(dsmax=Max('experiment__runname__dataset__date'),
-            anamax=Max('experiment__runname__dataset__datasetanalysis__analysis__date')).annotate(
-            greatdate=Greatest('dsmax', 'anamax'))
-    for proj in dbprojs.order_by('-greatdate'): # latest first
-        order.append(proj.id)
-        projs[proj.id] = {
-            'id': proj.id,
-            'name': proj.name,
-            'inactive': proj.active == False,
-            'start': datetime.strftime(proj.registered, '%Y-%m-%d %H:%M'),
-            'ptype': proj.ptype.name,
-            'dset_ids': [x.dataset.pk for y in proj.experiment_set.all() for x in y.runname_set.all() if hasattr(x, 'dataset')],
+    for proj in dbprojs.annotate(dsmax=Max('experiment__runname__dataset__date'),
+            anamax=Max('experiment__runname__dataset__datasetanalysis__analysis__date')
+            ).annotate(greatdate=Greatest('dsmax', 'anamax')).order_by('-greatdate'
+            ).values('pk', 'name', 'active', 'registered', 'ptype__name', 'greatdate'):
+        order.append(proj['pk'])
+        projs[proj['pk']] = {
+            'id': proj['pk'],
+            'name': proj['name'],
+            'inactive': proj['active'] == False,
+            'start': datetime.strftime(proj['registered'], '%Y-%m-%d %H:%M'),
+            'ptype': proj['ptype__name'],
+            'dset_ids': [x['pk'] for x in models.Dataset.objects.filter(runname__experiment__project_id=proj['pk']).values('pk')],
             'details': False,
             'selected': False,
-            'lastactive': datetime.strftime(proj.greatdate, '%Y-%m-%d %H:%M') if proj.greatdate else '-',
+            'lastactive': datetime.strftime(proj['greatdate'], '%Y-%m-%d %H:%M') if proj['greatdate'] else '-',
             'actions': ['new dataset', 'close'],
         }
     return projs, order

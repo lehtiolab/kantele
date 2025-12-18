@@ -530,26 +530,20 @@ def populate_analysis(analyses, user):
 
 @login_required
 def get_proj_info(request, proj_id):
-    # FIXME make sure users can edit project
     proj = dsmodels.Project.objects.filter(pk=proj_id).select_related('ptype', 'pi').get()
-    files = filemodels.StoredFile.objects.select_related('rawfile__producer', 'filetype').filter(
-        rawfile__datasetrawfile__dataset__runname__experiment__project=proj)
-    sfiles = {}
-    for sfile in files:
-        try:
-            sfiles[sfile.filetype.name].append(sfile)
-        except KeyError:
-            sfiles[sfile.filetype.name] = [sfile]
+    files = filemodels.StoredFile.objects.filter(mzmlfile__isnull=True,
+            rawfile__datasetrawfile__dataset__runname__experiment__project=proj)
+    nr_files = files.values('filetype__name').annotate(ftcount=Count('filetype__name')).order_by()
     dsets = dsmodels.Dataset.objects.filter(runname__experiment__project=proj)
-    #dsowners = dsmodels.DatasetOwner.objects.filter(dataset__runname__experiment__project_id=proj_id).distinct()
     info = {'owners': [x['datasetowner__user__username'] for x in dsets.values('datasetowner__user__username').distinct()],
             'stored_total_xbytes': getxbytes(files.aggregate(Sum('rawfile__size'))['rawfile__size__sum']),
-            'nrstoredfiles': {ft: len([fn for fn in fns]) for ft, fns in sfiles.items()},
+            'nrstoredfiles': {x['filetype__name']: x['ftcount'] for x in nr_files},
             'name': proj.name,
             'pi': proj.pi.name,
             'regdate': datetime.strftime(proj.registered, '%Y-%m-%d %H:%M'),
             'type': proj.ptype.name,
-            'instruments': list(set([x.rawfile.producer.name for x in files])),
+            'instruments': [x['rawfile__producer__name'] for x in
+                files.values('rawfile__producer__name').distinct()],
             'nrdsets': dsets.count(),
             'nrbackupfiles': filemodels.SwestoreBackedupFile.objects.filter(
                 storedfile__rawfile__datasetrawfile__dataset__runname__experiment__project_id=proj_id).count() + filemodels.PDCBackedupFile.objects.filter(
