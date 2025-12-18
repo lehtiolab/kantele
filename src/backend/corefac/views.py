@@ -8,7 +8,7 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.views.decorators.http import require_GET, require_POST
 from django.http import JsonResponse
 from django.shortcuts import render
-from django.db.models import Q, Max
+from django.db.models import Q, Max, Sum
 from django.db import IntegrityError
 from django.utils import timezone
 
@@ -113,32 +113,43 @@ def get_project_plotdata(request):
                 rawpp['end'] = today
 
         openpp = False
-        if firstfile_date and (opendate := dp['runname__experiment__project__registered']) < firstfile_date:
+        opendate = dp['runname__experiment__project__registered']
+        if not firstfile_date or opendate < firstfile_date:
             if opendate < firstdate:
                 firstdate = opendate
+            firstbar_start = opendate
             openpp = {'proj': bartext, 'dset': dp['pk'],
                     'open': dp['runname__experiment__project__active'],
                     'pid': dp['runname__experiment__project_id'],
                     'stage': Stages.OPENED, 'start': opendate,
                     'first': True}
-        elif firstfile_date:
+        else:
             # The opening of project was done after acquisition of files
             rawpp.update({'first': True, 'pid': dp['runname__experiment__project_id'],
                     'open': dp['runname__experiment__project__active'],
                 })
+            firstbar_start = firstfile_date
         if raws:
             perprojects.append(rawpp)
 
         track_pipeline = False
+        if openpp:
+            firststage = openpp['start']
+        elif firstfile_date:
+            firststage = firstfile_date
+        
         for tr in cm.DatasetPrepTracking.objects.filter(dspipe__dataset_id=dp['pk']).order_by(
                 'timestamp'):
             track_pipeline = True
-            if tr.stage == cm.TrackingStages.SAMPLESREADY and openpp:
-                openpp['end'] = tr.timestamp
+            if tr.stage == cm.TrackingStages.SAMPLESREADY and tr.timestamp > firstbar_start:
+                # Normal, i.e first opened proj, then samples arrive
+                if openpp:
+                    openpp['end'] = tr.timestamp
                 pp = {'proj': bartext, 'dset': dp['pk'],
                         'stage': Stages.SAMPLES, 'start': tr.timestamp}
 
-            elif tr.stage == cm.TrackingStages.SAMPLESREADY and tr.timestamp < (firstfile_date or firstdate):
+            elif tr.stage == cm.TrackingStages.SAMPLESREADY:
+                # Samples ready before opening project
                 pp = {'proj': bartext, 'dset': dp['pk'],
                         'stage': Stages.SAMPLES, 'start': tr.timestamp}
 
@@ -178,7 +189,7 @@ def get_project_plotdata(request):
         if openpp:
             perprojects.append(openpp)
 
-    firstdates_open, lastdates = {}, {}
+    firstdates_open, lastdates, mstimes = {}, {}, {}
     for pp in perprojects:
         if not (ld := lastdates.get(pp['dset'])) or ld < pp['end']:
             lastdates[pp['dset']] = pp['end']
@@ -186,14 +197,20 @@ def get_project_plotdata(request):
         if pp.get('first'):
             firstdates_open[pp['dset']] = (pp['start'], pp['open'])
             pp['duration'] = (lastdates[pp['dset']] - pp['start']).days
+            files = rm.RawFile.objects.filter(datasetrawfile__dataset_id=pp['dset'])
+            msfiles = rm.MSFileData.objects.filter(rawfile__datasetrawfile__dataset_id=pp['dset'])
+            pp['fsize'] = files.aggregate(Sum('size'))['size__sum']
+            pp['mstime'] = msfiles.aggregate(Sum('mstime'))['mstime__sum'] or 0
+            mstimes[pp['dset']] = pp['mstime']
+
     for pp in perprojects:
         # Mark last segments in dset, add open/owner and start of dset there
         if lastdates[pp['dset']] == pp['end']:
             pp['last'] = True
-            # FIXME this gives KeyError sometimes!
             pp['startdset'] = firstdates_open[pp['dset']][0]
             pp['open'] = firstdates_open[pp['dset']][1]
             pp['owner'] = ds_owners[pp['dset']]
+            pp['mstime'] = mstimes[pp['dset']]
 
     [x.update({'stage': str(x['stage']), 'start': datetime.strftime(x['start'], datefmt),
         'end': datetime.strftime(x['end'], datefmt)}) for x in perprojects]
