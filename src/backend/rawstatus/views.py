@@ -690,12 +690,14 @@ def archive_file(request):
         sfid = data['item_id']
     except KeyError:
         return JsonResponse({'error': 'Parameters not passed'}, status=400)
-    if sf := StoredFile.objects.filter(pk=sfid):
+    if sf := StoredFile.objects.filter(pk=sfid, mzmlfile__isnull=True):
         if sf.filter(pdcbackedupfile__success=True):
             return JsonResponse({'error': 'File is already in archive'}, status=400)
         elif sfl := StoredFileLoc.objects.filter(sfile_id=sfid, active=True).values('pk'):
             isdir = sf.values('filetype__is_folder').get()['filetype__is_folder']
-            create_job('create_pdc_archive', sfloc_id=sfl.get()['pk'], isdir=isdir)
+            create_job('create_pdc_archive', sfloc_id=sfl.first()['pk'], isdir=isdir)
+            if msferr := MSFileData.objects.filter(rawfile__storedfile__id=sfid, success=False):
+                msferr.update(success=True)
             return JsonResponse({})
         else:
             return JsonResponse({'error': 'Cannot find copy of file on disk to archive'}, status=404)
