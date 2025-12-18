@@ -86,7 +86,7 @@ async function deleteFileNoarchive(sfid) {
     const msg = `Something went wrong deleting file ${sfid}: ${resp.error}`;
     notif.errors[msg] = 1;
   } else {
-    const msg = `File ${itemid} queued for deleting`;
+    const msg = `File ${sfid} queued for deleting`;
     notif.messages[msg] = 1;
   }
   refreshFile(sfid);
