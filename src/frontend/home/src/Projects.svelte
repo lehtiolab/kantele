@@ -30,8 +30,6 @@ $: newProjIsExternal = Boolean(newproj_ptype_id !== local_ptype_id);
 
 const tablefields = [
   {id: 'name', name: 'Name', type: 'str', multi: false},
-//  {id: 'storestate', name: 'Stored', type: 'tag', multi: false, links: 'fn_ids', linkroute: '#/files/'},
-//  {id: 'jobstates', name: '__hourglass-half', type: 'state', multi: true, links: 'jobids', linkroute: '#/jobs'},
   {id: 'datasets', name: '', help: 'Datasets', type: 'icon', icon: 'clipboard-list', multi: false, links: 'dset_ids', linkroute: '#/datasets'},
   {id: 'ptype', name: 'Type', type: 'str', multi: false},
   {id: 'start', name: 'Registered', type: 'str', multi: false},
@@ -232,7 +230,6 @@ async function mergeProjects() {
   fetchUrl="/show/projects"
   findUrl="/show/projects"
   defaultQ="active:true"
-  show_deleted_or_q="type:cf, type:local, from:2025, to:20250701, active:true, active:false"
   show_deleted_or_q="type:cf, from:2025, to:20250801, from:202504, active:true/false/yes/no, user:username"
   getdetails={getProjDetails}
   fixedbuttons={fixedbuttons}
