@@ -167,6 +167,9 @@ def dataset_files(request, dataset_id=False):
 @login_required
 def dataset_mssampleprep(request, dataset_id=False):
     params = {}
+    # also show sample prep methods that have versioned protocols - this does make it
+    # probable that their will be empty methods left when protocols are deleted,
+    # we'll have loose methods in the DB since they are connected to a dset
     for p in models.SampleprepParameterOption.objects.select_related('param'):
         fill_sampleprepparam(params, p)
     pipelines = {}
@@ -928,7 +931,7 @@ def move_project_cold(request):
     else:
         projquery.update(active=False)
         models.ProjectLog.objects.create(project_id=data['item_id'],
-                level=models.ProjLogLevels.INFO, message=f'User {request.user.id} closed project')
+                level=models.ProjLogLevels.CLOSE, message=f'User {request.user.id} closed project')
         return JsonResponse({})
 
 

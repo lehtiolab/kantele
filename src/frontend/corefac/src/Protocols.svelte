@@ -1,190 +1,248 @@
 <script>
-import { createEventDispatcher } from 'svelte';
-import Inputfield from './Inputfield.svelte';
 import { postJSON } from '../../datasets/src/funcJSON.js'
-import DynamicSelect from '../../datasets/src/DynamicSelect.svelte';
+import { flashtime } from '../../util.js'
+import Table from '../../home/src/Table.svelte';
+import Tabs from '../../home/src/Tabs.svelte'
 
-const dispatch = createEventDispatcher();
-export let meth;
+let addItem;
+let selectedProtocols = [];
+let loadedProtocols;
 
-let editing;
-let newProtocol;
-let newVersion;
-let newDOI;
-let editingProtocol;
-let selectedProtocol = false;
-let selectedDisabledProtocol = meth.versions.filter(x => !x.active)[0];
+let creatingNewProtocol = false;
+let creatingNewVersion = false;
+let newprotocol_name;
+let newprot_type_id;
+let newprot_version;
+let newprot_doi;
 
+let newver_protocol_name;
+let newver_protocol_id;
+let newver_protocol_type;
+let newver_protocol_version;
+let newver_protocol_doi;
 
-async function editMethod(name, method) {
-  const url = 'sampleprep/method/edit/';
-  const resp = await postJSON(url, {'newname': name, 'paramopt_id': method.id});
-  if (resp.error) {
-    dispatch('error', {error: resp.error});
-  } else {
-    method.name = name;
-    dispatch('updateprotocols', {});
-  }
-  editing = false;
+let notif = {errors: {}, messages: {}};
+
+const tablefields = [
+  {id: 'name', name: 'Name', type: 'str', multi: false},
+  {id: 'version', name: 'Version', type: 'str', multi: false},
+  {id: 'doi', name: 'DOI', type: 'str', multi: false},
+  {id: 'ptype', name: 'Type', type: 'str', multi: false},
+  {id: 'start', name: 'Registered', type: 'str', multi: false},
+  {id: 'actions', name: '', type: 'button', multi: true, confirm: ['close']},
+];
+
+const actionmap = {
+  'new version': newProtocolVersion,
+  'reactivate': reactivateProtocolVersion,
+  'deactivate': deactivateProtocolVersion,
 }
-
 
 async function addProtocol() {
+  const url = 'sampleprep/method/add/';
+  const resp = await postJSON(url, {name: newprotocol_name, doi: newprot_doi,
+    version: newprot_version, param_id: newprot_type_id});
+  if (resp.error) {
+    notif.errors[resp.error] = 1;
+  } else {
+    addItem(resp);
+    cancelProtocol();
+
+  }
+  updateNotif();
+}
+
+
+async function addProtocolVersion() {
   const url = 'sampleprep/version/add/';
-  const resp = await postJSON(url, {'doi': newDOI, 'version': newVersion, 'paramopt_id': meth.id});
+  const resp = await postJSON(url, {'doi': newver_protocol_doi,
+    'version': newver_protocol_version, 'paramopt_id': newver_protocol_id});
   if (resp.error) {
-    dispatch('error', {error: resp.error});
+    notif.errors[resp.error] = 1;
   } else {
-    const newmeth = {id: resp.id, version: newVersion, doi: newDOI, active: true};
-    meth.versions.push(newmeth);
-    selectedProtocol = newmeth;
-    dispatch('updateprotocols', {});
+    addItem(resp);
+    cancelProtocol();
+    cf_init_data.protocols[resp.id] = {
+      name: `${resp.name} - ${resp.ptype} - ${resp.doi} - ${resp.version}`, id: resp.id
+    } 
   }
-  cancelProtocol();
+  updateNotif();
 }
 
 
-async function editProtocol() {
-  const url = 'sampleprep/version/edit/';
-  const resp = await postJSON(url, {'doi': newDOI, 'version': newVersion, 'prepprot_id': selectedProtocol.id});
-  if (resp.error) {
-    dispatch('error', {error: resp.error});
-  } else {
-    selectedProtocol.version = newVersion;
-    selectedProtocol.doi = newDOI;
-    dispatch('updateprotocols', {});
-  }
-  cancelProtocol();
-}
-
-
-async function archiveProtocol() {
-  const url = 'sampleprep/version/disable/';
-  const resp = await postJSON(url, {'prepprot_id': selectedProtocol.id});
-  if (resp.error) {
-    dispatch('error', {error: resp.error});
-  } else {
-    selectedProtocol.active = false;
-    meth.versions = meth.versions;
-    selectedProtocol = false;
-    dispatch('updateprotocols', {});
-  }
-  cancelProtocol();
-}
-
-
-async function reactivateProtocol() {
+async function reactivateProtocolVersion(pver_id) {
   const url = 'sampleprep/version/enable/';
-  const resp = await postJSON(url, {'prepprot_id': selectedDisabledProtocol});
+  const resp = await postJSON(url, {'prepprot_id': pver_id});
   if (resp.error) {
-    dispatch('error', {error: resp.error});
+    notif.errors[resp.error] = 1;
   } else {
-    meth.versions
-      .filter(x => x.id === selectedDisabledProtocol)
-      .forEach(x => {
-        x.active = true
-      });
-    meth.versions = meth.versions;
-    selectedDisabledProtocol = meth.versions.filter(x => !x.active)[0];
-    dispatch('updateprotocols', {});
+    loadedProtocols[pver_id].inactive = false;
+    loadedProtocols[pver_id].actions = ['new version', 'deactivate'];
   }
-  cancelProtocol();
+  updateNotif();
+}
+
+
+async function deactivateProtocolVersion(pver_id) {
+  const url = 'sampleprep/version/disable/';
+  const resp = await postJSON(url, {'prepprot_id': pver_id});
+  if (resp.error) {
+    notif.errors[resp.error] = 1;
+  } else {
+    inactivate(pver_id);
+    loadedProtocols[pver_id].actions = ['reactivate'];
+  }
+  updateNotif();
 }
 
 
 async function deleteProtocol() {
   const url = 'sampleprep/version/delete/';
-  const resp = await postJSON(url, {'prepprot_id': selectedProtocol.id});
+  const resp = await postJSON(url, {'prepprot_ids': selectedProtocols});
   if (resp.error) {
-    dispatch('error', {error: resp.error});
+    notif.errors[resp.error] = 1;
   } else {
-    meth.versions = meth.versions.filter(x => x.id !== selectedProtocol.id);
-    selectedProtocol = false;
-    dispatch('updateprotocols', {});
+    selectedProtocols.forEach(x => inactivate(x));
+    selectedProtocols = [];
   }
-  cancelProtocol();
+  updateNotif();
+}
+
+
+function inactivate(pid) {
+  loadedProtocols[pid].inactive = true;
+  loadedProtocols[pid].actions = [];
 }
 
 
 function cancelProtocol() {
-  newDOI = '';
-  newVersion = '';
-  newProtocol = false;
-  editingProtocol = false;
+  newprotocol_name = '';
+  newprot_type_id = false;
+  newprot_version = '';
+  newprot_doi = '';
+  newver_protocol_id = '';
+  newver_protocol_name = '';
+  newver_protocol_type = false;
+  newver_protocol_version = '';
+  newver_protocol_doi = '';
+  creatingNewProtocol = false;
+  creatingNewVersion = false;
 }
 
-
-function startEditProtocol() {
-  editingProtocol = true;
-  newVersion = selectedProtocol.version;
-  newDOI = selectedProtocol.doi;
+function updateNotif() {
+  Object.entries(notif.errors)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.errors[msg] = 0 } , flashtime, msg));
+  Object.entries(notif.messages)
+    .filter(x => x[1])
+    .forEach(([msg,v]) => setTimeout(function(msg) { notif.messages[msg] = 0 } , flashtime, msg));
+  notif = notif;
 }
 
+async function doAction(action, protver_id) {
+  await actionmap[action](protver_id);
+  loadedProtocols = loadedProtocols;
+  updateNotif();
+}
+
+function newProtocolVersion(protver_id) {
+  newver_protocol_name = loadedProtocols[protver_id].name;
+  newver_protocol_id = loadedProtocols[protver_id].protocol_id;
+  newver_protocol_type = loadedProtocols[protver_id].ptype;
+  creatingNewVersion = true;
+}
 
 </script>
 
-<div class="box has-background-light">
-  <div class="field">
-    <label class="label">
-      {#if editing}
-      <Inputfield intext={meth.name} on:newvalue={e => editMethod(e.detail.text, meth)} />
+<Tabs tabs={['Protocols', 'Pipelines', 'Dashboard']} tabshow="Protocols" notif={notif} />
 
-      {:else}
-      <p>
-        {meth.name}
-        <a title="Edit" on:click={e => editing = true}><i class="has-text-grey fas fa-edit"></i></a>
-        <a title="Disable" on:click={e => dispatch('archive', {})}><i class="has-text-grey fas fa-archive"></i></a>
-        <a title="Delete" on:click={e => dispatch('delete', {})}><i class="has-text-danger fas fa-trash-alt"></i></a>
-      </p>
-      <p>
-        Versions:
-        <a title="New" on:click={e => newProtocol = true}><i class="has-text-grey fas fa-plus"></i></a>
-        {#if selectedProtocol}
-        <a title="Edit" on:click={startEditProtocol}><i class="has-text-grey fas fa-edit"></i></a>
-        <a title="Disable" on:click={archiveProtocol}><i class="has-text-grey fas fa-archive"></i></a>
-        <a title="Delete" on:click={deleteProtocol}><i class="has-text-danger fas fa-trash-alt"></i></a>
-        {/if}
-      </p>
+<div>Deactivated protocols can not be added to pipelines</div>
 
-      {/if}
-    </label>
 
-    {#if editingProtocol}
+{#if !creatingNewProtocol && !creatingNewVersion}
+  <a class="button is-small" title="Create new protocol" on:click={e => creatingNewProtocol=true}>New protocol</a>
+  {#if selectedProtocols.length}
+  <a class="button is-small" title="Delete version" on:click={deleteProtocol}>Delete version</a>
+  {:else}
+  <a class="button is-small" title="Delete version" disabled>Delete version</a>
+  {/if}
+
+{:else if creatingNewVersion}
+  <div class="box">
+    <h5 class="title is-5">New protocol version
+      <button on:click={e => creatingNewVersion=false} class="button is-small is-danger">Cancel</button>
+    </h5>
+  
     <div class="field">
-      <input class="input" type="text" bind:value={newVersion}  placeholder="Your version"/>
-      <input class="input" type="text" bind:value={newDOI} placeholder="DOI" />
-      <button class="button" on:click={editProtocol}>Update</button>
-      <button class="button" on:click={cancelProtocol}>Cancel</button>
+      <label class="label">Protocol name: </label> {newver_protocol_name}
     </div>
-      {:else if newProtocol}
+  
     <div class="field">
-      <input class="input" type="text" bind:value={newVersion} placeholder="Your version"/>
-      <input class="input" type="text" bind:value={newDOI} placeholder="DOI" />
-      <button class="button" on:click={addProtocol}>Save</button>
-      <button class="button" on:click={cancelProtocol}>Cancel</button>
+      <label class="label">Type: </label> {newver_protocol_type}
     </div>
-
-    {:else}
-    <div class="select">
-      <select bind:value={selectedProtocol}>
-        <option disabled value={false}>No {meth.name} version</option>
-        {#each meth.versions.filter(x => x.active) as version}
-        <option value={version}>{version.version} - {version.doi}</option>
-        {/each}
-      </select>
+  
+    <div class="field">
+      <label class="label">Version</label>
+      <input class="input" type="text" bind:value={newver_protocol_version}>
     </div>
-    {/if}
-    {#if meth.versions.filter(x => !x.active).length}
-    <div class="control mt-4">
-      <label class="label">Disabled versions:</label>
-
-        <DynamicSelect placeholder="Type to select version"
-  fixedoptions={Object.fromEntries(meth.versions.filter(x => !x.active).map(x => [x.id, x]))} bind:selectval={selectedDisabledProtocol} niceName={x => `${x.version} - ${x.doi}`} />
-        <button class="button" title="Reactivate" on:click={reactivateProtocol}>
-          <span class="icon"><i class="has-text-grey far fa-arrow-alt-circle-up"></i></span>
-          <span>Reactivate</span>
-        </button>
+  
+    <div class="field">
+      <label class="label">DOI</label>
+      <input class="input" type="text" bind:value={newver_protocol_doi}>
     </div>
-    {/if}
+  
+    <button class="button is-small is-success" on:click={addProtocolVersion}>Save</button>
+  
   </div>
-</div>
+
+{:else if creatingNewProtocol}
+  <div class="box">
+    <h5 class="title is-5">New protocol
+      <button on:click={e => creatingNewProtocol=false} class="button is-small is-danger">Cancel</button>
+    </h5>
+  
+    <div class="field">
+      <label class="label">Protocol name</label>
+      <input class="input" bind:value={newprotocol_name} type="text" placeholder="Protocol name">
+    </div>
+  
+    <div class="field">
+      <label class="label">Type</label>
+      <div class="select">
+        <select bind:value={newprot_type_id}>
+        {#each cf_init_data.ptypes as {id, name}}
+          <option value={id}>{name}</option>
+        {/each}
+        </select>
+      </div>
+    </div>
+  
+    <div class="field">
+      <label class="label">Version</label>
+      <input class="input" type="text" bind:value={newprot_version}>
+    </div>
+  
+    <div class="field">
+      <label class="label">DOI</label>
+      <input class="input" type="text" bind:value={newprot_doi}>
+    </div>
+  
+    <button class="button is-small is-success" on:click={addProtocol}>Save</button>
+  
+  </div>
+{/if}
+
+<Table tab="Protocols" bind:addItem={addItem}
+  bind:selected={selectedProtocols}
+  bind:items={loadedProtocols}
+  bind:notif={notif}
+  fetchUrl="sampleprep/method/find/"
+  findUrl="sampleprep/method/find/"
+  show_deleted_or_q="from:2025, to:20250801, from:202504, active:true/false/yes/no"
+  defaultQ="active:true"
+  fixedbuttons={[]}
+  fields={tablefields}
+  inactive={['inactive']}
+  allowedActions={Object.keys(actionmap)}
+  on:rowAction={e => doAction(e.detail.action, e.detail.id)}
+  />

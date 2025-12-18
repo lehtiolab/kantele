@@ -64,10 +64,12 @@ function findQuery(event) {
 }
 
 async function hoverDetails(itemId) {
-  showDetailBox = itemId; 
-  detailsLoaded = false;
-  detailBoxContent = await getdetails(itemId);
-  detailsLoaded = true;
+  if (getdetails) {
+    showDetailBox = itemId; 
+    detailsLoaded = false;
+    detailBoxContent = await getdetails(itemId);
+    detailsLoaded = true;
+  }
 }
 
 function clickSingleDetails(rowid) {
@@ -173,6 +175,7 @@ div.spinner {
         {#if selected}
         <input type="checkbox" bind:group={selected} value={row.id}>
         {/if}
+        {#if getdetails}
         <a on:click={e => clickSingleDetails(rowid)} on:mouseenter={e => hoverDetails(rowid)} on:mouseleave={e => showDetailBox = false}>
           <span class="has-text-info icon is-small"> <i class="fa fa-eye"></i></span>
           {#if showDetailBox === rowid}
@@ -185,6 +188,7 @@ div.spinner {
           </div>
           {/if}
         </a>
+        {/if}
         {#each fixedbuttons as button}
         <a title={button.alt} on:click={e => button.action(row.id)}>
         <span class="icon has-text-info is-small"><i class={`fa fa-${button.name.slice(2)}`}></i></span>
@@ -206,6 +210,9 @@ div.spinner {
             </a>
             {/if}
 
+          {:else if field.type === 'count'}
+            <TableItem value={row[field.count].length} rowid={rowid} inactive={inactive.some(x=>row[x])} help={field.help} icon={field.icon} field={field} on:rowAction allowedActions={allowedActions} />
+   
           {:else}
             {#if field.multi}
             {#each row[field.id] as item}

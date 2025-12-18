@@ -5,6 +5,7 @@ from datasets import models as dm
 
 class PrepOptionProtocol(models.Model):
     doi = models.TextField(unique=True)
+    registered = models.DateTimeField(auto_now_add=True)
     version = models.TextField()
     paramopt = models.ForeignKey(dm.SampleprepParameterOption, on_delete=models.CASCADE)
     active = models.BooleanField(default=True)
@@ -15,7 +16,7 @@ class SamplePipeline(models.Model):
 
 
 class PipelineVersion(models.Model):
-    pipeline = models.ForeignKey(SamplePipeline, on_delete=models.PROTECT)
+    pipeline = models.ForeignKey(SamplePipeline, on_delete=models.CASCADE)
     version = models.TextField()
     timestamp = models.DateTimeField()
     # Once pipeline locked, it can not be saved anymore, except for delete/inactivation/activation

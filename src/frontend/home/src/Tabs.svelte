@@ -3,7 +3,7 @@
 export let tabshow; 
 export let notif;
 
-let tabs = ['Projects', 'Analyses', 'Datasets', 'Files', 'Jobs'];
+export let tabs = ['Projects', 'Analyses', 'Datasets', 'Files', 'Jobs'];
 
 </script>
 
