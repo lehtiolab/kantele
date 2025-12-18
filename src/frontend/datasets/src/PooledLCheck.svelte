@@ -43,7 +43,10 @@ export async function save() {
       quanttype: prepdata.quanttype,
     };
     let url = '/datasets/save/labelcheck/';
-    await postJSON(url, postdata);
+    const resp = await postJSON(url, postdata);
+    if (resp.error) {
+      errors = [resp.error, ...errors];
+    }
     fetchData();
   }
 }

@@ -81,7 +81,7 @@ async function refreshFile(fnid) {
 
 async function deleteFileNoarchive(sfid) {
   const url = 'files/delete/';
-  const resp = await postJSON(url, {sfid: sfid, noarchive: true});
+  const resp = await postJSON(url, {item_id: sfid, noarchive: true});
   if (!resp.ok) {
     const msg = `Something went wrong deleting file ${sfid}: ${resp.error}`;
     notif.errors[msg] = 1;

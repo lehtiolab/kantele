@@ -89,6 +89,9 @@ async function save() {
     }
     const url = '/datasets/save/labelcheck/';
     const response = await postJSON(url, postdata);
+    if (response.error) {
+      errors = [response.error, ...errors];
+    }
     fetchData();
   }
 }
