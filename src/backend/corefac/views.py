@@ -501,8 +501,8 @@ def save_sampleprep_pipeline(request):
         pipeline, cr = cm.SamplePipeline.objects.get_or_create(name=pipename)
         if not cr:
             return JsonResponse({'error': 'Pipeline name already exists, create a new version instead'}, status=403)
-        pversion = cm.PipelineVersion.objects.create(pipeline_id=req['pipe_id'],
-                version=version, defaults={'timestamp': datetime.now()})
+        pversion = cm.PipelineVersion.objects.create(pipeline=pipeline, version=version,
+                timestamp=datetime.now())
 
     # Remove old steps that are not needed if pipeline is shorter, update remaining/new steps
     cm.PipelineStep.objects.filter(pipelineversion=pversion).exclude(
