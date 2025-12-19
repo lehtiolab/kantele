@@ -189,70 +189,85 @@ async function replot(sortkey) {
       owner: 'Datasets (stacked)',
       stage: 'Datasets',
     }
-    //const bar_to_aggregate = ['owner', 'end', 'start', 'stage'].indexOf(sortkey) > -1 ? 'last' : 'first';
     const bar_to_aggregate = sortkey === 'duration' ? 'first' : 'last';
     const agg_plotdata = perProject.filter(d => d[bar_to_aggregate]);
     let sortkey_mod = ['stage', 'owner'].indexOf(sortkey) > -1 ? sortkey : `month${sortkey}`;
     sortkey_mod = sortkey_mod === 'monthstart' ? 'monthstartdset' : sortkey_mod;
     const rotation = ['stage', 'owner'].indexOf(sortkey) > -1 ? 0 : 90;
 
-    let proj_agg_transform;
-    let ms_agg_transform;
+    let proj_agg_transform_yred = {y: 'count'};
+    let ms_agg_transform_yred = {y: 'sum'};
+    let agg_transform_in;
+    let ms_trf;
     let agg_x;
     let agg_fx;
     let agg_y;
     let agg_col;
-    let agg_margin = 40;
     let agg_marks;
+    let ms_agg_marks;
+    let open_closed_in;
 
     if (sortkey !== 'duration') {
       agg_y = { label: ylabels[sortkey], grid: true };
       agg_col = colorscale;
-      agg_margin = 75;
-      proj_agg_transform = Plot.groupX({y: 'count'},
-        {fx: sortkey_mod, x: 'state', fill: 'stage', opacity: 0.3});
-      ms_agg_transform = Plot.groupX({y: 'sum'}, {fx: sortkey_mod, x: 'state', y: 'mstime', fill: 'stage', opacity: 0.3});
+      agg_transform_in = {fx: sortkey_mod, x: 'state', fill: 'stage', opacity: 0.3};
       agg_x = {axis: null};
       agg_fx = {axis: 'bottom', tickRotate: rotation, label: xlabels[sortkey]};
+
+      open_closed_in = {
+          fx: sortkey_mod,
+          x: 'state',
+          text: (d) => d.open ? '⏳' : '✅',
+          fontSize: 20,
+          dy: -15,
+      }
       agg_marks = [
-                 Plot.barY(agg_plotdata, proj_agg_transform),
-                 Plot.ruleY([0]),
-                 Plot.text(agg_plotdata,
-                   Plot.groupX({text: "first", y: "count"}, {
-                     fx: sortkey_mod,
-                     x: 'state',
-                     text: (d) => d.open ? '⏳' : '✅',
-                     fontSize: 20,
-                     dy: -15,
-                   }),
-                 ),
+        Plot.barY(agg_plotdata, Plot.groupX(proj_agg_transform_yred, agg_transform_in)),
+        Plot.ruleY([0]),
+        Plot.text(agg_plotdata,
+          Plot.groupX(Object.assign({text: "first"}, proj_agg_transform_yred), open_closed_in),
+        )
+      ];
+
+      ms_trf = Object.assign(agg_transform_in, {y: 'mstime'});
+      ms_agg_marks = [
+        Plot.barY(agg_plotdata, Plot.groupX(ms_agg_transform_yred, ms_trf)),
+        Plot.ruleY([0]),
+        Plot.text(agg_plotdata,
+          Plot.groupX(Object.assign({text: "first"}, ms_agg_transform_yred),
+            Object.assign(open_closed_in, {y: 'mstime'})),
+        ),
       ];
       
     } else if (sortkey === 'duration') {
       // Duration needs binning, so the aggregate plots get own code
       agg_y = { label: 'Datasets', grid: true};
       agg_col = { legend: true, opacity: 0.3};
-      proj_agg_transform = Plot.binX({y: 'count'},
-        {x: {thresholds: 20, value: sortkey}, fill: 'state', opacity: 0.3});
-      ms_agg_transform = Plot.binX({y: 'sum'},
-        {x: {thresholds: 20, value: sortkey}, y: 'mstime', fill: 'state', opacity: 0.3})
+      agg_transform_in = {x: {thresholds: 20, value: sortkey}, fill: 'state', opacity: 0.3};
+      ms_trf = Object.assign(agg_transform_in, {y: 'mstime'});
       agg_x = {label: xlabels[sortkey]};
       agg_fx = {axis: null};
       agg_marks = [
-                 Plot.barY(agg_plotdata, proj_agg_transform),
-                 Plot.ruleY([0]),
+        Plot.barY(agg_plotdata, Plot.binX(proj_agg_transform_yred, agg_transform_in)),
+        Plot.ruleY([0]),
+      ];
+      ms_agg_marks = [
+        Plot.barY(agg_plotdata, Plot.binX(ms_agg_transform_yred, ms_trf)),
+        Plot.ruleY([0]),
       ];
     }
+
     aggregate_plot = Plot.plot({
            color: agg_col,
            y: agg_y,
-           x: agg_x, //{label: xlabels[sortkey]},
-           fx: agg_fx, //{label: xlabels[sortkey]},
+           x: agg_x, 
+           fx: agg_fx,
            marks: agg_marks,
     })
+
     ms_agg_plot = Plot.plot({
-      marginBottom: agg_margin,
-      marginTop: agg_margin,
+      marginBottom: 75,
+      marginTop: 75,
       color: {
              legend: true,
               opacity: 0.3,
@@ -260,20 +275,20 @@ async function replot(sortkey) {
       y: { label: 'MS time(min)', grid: true },
       x: agg_x,
       fx: agg_fx,
-      marks: agg_marks,
+      marks: ms_agg_marks,
     })
 
     //  MS time
     ms_proj_plot = Plot.plot({
-          marginRight: 130,
-          marginBottom: 20,
-          axis: null,
-          color: {
-                 legend: true,
-                  opacity: 0.3,
-              },
-          x: {axis: "top", label: 'MS time (min)', grid: true,},
-          y: {axis: "right", label: sortkey },
+      marginRight: 75,
+      marginLeft: 75,
+      marginBottom: 20,
+      color: {
+             legend: true,
+              opacity: 0.3,
+          },
+      x: {axis: "top", label: 'MS time (min)', labelAnchor: 'center', grid: true,},
+          y: {axis: "left", label: sortkey },
           marks: [
                 Plot.dot(perProject.filter((d) => d.last), {
                   x: "mstime",
