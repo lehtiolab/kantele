@@ -359,8 +359,6 @@ def process_error_from_nf_log(logfile):
 
 def execute_normal_nf(run, params, baseoutdir, gitwfdir, taskid, nf_version, profiles, scratchdir):
     log_analysis(run['analysis_id'], 'Staging files finished, starting analysis')
-    if not profiles:
-        profiles = 'standard'
     try:
         outdir = run_nextflow(run, params, baseoutdir, gitwfdir, profiles, nf_version, scratchdir)
     except subprocess.CalledProcessError as e:
