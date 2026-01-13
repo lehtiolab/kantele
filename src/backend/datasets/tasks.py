@@ -18,7 +18,7 @@ from rawstatus.tasks import calc_md5, delete_empty_dir
 
 
 @shared_task(bind=True)
-def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profiles, stagescratchdir):
+def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, stagescratchdir):
     basedir = create_runname_dirname(run)
     params, gitwfdir, stagedir, scratchdir = prepare_nextflow_run(run, self.request.id, basedir,
             {}, params, stagescratchdir)
@@ -36,7 +36,7 @@ def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profile
         cmdraws = ';'.join([os.path.join(x[0], x[1]) for x in raws])
         params.extend(['--raws', cmdraws])
     try:
-        run_outdir = run_nextflow(run, params, run['dsspath'], gitwfdir, profiles, nf_version, scratchdir)
+        run_outdir = run_nextflow(run, params, run['dsspath'], gitwfdir, nf_version, scratchdir)
     except subprocess.CalledProcessError as e:
         print(e)
         errmsg = process_error_from_nf_log(os.path.join(gitwfdir, '.nextflow.log'))

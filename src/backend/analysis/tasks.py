@@ -88,7 +88,7 @@ def check_ensembl_uniprot_fasta_download(self, dbname, version, organism, dbtype
     print(f'Finished downloading {desc}')
         
 
-def run_nextflow(run, params, baseoutdir, gitwfdir, profiles, nf_version, scratchdir):
+def run_nextflow(run, params, baseoutdir, gitwfdir, nf_version, scratchdir):
     """Fairly generalized code for kantele celery task to run a WF in NXF"""
     print('Starting nextflow workflow {}'.format(run['nxf_wf_fn']))
     outdir = os.path.join(run['outsharepath'], baseoutdir)
@@ -102,7 +102,7 @@ def run_nextflow(run, params, baseoutdir, gitwfdir, profiles, nf_version, scratc
     print('Checked out repo {} at commit {}'.format(run['repo'], run['wf_commit']))
     # There will be files inside data dir of WF repo so we must be in
     # that dir for WF to find them
-    cmd = [*settings.NXF_COMMAND, run['nxf_wf_fn'], *params, '--outdir', outdir, '-profile', profiles, '-with-trace', '-resume']
+    cmd = [*settings.NXF_COMMAND, run['nxf_wf_fn'], *params, '--outdir', outdir, '-with-trace', '-resume']
     env = os.environ
     env['NXF_VER'] = nf_version
     if scratchdir:
@@ -137,7 +137,7 @@ def log_analysis(analysis_id, message):
 
 
 @shared_task(bind=True)
-def run_nextflow_workflow(self, run, params, stagefiles, profiles, nf_version, scratchbasedir):
+def run_nextflow_workflow(self, run, params, stagefiles, nf_version, scratchbasedir):
     print('Got message to run nextflow workflow, preparing')
     # Init
     rundir = create_runname_dirname(run)
@@ -172,7 +172,7 @@ def run_nextflow_workflow(self, run, params, stagefiles, profiles, nf_version, s
         params.extend(['--oldmzmldef', os.path.join(stagedir, 'oldinputdef.txt')])
     params = [x if x != 'RUNNAME__PLACEHOLDER' else run['runname'] for x in params]
     outfiles = execute_normal_nf(run, params, os.path.basename(rundir), gitwfdir, self.request.id,
-            nf_version, profiles, scratchdir)
+            nf_version, scratchdir)
 
     # Register output files to web host
     reg_session, reg_headers = get_session_cookies()
@@ -210,7 +210,7 @@ def run_nextflow_workflow(self, run, params, stagefiles, profiles, nf_version, s
 
 
 @shared_task(bind=True)
-def refine_mzmls(self, run, params, mzmls, stagefiles, profiles, nf_version, stagescratchdir):
+def refine_mzmls(self, run, params, mzmls, stagefiles, nf_version, stagescratchdir):
     print('Got message to run mzRefine workflow, preparing')
     basedir = create_runname_dirname(run)
     params, gitwfdir, stagedir, scratchdir = prepare_nextflow_run(run, self.request.id, basedir,
@@ -221,7 +221,7 @@ def refine_mzmls(self, run, params, mzmls, stagefiles, profiles, nf_version, sta
         for fn in mzmls_def:
             fp.write(f'{fn}\n')
     params.extend(['--input', os.path.join(stagedir, 'mzmldef.txt')])
-    outfiles = execute_normal_nf(run, params, run['dsspath'], gitwfdir, self.request.id, nf_version, profiles, scratchdir)
+    outfiles = execute_normal_nf(run, params, run['dsspath'], gitwfdir, self.request.id, nf_version, scratchdir)
     outfiles_db = {}
     for outfn in outfiles:
         path, fn = os.path.split(outfn)
@@ -357,10 +357,11 @@ def process_error_from_nf_log(logfile):
         return '\n'.join(errorlines)
 
 
-def execute_normal_nf(run, params, baseoutdir, gitwfdir, taskid, nf_version, profiles, scratchdir):
+def execute_normal_nf(run, params, baseoutdir, gitwfdir, taskid, nf_version, scratchdir):
+    '''Called by run workflow and refine'''
     log_analysis(run['analysis_id'], 'Staging files finished, starting analysis')
     try:
-        outdir = run_nextflow(run, params, baseoutdir, gitwfdir, profiles, nf_version, scratchdir)
+        outdir = run_nextflow(run, params, baseoutdir, gitwfdir, nf_version, scratchdir)
     except subprocess.CalledProcessError as e:
         errmsg = process_error_from_nf_log(os.path.join(gitwfdir, '.nextflow.log'))
         log_analysis(run['analysis_id'], 'Workflow crashed, reporting errors')
@@ -388,7 +389,7 @@ def execute_normal_nf(run, params, baseoutdir, gitwfdir, taskid, nf_version, pro
 
 
 @shared_task(bind=True)
-def run_nextflow_longitude_qc(self, run, params, stagefiles, profiles, nf_version, scratchbasedir):
+def run_nextflow_longitude_qc(self, run, params, stagefiles, nf_version, scratchbasedir):
     print('Got message to run QC workflow, preparing')
     reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:storelongqc'))
     postdata = {'client_id': settings.APIKEY, 'qcrun_id': run['qcrun_id'], 'plots': {},
@@ -400,7 +401,7 @@ def run_nextflow_longitude_qc(self, run, params, stagefiles, profiles, nf_versio
     # Also, outsharepath can be NF_RUNDIR since these files are thrown away after run
     run['outsharepath'] = os.path.join(settings.NF_RUNDIR, 'qc_output')
     try:
-        outdir = run_nextflow(run, params, os.path.basename(rundir), gitwfdir, profiles, nf_version, scratchdir)
+        outdir = run_nextflow(run, params, os.path.basename(rundir), gitwfdir, nf_version, scratchdir)
     except subprocess.CalledProcessError:
         errmsg = process_error_from_nf_log(os.path.join(gitwfdir, '.nextflow.log'))
         log_analysis(run['analysis_id'], 'QC Workflow crashed')

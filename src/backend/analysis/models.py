@@ -85,6 +85,16 @@ class NextflowWfVersionParamset(models.Model):
         return '{} - {}'.format(self.nfworkflow.description, self.update)
 
 
+class NfConfigFile(models.Model):
+    serverprofile = models.ForeignKey(filemodels.AnalysisServerProfile, on_delete=models.CASCADE)
+    nfpipe = models.ForeignKey(NextflowWfVersionParamset, on_delete=models.CASCADE)
+    nfconfig = models.ForeignKey(LibraryFile, on_delete=models.CASCADE)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['serverprofile', 'nfpipe', 'nfconfig'], name='uni_nfconfigfile')]
+
+
+
 class UserWorkflow(models.Model):
 
     class WFTypeChoices(models.IntegerChoices):

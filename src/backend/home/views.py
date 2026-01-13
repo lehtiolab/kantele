@@ -1085,8 +1085,13 @@ def create_mzmls(request):
             'with analysis capability, please make sure it is correctly stored'}, status=403)
     # Select possible servers
     source_ssid = rawsfl.values('servershare_id').first()['servershare_id']
-    anaserver_q = filemodels.FileServer.objects.filter(fileservershare__share_id=source_ssid,
-            active=True, analysisserverprofile__isnull=False)
+    nfwf = anmodels.NextflowWfVersionParamset.objects.select_related('nfworkflow').get(
+            pk=pwiz.nf_version_id)
+    if not (anaserver_q := filemodels.FileServer.objects.filter(
+                fileservershare__share_id=source_ssid, active=True,
+                analysisserverprofile__nfconfigfile__nfpipe=nfwf)):
+        return JsonResponse({'error': 'Analysis server cannot be found in config, please check '
+            'with your admin'}, status=403)
     if not (analocalshare_q := filemodels.FileserverShare.objects.filter(server__in=anaserver_q,
             share__active=True, share__function=filemodels.ShareFunction.ANALYSISRESULTS)):
         return JsonResponse({'error': 'Analysis server does not have an output share configured'},
@@ -1116,9 +1121,13 @@ def create_mzmls(request):
             storageshare_id=source_ssid).values('pk').get()['pk']
 
     # we dont do error checking earlier, before deleting old mzML, because deleting those is fine
+    server_id = analocalshare_q.values('server_id').first()['server_id']
     mzjob = create_job('convert_dataset_mzml', options=pwiz_options, filters=pwiz_filters, dss_id=dss_id,
             pwiz_id=pwiz.pk, timestamp=datetime.strftime(datetime.now(), '%Y%m%d_%H.%M'),
-            server_id=analocalshare_q.values('server_id').first()['server_id'], sfloc_ids=srcsfl_pk)
+            server_id=server_id, sfloc_ids=srcsfl_pk,
+            nfconfig_id=anmodels.LibraryFile.objects.filter(nfconfigfile__nfpipe=nfwf,
+                nfconfigfile__serverprofile__server_id=server_id
+                ).values('sfile_id').get()['sfile_id'])
     if mzjob['error']:
         pass
     elif mzjob['kwargs'].get('dstsfloc_ids', False):
@@ -1210,9 +1219,9 @@ def refine_mzmls(request):
     else:
         return JsonResponse({'error': 'Must pass a database to refine with'}, status=400)
     # Check WF
-    if anmodels.NextflowWfVersionParamset.objects.filter(pk=data['wfid'],
+    if not (nfwf_q := anmodels.NextflowWfVersionParamset.objects.filter(pk=data['wfid'],
            userworkflow__name__icontains='refine',
-           userworkflow__wftype=anmodels.UserWorkflow.WFTypeChoices.SPEC).count() != 1:
+           userworkflow__wftype=anmodels.UserWorkflow.WFTypeChoices.SPEC)):
         return JsonResponse({'error': 'Wrong workflow to refine with'}, status=403)
 
     # Pick one but any servershare which is reachable on an analysis server:
@@ -1239,9 +1248,11 @@ def refine_mzmls(request):
     dss_id, source_ssid = srcdss['pk'], srcdss['storageshare_id']
     srcsfl_pk = [x['pk'] for x in mzmlsfl.filter(servershare_id=source_ssid).exclude(
         sfile__rawfile__in=[x['rawfile'] for x in existing_refined.values('rawfile')]).values('pk')]
+    nfconfig_id = anmodels.LibraryFile.objects.filter(nfconfigfile__nfpipe_id=data['wfid'],
+            nfconfigfile__serverprofile__server_id=anaserver_id).values('sfile_id').get()['sfile_id']
     job = create_job('refine_mzmls', dss_id=dss_id, analysis_id=analysis.id, wfv_id=data['wfid'],
             sfloc_ids=srcsfl_pk, dbfn_id=dbid, qtype=dset.quantdataset.quanttype.shortname,
-            instrument=instrument, anaserver_id=anaserver_id)
+            instrument=instrument, anaserver_id=anaserver_id, nfconfig_id=nfconfig_id)
     if job['error']:
         analysis.delete()
         return JsonResponse({'error': 'Error trying to create a refine dataset job: {job["error"]}'},

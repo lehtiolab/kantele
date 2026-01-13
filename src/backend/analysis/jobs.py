@@ -69,7 +69,7 @@ class RefineMzmls(DatasetJob):
                 'srcsharepath': anasrcshareonserver['path']}
 
     def _get_extrafiles_to_rsync(self, **kwargs):
-        return [kwargs['dbfn_id']]
+        return [kwargs['dbfn_id'], kwargs['nfconfig_id']]
 
     def process(self, **kwargs):
         """Return all a dset mzMLs but not those that have a refined mzML associated, to not do extra work."""
@@ -130,8 +130,7 @@ class RefineMzmls(DatasetJob):
                'server_id': anaserver.server_id,
                'dsspath': dss['storage_loc'],
                }
-        self.run_tasks.append((run, params, mzmls, stagefiles, ','.join(anaserver.nfprofiles), nfwf.nfversion,
-            anaserver.scratchdir))
+        self.run_tasks.append((run, params, mzmls, stagefiles, nfwf.nfversion, anaserver.scratchdir))
         # TODO replace this for general logging anyway, not necessary to keep queueing in analysis log
         analysis.log = ['[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S'))]
         analysis.save()
@@ -179,7 +178,7 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
             params.extend(['--trackedpeptides', ';'.join([f'{pep}_{ch}'
                 for _, pep, ch in kwargs['trackpeptides']])])
 
-        self.run_tasks.append((run, params, stagefiles, ','.join(anaserver.nfprofiles), nfwf.nfversion, anaserver.scratchdir))
+        self.run_tasks.append((run, params, stagefiles, nfwf.nfversion, anaserver.scratchdir))
         analysis.log.append('[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S')))
         analysis.save()
 
@@ -423,7 +422,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
         # RunID is probably only used in a couple of pipelines but it's nice to use "our" analysis ID here
         # and needs to be coupled here, cannot have user make it
         params.extend(['--name', 'RUNNAME__PLACEHOLDER', '--runid', f'run_{analysis.pk}'])
-        self.run_tasks.append((run, params, stagefiles, ','.join(anaserver.nfprofiles), nfwf.nfversion, anaserver.scratchdir))
+        self.run_tasks.append((run, params, stagefiles, nfwf.nfversion, anaserver.scratchdir))
 
         analysis.log.append('[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S')))
         analysis.save()

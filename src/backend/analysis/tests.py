@@ -685,6 +685,9 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.wftype = am.UserWorkflow.WFTypeChoices.STD
         self.wf = am.UserWorkflow.objects.create(name='testwf', wftype=self.wftype, public=True)
         self.wf.nfwfversionparamsets.add(self.nfwf)
+        am.NfConfigFile.objects.create(serverprofile=self.anaprofile, nfpipe=self.nfwf, nfconfig=self.nfc_lf)
+        am.NfConfigFile.objects.create(serverprofile=self.anaprofile2, nfpipe=self.nfwf, nfconfig=self.nfc_lf)
+
 
     def test_store_external_analysis(self):
         params = {'flags': {}, 'inputparams': {}, 'multicheck': {}}
@@ -847,6 +850,8 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
     url = '/analysis/store/'
 
     def test_existing_analysis(self):
+        am.NfConfigFile.objects.create(serverprofile=self.anaprofile, nfpipe=self.nfwf, nfconfig=self.nfc_lf)
+        am.NfConfigFile.objects.create(serverprofile=self.anaprofile2, nfpipe=self.nfwf, nfconfig=self.nfc_lf)
         quant = self.ds.quantdataset.quanttype
         remotedss = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.analocalstor,
                 storage_loc_ui=self.storloc, storage_loc=self.storloc, startdate=timezone.now())
@@ -943,7 +948,7 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
                   self.param3.nfparam, '42',
                   self.param4.nfparam, self.popt4.value,
                   ],
-              'singlefiles': {f'{self.pfn2.nfparam}': self.sflib.pk}},
+              'singlefiles': {f'{self.pfn2.nfparam}': self.sflib.pk, '-c': self.sfnfc.pk}},
               'platenames': {}, 'wfv_id': self.nfwf.pk}
 
         self.assertTrue(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
@@ -1007,6 +1012,8 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
                 'selected analysis server', resp.json()['multierror'])
 
     def test_existing_analysis(self):
+        am.NfConfigFile.objects.create(serverprofile=self.anaprofile, nfpipe=self.nfwf, nfconfig=self.nfc_lf)
+        am.NfConfigFile.objects.create(serverprofile=self.anaprofile2, nfpipe=self.nfwf, nfconfig=self.nfc_lf)
         c_ch = am.PsetComponent.ComponentChoices
         am.PsetComponent.objects.get_or_create(pset=self.pset,
                 component=am.PsetComponent.ComponentChoices.COMPLEMENT_ANALYSIS)

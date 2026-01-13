@@ -971,13 +971,14 @@ def store_analysis(request):
             response_errors.append(f'Dataset {missing_dsid} does not have its files available '
                     'to the selected analysis server')
         if fserver := rm.FileServer.objects.filter(pk=req['analysisserver_id'], active=True,
-                analysisserverprofile__isnull=False):
+                analysisserverprofile__nfconfigfile__nfpipe=nfwf_ver):
             server_dss_args.update({'fserver_id': fserver.values('pk').get()['pk'],
                 'dss_ids': [x['pk'] for x in dss.values('pk')],
                 })
         else:
             response_errors.append('You must select an active server with analysis capacity, '
-                    'maybe the infrastructure has changed, please reload the analysis')
+                    'maybe the infrastructure has changed, please reload the analysis, or ask '
+                    'an admin to update the analysis server configurations')
         if fserver and not rm.FileserverShare.objects.filter(server__active=True, share__active=True,
                 server_id=req['analysisserver_id'], share__function=rm.ShareFunction.ANALYSISRESULTS
                 ).values('pk').first():
@@ -1130,6 +1131,12 @@ def store_analysis(request):
     for pid, sfid in req['singlefiles'].items():
         afp, created = am.AnalysisFileParam.objects.update_or_create(defaults={'sfile_id': sfid}, analysis=analysis, param_id=pid)
         jobinputs['singlefiles'][afp.param.nfparam] = sfid
+    # Special -c config nextflow file
+    if req['nfwfvid']:
+        # Not doing this for external analysis saves
+        jobinputs['singlefiles']['-c'] = am.LibraryFile.objects.filter(
+                nfconfigfile__serverprofile__server_id=req['analysisserver_id'],
+                nfconfigfile__nfpipe=nfwf_ver).values('sfile_id').get()['sfile_id']
     # Re-create multifiles, they cannot be updated since all files map to analysis/param_id
     # resulting in only a single row in DB
     for pid, sfids in req['multifiles'].items():
