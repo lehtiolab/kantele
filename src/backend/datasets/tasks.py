@@ -36,7 +36,7 @@ def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, stagesc
         cmdraws = ';'.join([os.path.join(x[0], x[1]) for x in raws])
         params.extend(['--raws', cmdraws])
     try:
-        run_outdir = run_nextflow(run, params, run['dsspath'], gitwfdir, profiles, nf_version, scratchdir)
+        run_outdir = run_nextflow(run, params, run['dsspath'], gitwfdir, nf_version, scratchdir)
     except subprocess.CalledProcessError as e:
         print(e)
         errmsg = process_error_from_nf_log(os.path.join(gitwfdir, '.nextflow.log'))
