@@ -75,7 +75,7 @@ CMD service ssh start -D
 # Analysis if needed
 FROM django AS nextflow
 USER root
-RUN apt install -y openjdk-17-jre git-core
+RUN apt update && apt install -y openjdk-17-jre git-core
 RUN mkdir /nxf && cd /nxf && curl -s https://get.nextflow.io | bash
 RUN chown -R kantele:kantele /nxf
 USER kantele
