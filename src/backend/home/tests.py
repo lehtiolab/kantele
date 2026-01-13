@@ -27,6 +27,10 @@ class MzmlTests(BaseIntegrationTest):
         self.wf = am.UserWorkflow.objects.create(name='refine', wftype=am.UserWorkflow.WFTypeChoices.SPEC,
                 public=False)
         self.wf.nfwfversionparamsets.add(self.refinewf)
+        am.NfConfigFile.objects.create(serverprofile=self.anaprofile, nfpipe=self.nfwv, nfconfig=self.nfc_lf)
+        am.NfConfigFile.objects.create(serverprofile=self.anaprofile2, nfpipe=self.nfwv, nfconfig=self.nfc_lf)
+        am.NfConfigFile.objects.create(serverprofile=self.anaprofile, nfpipe=self.refinewf, nfconfig=self.nfc_lf)
+        am.NfConfigFile.objects.create(serverprofile=self.anaprofile2, nfpipe=self.refinewf, nfconfig=self.nfc_lf)
 
 
 class TestCreateMzmls(MzmlTests):
@@ -91,7 +95,7 @@ class TestCreateMzmls(MzmlTests):
         self.assertTrue(mzml_q.filter(purged=True).exists())
         md5sum = f'{mzml_sf.filename} md5 file'
         self.assertNotEqual(mzml_sf.md5, md5sum)
-        j = jm.Job.objects.first()
+        self.run_job() # rsync nfconfig
         self.run_job() # convert mzml
         self.assertTrue(os.path.exists(mzmlfn1))
         self.assertTrue(mzml_q.filter(purged=False).exists())
@@ -208,7 +212,9 @@ class TestCreateMzmls(MzmlTests):
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 200)
         j = jm.Job.objects.first()
-        self.assertEqual(j.funcname, 'convert_dataset_mzml')
+        self.assertEqual(j.funcname, 'rsync_otherfiles_to_servershare')
+        self.run_job() # run rsync of config file
+        j = jm.Job.objects.get(funcname='convert_dataset_mzml')
         exp_kw  = {'options': [], 'filters': ['precursorRefine'], 
                 'dss_id': dss2.pk, 'pwiz_id': self.pwiz.pk,
                 'sfloc_ids': [x['pk'] for x in rm.StoredFileLoc.objects.filter(
@@ -303,7 +309,8 @@ class TestCreateMzmls(MzmlTests):
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 200)
         j = jm.Job.objects.first()
-        self.assertEqual(j.funcname, 'convert_dataset_mzml')
+        self.assertEqual(j.funcname, 'rsync_otherfiles_to_servershare')
+        j = jm.Job.objects.get(funcname='convert_dataset_mzml')
         exp_kw  = {'options': ['combineIonMobilitySpectra'], 'filters': ['precursorRefine', '"scanSumming precursorTol=0.02 scanTimeTol=10 ionMobilityTol=0.1"'], 
                 'dss_id': self.dss.pk, 'pwiz_id': self.pwiz.pk,
                 'sfloc_ids': [x['pk'] for x in rm.StoredFileLoc.objects.filter(
@@ -323,6 +330,7 @@ class TestCreateMzmls(MzmlTests):
         mzmlfn2 = os.path.join(dss2_fpath, mzmlfn)
         self.assertFalse(os.path.exists(mzmlfn1))
         self.assertFalse(os.path.exists(mzmlfn2))
+        self.run_job() # rsync nfconfig
         self.run_job() # convert mzml
         self.assertTrue(os.path.exists(mzmlfn1))
         self.assertFalse(os.path.exists(mzmlfn2))
@@ -340,15 +348,6 @@ class TestCreateMzmls(MzmlTests):
 class TestRefineMzmls(MzmlTests):
     url = '/refinemzml/'
 
-    def setUp(self):
-        super().setUp()
-        self.refinewf = am.NextflowWfVersionParamset.objects.create(update='refine wf',
-                commit='master', filename='refine.py', nfworkflow=self.nfw, paramset=self.pset, 
-                nfversion='', active=True)
-        wf = am.UserWorkflow.objects.create(name='refine', wftype=am.UserWorkflow.WFTypeChoices.SPEC,
-                public=False)
-        wf.nfwfversionparamsets.add(self.refinewf)
-        
     def test_fail_requests(self):
         # GET
         resp = self.cl.get(self.url)

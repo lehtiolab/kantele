@@ -180,6 +180,17 @@ class BaseTest(TestCase):
                 path=self.storloc, active=True, purged=False)
         self.f3mzml = am.MzmlFile.objects.create(sfile=self.f3sfmz, pwiz=self.pwiz)
 
+        # NF Config file
+        nfc_ft = rm.StoredFileType.objects.create(name='nfconfig', filetype='txt',
+                is_rawdata=False, user_uploadable=True)
+        nfcraw = rm.RawFile.objects.create(name='nf.config', producer=self.adminprod,
+                source_md5='nfcfilemd5', size=100, claimed=True, date=timezone.now(), usetype=rm.UploadFileType.LIBRARY)
+        self.sfnfc = rm.StoredFile.objects.create(rawfile=nfcraw, md5=nfcraw.source_md5,
+                filetype=nfc_ft, checked=True, filename=nfcraw.name)
+        nfc_loc = rm.StoredFileLoc.objects.create(sfile=self.sfnfc, servershare=self.sslib,
+                path='', active=True, purged=False)
+        self.nfc_lf = am.LibraryFile.objects.create(sfile=self.sfnfc, description='NF config')
+
         # Project/dataset/files on old storage
         oldfn = 'raw1'
         self.oldp = dm.Project.objects.create(name='oldp', pi=self.pi, ptype=self.ptype)

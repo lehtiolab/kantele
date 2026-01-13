@@ -83,7 +83,6 @@ class FileServer(models.Model):
 
 class AnalysisServerProfile(models.Model):
     server = models.OneToOneField(FileServer, on_delete=models.CASCADE)
-    nfprofiles = models.JSONField(default=list)
     scratchdir = models.TextField(blank=True,
             help_text='For nextflow TMPDIR and stage if needed. Can be blank if not needed')
     queue_name = models.TextField(unique=True)

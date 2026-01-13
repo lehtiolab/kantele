@@ -189,6 +189,9 @@ class ConvertDatasetMzml(DatasetJob):
     queue = False
     can_be_canceled = True
 
+    def _get_extrafiles_to_rsync(self, **kwargs):
+        return [kwargs['nfconfig_id']]
+
     def on_create_addkwargs(self, **kwargs):
         '''Create target SFLs on local analysis server and final destination 
         dataset source. This is needed because the final sflocs (which are rsynced
@@ -260,7 +263,7 @@ class ConvertDatasetMzml(DatasetJob):
             if len(p2parse):
                 params.extend(['--{}'.format(pname), ';'.join(p2parse)])
         self.run_tasks.append((run, params, nf_raws, mzsfl['sfile__filetype__name'],
-            nfwf.nfversion, ','.join(anaserver.nfprofiles), anaserver.scratchdir))
+            nfwf.nfversion, anaserver.scratchdir))
 
 
 class DeleteDatasetPDCBackup(DatasetJob):

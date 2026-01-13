@@ -18,7 +18,7 @@ from rawstatus.tasks import calc_md5, delete_empty_dir
 
 
 @shared_task(bind=True)
-def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, profiles, stagescratchdir):
+def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, stagescratchdir):
     basedir = create_runname_dirname(run)
     params, gitwfdir, stagedir, scratchdir = prepare_nextflow_run(run, self.request.id, basedir,
             {}, params, stagescratchdir)

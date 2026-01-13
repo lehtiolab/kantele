@@ -463,19 +463,6 @@ async function saveShare(share) {
           <h6 class="title is-6">Analysis server</h6>
           <div class="field is-horizontal">
             <div class="field-label is-normal">
-              <label class="label">Nextflow profiles</label>
-            </div>
-            <div class="field-body">
-              <div class="field">
-                <p class="control">
-                  <input class="input" placeholder='E.g. ["lehtio", "qc"]' bind:value="{server.nfprofiles}" />
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div class="field is-horizontal">
-            <div class="field-label is-normal">
               <label class="label">Analysis queue</label>
             </div>
             <div class="field-body">

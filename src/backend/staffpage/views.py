@@ -47,7 +47,7 @@ def show_staffpage(request):
     [servers[x].update({'show_analysis_profile': False, 'mounted': []}) for x in servers.keys()]
     for asp in rm.AnalysisServerProfile.objects.all():
         servers[asp.server_id].update({'queue_name': asp.queue_name, 'scratchdir': asp.scratchdir,
-            'nfprofiles': json.dumps(asp.nfprofiles), 'show_analysis_profile': True})
+            'show_analysis_profile': True})
     for fss in rm.FileserverShare.objects.all():
         servers[fss.server_id]['mounted'].append({'share': fss.share.pk, 'path': fss.path})
 
@@ -329,12 +329,7 @@ def save_server(request):
         return JsonResponse({'state': 'error', 'msg': 'Invalid params passed'}, status=400)
     if data['show_analysis_profile']:
         try:
-            # nfprofiles is passed as a string from the form, '["profile1", "profile2", ...]'
-            data['nfprofiles'] = json.loads(data['nfprofiles'])
             data['queue_name']
-        except json.decoder.JSONDecodeError:
-            return JsonResponse({'state': 'error', 'msg': 'Not valid JSON for nextflow profiles'},
-                    status=400)
         except KeyError:
             return JsonResponse({'state': 'error', 'msg': 'Need to enter analysis server information'},
                     status=400)
@@ -364,7 +359,7 @@ def save_server(request):
 
     if data['show_analysis_profile']:
         rm.AnalysisServerProfile.objects.update_or_create(server=fs, defaults={
-            f: data[f] for f in ['nfprofiles', 'scratchdir', 'queue_name']})
+            f: data[f] for f in ['scratchdir', 'queue_name']})
     else:
         rm.AnalysisServerProfile.objects.filter(server=fs).delete()
     return JsonResponse({'state': 'ok', 'msg': f'Saved server {fs.name} with ID {fs.pk}'})
