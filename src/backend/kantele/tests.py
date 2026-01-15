@@ -187,7 +187,7 @@ class BaseTest(TestCase):
                 source_md5='nfcfilemd5', size=100, claimed=True, date=timezone.now(), usetype=rm.UploadFileType.LIBRARY)
         self.sfnfc = rm.StoredFile.objects.create(rawfile=nfcraw, md5=nfcraw.source_md5,
                 filetype=nfc_ft, checked=True, filename=nfcraw.name)
-        nfc_loc = rm.StoredFileLoc.objects.create(sfile=self.sfnfc, servershare=self.sslib,
+        self.nfc_loc = rm.StoredFileLoc.objects.create(sfile=self.sfnfc, servershare=self.sslib,
                 path='', active=True, purged=False)
         self.nfc_lf = am.LibraryFile.objects.create(sfile=self.sfnfc, description='NF config')
 
