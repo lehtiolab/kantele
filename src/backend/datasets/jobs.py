@@ -256,7 +256,13 @@ class ConvertDatasetMzml(DatasetJob):
                'outsharepath': sharemap[mzsfl['servershare_id']],
                'dsspath': kwargs['dsspath'],
                }
-        params = ['--md5out']
+        if nfcloc_q := StoredFileLoc.objects.filter(sfile_id=kwargs['nfconfig_id'], active=True,
+                servershare__fileservershare__server_id=kwargs['server_id'],
+                servershare__active=True).values('servershare_id', 'path', 'sfile__filename'):
+            nfcl = nfcloc_q.first()
+        else:
+            raise RuntimeError(f'No NF config file available for server, please fix server config')
+        params = ['--md5out', '-c', os.path.join(sharemap[nfcl['servershare_id']], nfcl['path'], nfcl['sfile__filename'])]
         params.extend([x for y in [(f'--{k}', v) for k,v in pwiz.params.items()] for x in y])
         for pname in ['options', 'filters']:
             p2parse = kwargs.get(pname, [])

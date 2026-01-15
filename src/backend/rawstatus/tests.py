@@ -416,13 +416,6 @@ class TestUploadScript(BaseIntegrationTest):
 
     def test_transfer_qc(self):
         # Test trying to upload file with same name/path but diff MD5
-        self.nfwf = am.NextflowWfVersionParamset.objects.create(update='nf workflow',
-                commit='master', filename='qc.py', nfworkflow=self.nfw,
-                paramset=self.pset, nfversion='', active=True)
-        self.wftype = am.UserWorkflow.WFTypeChoices.QC
-        self.wf = am.UserWorkflow.objects.create(name='testwfqc', wftype=self.wftype, public=True)
-        self.wf.nfwfversionparamsets.add(self.nfwf)
-
         self.token = 'prodtoken_noadminprod'
         self.uploadtoken = rm.UploadToken.objects.create(user=self.user, token=self.token,
                 expires=timezone.now() + timedelta(settings.TOKEN_RENEWAL_WINDOW_DAYS + 1), expired=False,
@@ -463,14 +456,17 @@ class TestUploadScript(BaseIntegrationTest):
         classifytask = jm.Task.objects.filter(job__funcname='classify_msrawfile', job__kwargs__sfloc_id=newsfloc.pk)
         rsjobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare', kwargs__sfloc_id=newsfloc.pk, kwargs__dstshare_id=self.ssnewstore.pk,
             kwargs__dstpath=os.path.join(settings.QC_STORAGE_DIR, self.prod.name))
+        nfrsjobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
+                kwargs__sfloc_id=self.nfc_loc.pk, kwargs__dstshare_id=self.ssnewstore.pk)
         self.assertEqual(classifyjob.count(), 1)
         self.assertEqual(classifytask.count(), 0)
         self.assertEqual(rsjobs.count(), 0)
+        self.assertEqual(nfrsjobs.count(), 0)
         # Run classify
         self.run_job()
         newraw.refresh_from_db()
         self.assertEqual(newraw.usetype, rm.UploadFileType.QC)
-        dstsfloc = rm.StoredFileLoc.objects.last()
+        dstsfloc = rm.StoredFileLoc.objects.filter(sfile_id=newsfloc.sfile_id).last()
         qcjobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow',
                 kwargs__sfloc_id=dstsfloc.pk, kwargs__params=['--instrument', self.msit.name, '--dia'])
         self.assertTrue(newraw.claimed)
@@ -478,8 +474,9 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertEqual(classifytask.filter(state=states.SUCCESS).count(), 1)
         self.assertEqual(dashm.QCRun.objects.filter(rawfile=newraw).count(), 1)
         self.assertEqual(rsjobs.count(), 1)
+        self.assertEqual(nfrsjobs.count(), 1)
         self.assertEqual(qcjobs.count(), 1)
-        self.run_job() # run rsync to analysis
+        self.run_job() # run rsync to analysis of both raw and nfconfig files
         self.run_job() # run qc
         qcrun = dashm.QCRun.objects.last()
         self.assertTrue(dashm.LineplotData.objects.filter(qcrun=qcrun,

@@ -123,39 +123,6 @@ def retrieve_backup_to_ana_or_rsyncstor(sfid):
     return errmsg
 
 
-def rsync_qc_to_analysis(sfl_q):
-    '''Select sfl to run QC on, if not on analysis server, queue it to one
-    returns either sfl, server_id, False
-    or False, False 'error message'
-    '''
-    fss_q = rm.FileserverShare.objects.filter(server__analysisserverprofile__isnull=False,
-            server__active=True, share__function=rm.ShareFunction.RAWDATA)
-    if ana_sfl := sfl_q.filter(servershare__fileservershare__server__analysisserverprofile__isnull=False,
-            servershare__fileservershare__server__active=True):
-        sfloc = ana_sfl.get()
-        fss = fss_q.filter(share_id=sfloc.servershare_id).values('server_id').first()
-
-    elif ana_rs_fssq := fss_q.filter(server__can_rsync_remote=True):
-        fss = ana_rs_fssq.values('share_id', 'server_id').first()
-        srcsfl = sfl_q.first()
-        # FIXME path!
-        qc_mvjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=srcsfl.pk,
-            dstshare_id=fss['share_id'])
-        sfloc = rm.StoredFileLoc.objects.get(pk=qc_mvjob['kwargs']['dstsfloc_id'])
-
-    elif srcsfloc := sfl_q.filter(servershare__fileservershare__server__can_rsync_remote=True):
-        fss = fss_q.values('share_id', 'server_id').first()
-        qc_mvjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=srcsfloc.first().pk,
-            dstshare_id=fss['share_id'])
-        sfloc = rm.StoredFileLoc.objects.get(pk=qc_mvjob['kwargs']['dstsfloc_id'])
-
-    else:
-        msg = (f'Queued file {rfnq.values("name").get()["name"]} for QC run could not be found '
-        'on any share with either analysis or rsync transfer capabilities')
-        return False, False, msg
-    return sfloc, fss['server_id'], False
-
-
 @staff_member_required
 @require_POST
 def new_qcfiles(request):
@@ -177,13 +144,12 @@ def new_qcfiles(request):
     if sfnq.count() == len(set(data['sfids'])):
         rm.RawFile.objects.filter(storedfile__pk__in=data['sfids']).update(claimed=True,
                 usetype=rm.UploadFileType.QC)
+        user_op = get_operator_user()
         for sfid in set(data['sfids']):
             sfl_q = rm.StoredFileLoc.objects.filter(sfile_id=sfid, active=True)
-            sfloc, server_id, errmsg = rsync_qc_to_analysis(sfl_q)
-            if errmsg and not sfloc:
+            errmsg = run_singlefile_qc(sfl_q, user_op, acqtype)
+            if errmsg:
                 return JsonResponse({'msg': errmsg, 'state': 'error'}, status=400)
-        user_op = get_operator_user()
-        run_singlefile_qc(sfloc, server_id, user_op, acqtype)
         state = 'ok'
         msg = f'Added {len(set(data["sfids"]))} to QC'
     else:
@@ -228,10 +194,8 @@ def rerun_qcs(request):
         retr_msg = f' - Queued {retrieve_files.count()} QC raw files for retrieval from archive'
         msg = f'Queued {sfs.count()} QC raw files for running{retr_msg}'
         for sf in sfs.values('pk', 'rawfile__qcrun__runtype'):
-            # here home
-            sfloc, server_id, errmsg = rsync_qc_to_analysis(
-                    rm.StoredFileLoc.objects.filter(sfile_id=sf['pk'], active=True))
-            run_singlefile_qc(sfloc, server_id, user_op, dm.AcquisistionMode(sf['rawfile__qcrun__runtype']))
+            run_singlefile_qc(rm.StoredFileLoc.objects.filter(sfile_id=sf['pk'], active=True),
+                    user_op, dm.AcquisistionMode(sf['rawfile__qcrun__runtype']))
         state = 'ok'
 
     else:

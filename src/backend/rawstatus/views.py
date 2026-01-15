@@ -29,7 +29,8 @@ from rawstatus.models import (RawFile, Producer, StoredFile, FileServer, ServerS
         UploadToken, UploadFileType, DataSecurityClass)
 from rawstatus import jobs as rsjobs
 from rawstatus.tasks import search_raws_downloaded
-from analysis.models import Analysis, LibraryFile, AnalysisResultFile, UniProtFasta, EnsemblFasta
+from analysis.models import (Analysis, LibraryFile, AnalysisResultFile, UniProtFasta, EnsemblFasta,
+        UserWorkflow)
 from datasets import views as dsviews
 from datasets import models as dsmodels
 from dashboard import models as dashmodels
@@ -491,18 +492,11 @@ def classified_rawfile_treatment(request):
         sfloc.sfile.rawfile.claimed = True
         sfloc.sfile.rawfile.usetype = UploadFileType.QC
         sfloc.sfile.rawfile.save()
-        # Rsync file to analysis server
-        fss = FileserverShare.objects.filter(share__function=ShareFunction.RAWDATA,
-                share__active=True, server__active=True, server__analysisserverprofile__isnull=False
-                ).values('share_id', 'server_id').first()
-        qc_mvjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sfloc.pk,
-                dstshare_id=fss['share_id'],
-                dstpath=os.path.join(settings.QC_STORAGE_DIR, sfloc.sfile.rawfile.producer.name))
         user_op = get_operator_user()
-        dst_sfloc = StoredFileLoc.objects.select_related(
-                'sfile__rawfile__producer__msinstrument__instrumenttype').get(
-                        pk=qc_mvjob['kwargs']['dstsfloc_id'])
-        run_singlefile_qc(dst_sfloc, fss['server_id'], user_op, dsmodels.AcquisistionMode[is_qc_acqtype])
+        if errmsg := run_singlefile_qc(StoredFileLoc.objects.filter(pk=sfloc.pk), user_op,
+                dsmodels.AcquisistionMode[is_qc_acqtype]):
+            return JsonResponse({'error': f'Problem transferring QC file to analysis: {errmsg}'},
+                    status=400)
     elif dsid:
         # Make sure dataset exists
         dsq = dsmodels.Dataset.objects.filter(pk=dsid, locked=False)
@@ -917,8 +911,53 @@ def transfer_file(request):
     return JsonResponse({'fn_id': fn_id, 'state': 'ok'})
 
 
-def run_singlefile_qc(sfloc, server_id, user_op, acqtype):
+def rsync_qc_to_analysis(sfl_q, nfwfvid):
+    '''Select sfl to run QC on, if not on analysis server, queue it to one.
+    Returns either (sfl, server_id, False)
+    OR (False, False 'error message')
+    '''
+    fss_q = FileserverShare.objects.filter(share__function=ShareFunction.RAWDATA,
+            server__analysisserverprofile__nfconfigfile__nfpipe_id=nfwfvid, server__active=True,
+            share__active=True)
+    if ana_sfl := sfl_q.filter(servershare__fileservershare__in=fss_q):
+        # File is on analysis server with QC pipe 
+        sfloc = ana_sfl.first()
+        fss = fss_q.filter(share_id=sfloc.servershare_id).values('server_id').first()
+
+    elif ana_rs_fssq := fss_q.filter(server__can_rsync_remote=True):
+        # We can pull file to analysis server with QC pipe
+        fss = ana_rs_fssq.values('share_id', 'server_id').first()
+        srcsfl = sfl_q.first()
+        dstpath = os.path.join(settings.QC_STORAGE_DIR, srcsfl.sfile.rawfile.producer.name)
+        # FIXME path!
+        qc_mvjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=srcsfl.pk,
+            dstshare_id=fss['share_id'], dstpath=dstpath)
+        sfloc = StoredFileLoc.objects.get(pk=qc_mvjob['kwargs']['dstsfloc_id'])
+
+    elif srcsfloc := sfl_q.filter(servershare__fileservershare__server__can_rsync_remote=True):
+        # We can push file to analysis server with QC
+        fss = fss_q.values('share_id', 'server_id').first()
+        srcsfl = srcsfloc.first()
+        dstpath = os.path.join(settings.QC_STORAGE_DIR, srcsfl.sfile.rawfile.producer.name)
+        qc_mvjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=srcsfl.pk,
+            dstshare_id=fss['share_id'], dstpath=dstpath)
+        sfloc = StoredFileLoc.objects.get(pk=qc_mvjob['kwargs']['dstsfloc_id'])
+    else:
+        msg = (f'Queued file {sfl_q.values("storedfile__filename").get()["storedfile__filename"]} '
+                'for QC run could not be found on any share with either analysis or rsync transfer '
+                'capabilities')
+        return False, False, msg
+    return sfloc, fss['server_id'], False
+
+
+def run_singlefile_qc(sfloc_q, user_op, acqtype):
     """This method is only run for detecting new incoming QC files"""
+    wf = UserWorkflow.objects.filter(wftype=UserWorkflow.WFTypeChoices.QC).last()
+    nfwfvid = wf.nfwfversionparamsets.values('pk').last()['pk']
+    sfloc, server_id, rsync_errmsg = rsync_qc_to_analysis(sfloc_q, nfwfvid)
+    if rsync_errmsg and not sfloc:
+        return rsync_errmsg
+
     rawfile = sfloc.sfile.rawfile
     params = ['--instrument', rawfile.producer.msinstrument.instrumenttype.name,
             f'--{acqtype.name.lower()}']
@@ -932,8 +971,12 @@ def run_singlefile_qc(sfloc, server_id, user_op, acqtype):
     trackpeps = [[x['peptide__pk'], x['peptide__sequence'], x['peptide__charge']] for x in
             dashmodels.PeptideInSet.objects.filter(peptideset=tps).values('peptide__pk',
             'peptide__sequence', 'peptide__charge')]
-    create_job('run_longit_qc_workflow', sfloc_id=sfloc.id, analysis_id=analysis.id,
-            fserver_id=server_id, qcrun_id=qcrun.pk, params=params, trackpeptides=trackpeps)
+    nfconfig = LibraryFile.objects.filter(nfconfigfile__serverprofile__server_id=server_id,
+            nfconfigfile__nfpipe_id=nfwfvid).values('sfile_id').get()['sfile_id']
+    create_job('run_longit_qc_workflow', sfloc_id=sfloc.id, analysis_id=analysis.id, wf_id=wf.pk,
+            nfwfvid=nfwfvid, fserver_id=server_id, nfconfig_id=nfconfig, qcrun_id=qcrun.pk,
+            params=params, trackpeptides=trackpeps)
+    return False
 
 
 def get_file_owners(sfile):

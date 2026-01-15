@@ -92,6 +92,13 @@ class RefineMzmls(DatasetJob):
             server__active=True, share__active=True,
             server_id=kwargs['server_id']).values('share_id', 'path')}
 
+        if nfcloc_q := rm.StoredFileLoc.objects.filter(sfile_id=kwargs['nfconfig_id'], active=True,
+                servershare__fileservershare__server_id=kwargs['server_id'],
+                servershare__active=True).values('servershare_id', 'path', 'sfile__filename'):
+            nfcl = nfcloc_q.first()
+        else:
+            raise RuntimeError(f'No NF config file available for server, please fix server config')
+
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
         analysis.nextflowsearch.token = f'nf-{uuid4()}'
         analysis.nextflowsearch.save()
@@ -102,8 +109,11 @@ class RefineMzmls(DatasetJob):
                 servershare__fileservershare__server_id=kwargs['server_id']).values(
                         'servershare_id', 'path', 'sfile__filename').first()
         
-        stagefiles = {'--tdb': [(os.path.join(sharemap[dbfn['servershare_id']], dbfn['path']),
-            dbfn['sfile__filename'])]}
+        stagefiles = {
+                '--tdb': [(os.path.join(sharemap[dbfn['servershare_id']], dbfn['path']),
+            dbfn['sfile__filename'])],
+                '-c': [(os.path.join(sharemap[nfcl['servershare_id']], nfcl['path']), nfcl['sfile__filename'])],
+                }
 
         mzmls = []
         srcpath = os.path.join(kwargs['srcsharepath'], dss['storage_loc'])
@@ -142,6 +152,9 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
     queue = False
     can_be_canceled = True
 
+    def _get_extrafiles_to_rsync(self, **kwargs):
+        return [kwargs['nfconfig_id']]
+
     def process(self, **kwargs):
         """Assumes one file, one analysis"""
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
@@ -155,15 +168,25 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
                     'not capable of analysis')
         self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_QC_NXF)
 
-        wf = models.UserWorkflow.objects.filter(wftype=models.UserWorkflow.WFTypeChoices.QC).last()
-        nfwf = wf.nfwfversionparamsets.last()
+        nfwf = models.NextflowWfVersionParamset.objects.get(pk=kwargs['nfwfvid'])
+        if nfcloc_q := rm.StoredFileLoc.objects.filter(sfile_id=kwargs['nfconfig_id'], active=True,
+                servershare__fileservershare__server_id=kwargs['fserver_id'],
+                servershare__active=True).values('servershare_id', 'path', 'sfile__filename'):
+            nfcl = nfcloc_q.first()
+        else:
+            raise RuntimeError(f'No NF config file available for server, please fix server config')
         params = kwargs.get('params', [])
         fss = rm.FileserverShare.objects.values('path').get(server__active=True, share__active=True,
                 server_id=kwargs['fserver_id'], share_id=sfl['servershare_id'])
-        stagefiles = {'--raw': [(os.path.join(fss['path'], sfl['path']), sfl['sfile__filename'])]}
+        nfcfss = rm.FileserverShare.objects.values('path').get(server__active=True, share__active=True,
+                server_id=kwargs['fserver_id'], share_id=nfcl['servershare_id'])
+        stagefiles = {
+                '--raw': [(os.path.join(fss['path'], sfl['path']), sfl['sfile__filename'])],
+                '-c': [(os.path.join(nfcfss['path'], nfcl['path']), nfcl['sfile__filename'])],
+                }
         timestamp = datetime.strftime(analysis.date, '%Y%m%d_%H.%M')
         models.NextflowSearch.objects.update_or_create(defaults={'nfwfversionparamset_id': nfwf.id, 
-            'job_id': self.job.pk, 'workflow_id': wf.id, 'token': f'nf-{uuid4()}'},
+            'job_id': self.job.pk, 'workflow_id': kwargs['wf_id'], 'token': f'nf-{uuid4()}'},
             analysis=analysis)
         run = {'timestamp': timestamp,
                'analysis_id': analysis.id,
