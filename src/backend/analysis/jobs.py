@@ -92,6 +92,13 @@ class RefineMzmls(DatasetJob):
             server__active=True, share__active=True,
             server_id=kwargs['server_id']).values('share_id', 'path')}
 
+        if nfcloc_q := rm.StoredFileLoc.objects.filter(sfile_id=kwargs['nfconfig_id'], active=True,
+                servershare__fileservershare__server_id=kwargs['server_id'],
+                servershare__active=True).values('servershare_id', 'path', 'sfile__filename'):
+            nfcl = nfcloc_q.first()
+        else:
+            raise RuntimeError(f'No NF config file available for server, please fix server config')
+
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
         analysis.nextflowsearch.token = f'nf-{uuid4()}'
         analysis.nextflowsearch.save()
@@ -102,8 +109,11 @@ class RefineMzmls(DatasetJob):
                 servershare__fileservershare__server_id=kwargs['server_id']).values(
                         'servershare_id', 'path', 'sfile__filename').first()
         
-        stagefiles = {'--tdb': [(os.path.join(sharemap[dbfn['servershare_id']], dbfn['path']),
-            dbfn['sfile__filename'])]}
+        stagefiles = {
+                '--tdb': [(os.path.join(sharemap[dbfn['servershare_id']], dbfn['path']),
+            dbfn['sfile__filename'])],
+                '-c': [(os.path.join(sharemap[nfcl['servershare_id']], nfcl['path']), nfcl['sfile__filename'])],
+                }
 
         mzmls = []
         srcpath = os.path.join(kwargs['srcsharepath'], dss['storage_loc'])
@@ -168,9 +178,11 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
         params = kwargs.get('params', [])
         fss = rm.FileserverShare.objects.values('path').get(server__active=True, share__active=True,
                 server_id=kwargs['fserver_id'], share_id=sfl['servershare_id'])
+        nfcfss = rm.FileserverShare.objects.values('path').get(server__active=True, share__active=True,
+                server_id=kwargs['fserver_id'], share_id=nfcl['servershare_id'])
         stagefiles = {
                 '--raw': [(os.path.join(fss['path'], sfl['path']), sfl['sfile__filename'])],
-                '-c': [(os.path.join(fss['path'], nfcl['path']), nfcl['sfile__filename'])],
+                '-c': [(os.path.join(nfcfss['path'], nfcl['path']), nfcl['sfile__filename'])],
                 }
         timestamp = datetime.strftime(analysis.date, '%Y%m%d_%H.%M')
         models.NextflowSearch.objects.update_or_create(defaults={'nfwfversionparamset_id': nfwf.id, 
