@@ -121,9 +121,6 @@ class QCBase(BaseTest):
         self.diaqc = dm.QCRun.objects.create(rawfile=self.tmpraw, analysis=self.diaana, is_ok=False,
                 message='', runtype=dam.AcquisistionMode.DIA)
 
-        wfv = am.NextflowWfVersionParamset.objects.create(update='qc wfv base',
-                commit='qc ci base', filename='qc.nf', nfworkflow=self.nfw,
-                paramset=self.pset, nfversion='', active=True)
         self.trackpep = dm.TrackedPeptide.objects.create(sequence=self.pepseq, charge=self.pepcharge)
         pepset = dm.TrackedPeptideSet.objects.create(name='qcpeps', acqmode=dam.AcquisistionMode.DIA,
                 active=True, frozen=True)
@@ -131,10 +128,7 @@ class QCBase(BaseTest):
         qcjob = jm.Job.objects.create(funcname='qcjob', state=jj.Jobstates.PROCESSING,
                 kwargs={'trackpeptides': [[self.trackpep.pk, self.trackpep.sequence, 
                     self.trackpep.charge]]}, timestamp=datetime.now())
-        uwf = am.UserWorkflow.objects.create(name='qc', wftype=am.UserWorkflow.WFTypeChoices.QC,
-                public=False)
-        uwf.nfwfversionparamsets.add(wfv)
-        am.NextflowSearch.objects.create(nfwfversionparamset=wfv, workflow=uwf, analysis=self.diaana,
+        am.NextflowSearch.objects.create(nfwfversionparamset=self.qcnfwf, workflow=self.qcwf, analysis=self.diaana,
             token='token1234', job=qcjob)
 
 

@@ -76,10 +76,9 @@ class RemoveQCFile(BaseQCFileTest):
                 securityclass=rm.DataSecurityClass.NOSECURITY)
         self.qcdata = dashm.QCRun.objects.create(rawfile=self.oldraw, analysis=self.ana,
                 runtype=dm.AcquisistionMode.DDA)
-        uwf = am.UserWorkflow.objects.create(name='a', wftype=2, public=False)
         self.job = jm.Job.objects.create(funcname='hej', kwargs={}, timestamp=timezone.now(),
                 state='processing')
-        nfs = am.NextflowSearch.objects.create(nfwfversionparamset=self.nfwv, workflow=uwf,
+        nfs = am.NextflowSearch.objects.create(nfwfversionparamset=self.qcnfwf, workflow=self.qcwf,
                 analysis=self.ana, token='abc', job=self.job)
         self.olddsr.delete()
         self.oldraw.usetype = rm.UploadFileType.QC
@@ -141,8 +140,6 @@ class RerunManyQCsTest(BaseQCFileTest):
         self.qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow')
         nfrepo = am.NextflowWorkflowRepo.objects.create()
         pset = am.ParameterSet.objects.create()
-        uwf = am.UserWorkflow.objects.create(wftype=am.UserWorkflow.WFTypeChoices.QC, public=False)
-        uwf.nfwfversionparamsets.create(nfworkflow=nfrepo, paramset=pset)
         f3ana = am.Analysis.objects.create(name='previousrun', user=self.user, base_rundir='blbala',
                 securityclass=rm.DataSecurityClass.NOSECURITY)
         dashm.QCRun.objects.create(rawfile=self.f3raw, analysis=f3ana,

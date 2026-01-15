@@ -416,13 +416,6 @@ class TestUploadScript(BaseIntegrationTest):
 
     def test_transfer_qc(self):
         # Test trying to upload file with same name/path but diff MD5
-        self.nfwf = am.NextflowWfVersionParamset.objects.create(update='nf workflow',
-                commit='master', filename='qc.py', nfworkflow=self.nfw,
-                paramset=self.pset, nfversion='', active=True)
-        self.wftype = am.UserWorkflow.WFTypeChoices.QC
-        self.wf = am.UserWorkflow.objects.create(name='testwfqc', wftype=self.wftype, public=True)
-        self.wf.nfwfversionparamsets.add(self.nfwf)
-
         self.token = 'prodtoken_noadminprod'
         self.uploadtoken = rm.UploadToken.objects.create(user=self.user, token=self.token,
                 expires=timezone.now() + timedelta(settings.TOKEN_RENEWAL_WINDOW_DAYS + 1), expired=False,

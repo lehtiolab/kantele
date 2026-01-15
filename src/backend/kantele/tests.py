@@ -191,6 +191,17 @@ class BaseTest(TestCase):
                 path='', active=True, purged=False)
         self.nfc_lf = am.LibraryFile.objects.create(sfile=self.sfnfc, description='NF config')
 
+        # QC workflow
+        self.qcnfwf = am.NextflowWfVersionParamset.objects.create(update='nf workflow',
+                commit='master', filename='qc.py', nfworkflow=self.nfw,
+                paramset=self.pset, nfversion='', active=True)
+        self.qcwf = am.UserWorkflow.objects.create(name='testwfqc', public=True,
+                wftype=am.UserWorkflow.WFTypeChoices.QC)
+        self.qcwf.nfwfversionparamsets.add(self.qcnfwf)
+        am.NfConfigFile.objects.create(serverprofile=self.anaprofile, nfpipe=self.qcnfwf,
+                nfconfig=self.nfc_lf)
+
+
         # Project/dataset/files on old storage
         oldfn = 'raw1'
         self.oldp = dm.Project.objects.create(name='oldp', pi=self.pi, ptype=self.ptype)

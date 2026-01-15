@@ -155,15 +155,14 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
                     'not capable of analysis')
         self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_QC_NXF)
 
-        wf = models.UserWorkflow.objects.filter(wftype=models.UserWorkflow.WFTypeChoices.QC).last()
-        nfwf = wf.nfwfversionparamsets.last()
+        nfwf = models.NextflowWfVersionParamset.objects.get(pk=kwargs['nfwfvid'])
         params = kwargs.get('params', [])
         fss = rm.FileserverShare.objects.values('path').get(server__active=True, share__active=True,
                 server_id=kwargs['fserver_id'], share_id=sfl['servershare_id'])
         stagefiles = {'--raw': [(os.path.join(fss['path'], sfl['path']), sfl['sfile__filename'])]}
         timestamp = datetime.strftime(analysis.date, '%Y%m%d_%H.%M')
         models.NextflowSearch.objects.update_or_create(defaults={'nfwfversionparamset_id': nfwf.id, 
-            'job_id': self.job.pk, 'workflow_id': wf.id, 'token': f'nf-{uuid4()}'},
+            'job_id': self.job.pk, 'workflow_id': kwargs['wf_id'], 'token': f'nf-{uuid4()}'},
             analysis=analysis)
         run = {'timestamp': timestamp,
                'analysis_id': analysis.id,
