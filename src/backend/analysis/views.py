@@ -1339,8 +1339,7 @@ def delete_analysis(request):
         if not analysis.deleted:
             analysis.deleted = True
             analysis.save()
-            del_record = am.AnalysisDeleted(analysis=analysis)
-            del_record.save()
+            am.AnalysisDeleted.objects.update_or_create(analysis=analysis)
             if hasattr(analysis, 'nextflowsearch'):
                 jobq = jm.Job.objects.filter(nextflowsearch__analysis=analysis)
                 jv.cancel_or_revoke_job(jobq)
