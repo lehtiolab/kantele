@@ -8,7 +8,7 @@
       src: "{{ item.1 }}"
       state: mounted
       fstype: cifs
-      opts: "credentials={{ mount_cred }},uid={{ kanteleuser }},domain={{ mount_domain }},mfsymlinks"
+      opts: "credentials={{ mount_cred }},cache=none,uid={{ kanteleuser }},domain={{ mount_domain }},mfsymlinks"
   loop: "{{ storagedirs | zip(storageservers) | list }}"
 
 - name: create folder for .ssh
