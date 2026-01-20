@@ -308,8 +308,9 @@ class Analysis(models.Model):
 
 # Can this be generalized to deleted log for also files?
 class AnalysisDeleted(models.Model):
+    '''Table to track when analysis was deleted, for purging purposes'''
     analysis = models.OneToOneField(Analysis, on_delete=models.CASCADE)
-    date = models.DateTimeField(auto_now_add=True)
+    date = models.DateTimeField(auto_now=True)
 
 
 class AnalysisError(models.Model):
