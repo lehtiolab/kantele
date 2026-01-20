@@ -8,7 +8,7 @@ import signal
 from string import Template
 from time import sleep, time
 from io import BytesIO
-from base64 import b64encode
+from base64 import b64encode, b64decode
 import subprocess
 from datetime import timedelta, datetime
 from tempfile import mkdtemp
@@ -443,13 +443,14 @@ class TestUploadScript(BaseIntegrationTest):
                 'filetype_ext': os.path.splitext(fullp)[1][1:], 'injection_waittime': 5}, fp)
         sp = self.run_script(False, config=os.path.join(tmpdir, 'config.json'), session=True)
         sleep(5)
+
         newraw = rm.RawFile.objects.last()
         newsfloc = rm.StoredFileLoc.objects.last()
         self.assertEqual(newraw.pk, lastraw.pk + 1)
         self.assertEqual(newsfloc.sfile_id, lastsf.pk + 1)
         self.assertFalse(newraw.claimed)
         self.assertEqual(newraw.usetype, rm.UploadFileType.RAWFILE)
-        # Run rsync
+        # Run rsync fromweb
         self.run_job()
         classifyjob = jm.Job.objects.filter(funcname='classify_msrawfile', kwargs={
             'sfloc_id': newsfloc.pk, 'token': self.token})
@@ -758,10 +759,12 @@ class TestUploadScript(BaseIntegrationTest):
                 state=dm.DCStates.NEW)
         self.do_transfer_dset_assoc(ds_exists=True, ds_hasfiles=False)
 
-    def test_classify_fail_nometadata(self):
+    def test_classify_fail_nometadata_and_renew_token(self):
         # This file is of filetype self.ft which is is_folder
         self.f3raw.delete()
         self.get_token()
+        strtoken, _h, _d = b64decode(self.token['user_token']).decode('utf-8').split('|')
+        token = rm.UploadToken.objects.get(token=strtoken)
         fpath = os.path.join(self.rootdir, self.newstorctrl.path, self.f3sss.path) 
         fullp = os.path.join(fpath, self.f3sf.filename)
         old_raw = rm.RawFile.objects.last()
@@ -774,6 +777,10 @@ class TestUploadScript(BaseIntegrationTest):
         # Run rsync
         self.run_job()
         sf.refresh_from_db()
+        # Expire token so classify gets 403, make it run again
+        token.expires = timezone.now()
+        token.save()
+        self.assertFalse(token.expired)
         # Delete classify input xml and run classify
         os.unlink(os.path.join(self.rootdir, self.inboxctrl.path, sss.path, sf.filename, 'HyStarMetadata.xml'))
         self.run_job()
@@ -785,9 +792,29 @@ class TestUploadScript(BaseIntegrationTest):
             os.killpg(os.getpgid(sp.pid), signal.SIGTERM)
             spout, sperr = sp.communicate()
             self.fail()
-        cjob = jm.Job.objects.filter(funcname='classify_msrawfile', kwargs__sfloc_id=sss.pk).get()
+        # Classify task call w "old" token, will set token to expired
+        cjob = jm.Job.objects.filter(funcname='classify_msrawfile', kwargs__sfloc_id=sss.pk)
+        cj_g = cjob.get()
+        token.refresh_from_db()
+        self.assertTrue(token.expired)
+        self.assertEqual(cj_g.task_set.get().state, states.FAILURE)
+        # Call retry job which will update the expired
+        self.user.is_staff = True
+        self.user.save()
+        resp = self.cl.post('/jobs/retry/', content_type='application/json',
+                data={'item_id': cj_g.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.run_job()
+        try:
+            spout, sperr = sp.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            sp.terminate()
+            # Properly kill children since upload.py uses multiprocessing
+            os.killpg(os.getpgid(sp.pid), signal.SIGTERM)
+            spout, sperr = sp.communicate()
+            self.fail()
         new_raw.refresh_from_db()
-        self.assertEqual(cjob.task_set.get().state, states.SUCCESS)
+        self.assertEqual(cjob.get().task_set.get().state, states.SUCCESS)
         classifytask = jm.Task.objects.filter(job__funcname='classify_msrawfile', job__kwargs__sfloc_id=sss.pk)
         self.assertEqual(classifytask.filter(state=states.SUCCESS).count(), 1)
         self.assertFalse(new_raw.claimed) # not QC

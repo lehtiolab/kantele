@@ -1,6 +1,6 @@
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from base64 import b64encode
 
 from django.db import models
@@ -341,6 +341,17 @@ class UploadToken(models.Model):
 
     def invalidate(self):
         self.expired = True
+        self.save()
+
+    def renew(self, expires=False):
+        if not expires:
+            if self.producer.internal:
+                expi_sec = settings.MAX_TIME_PROD_TOKEN 
+            else :
+                expi_sec = settings.MAX_TIME_UPLOADTOKEN
+            expires = timezone.now() + timedelta(seconds=expi_sec)
+        self.expired = False
+        self.expires = expires
         self.save()
 
 

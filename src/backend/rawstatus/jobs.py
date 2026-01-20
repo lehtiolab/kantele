@@ -3,6 +3,7 @@ import requests
 from urllib.parse import urlsplit, urlparse, urljoin
 import ftplib
 from datetime import datetime
+from django.utils import timezone
 
 from rawstatus import tasks
 from rawstatus import models as rm
@@ -327,6 +328,10 @@ class ClassifyMSRawFile(SingleFileJob):
                 'path').first()
 
         self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_FASTSTORAGE)
+        # Renew token in case it's old
+        up_token = rm.UploadToken.objects.get(token=kwargs['token'])
+        if up_token.expired:
+            up_token.renew()
         self.run_tasks.append((kwargs['token'], sfloc['pk'], sfloc['sfile__filetype__name'],
             fss['path'], sfloc['path'], sfloc['sfile__filename']))
 
