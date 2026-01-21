@@ -19,7 +19,6 @@ p.add_argument('-c', required=True)
 p.add_argument('-profile')
 p.add_argument('-name')
 p.add_argument('-with-weblog')
-p.add_argument('-with-trace', action='store_const', const=True, default=False)
 p.add_argument('-resume', action='store_const', const=True, default=False)
 args = p.parse_args(sys.argv[1:])
 

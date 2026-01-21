@@ -102,7 +102,8 @@ def run_nextflow(run, params, baseoutdir, gitwfdir, nf_version, scratchdir):
     print('Checked out repo {} at commit {}'.format(run['repo'], run['wf_commit']))
     # There will be files inside data dir of WF repo so we must be in
     # that dir for WF to find them
-    cmd = [*settings.NXF_COMMAND, run['nxf_wf_fn'], *params, '--outdir', outdir, '-with-trace', '-resume']
+    cmd = [*settings.NXF_COMMAND, run['nxf_wf_fn'], *params, '--outdir', outdir, '-resume']
+    print(cmd)
     env = os.environ
     env['NXF_VER'] = nf_version
     if scratchdir:
