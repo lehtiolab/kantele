@@ -984,7 +984,9 @@ def get_file_owners(sfile):
     if hasattr(sfile.rawfile, 'datasetrawfile'):
         owners.update(dsviews.get_dataset_owners_ids(sfile.rawfile.datasetrawfile.dataset))
     elif hasattr(sfile, 'analysisresultfile'):
-        owners.add(sfile.analysisresultfile.analysis.user.id)
+        owners.add(sfile.analysisresultfile.analysis.user_id)
+    elif hasattr(sfile, 'userfile'):
+        owners.add(sfile.userfile.upload.user_id)
     return owners
  
 
@@ -1027,6 +1029,33 @@ def rename_file(request):
     newrawname = f'{newfilename}{rawfn_ext}'
     RawFile.objects.filter(storedfile=sfile).update(name=newname)
     return JsonResponse({})
+
+
+@login_required
+def update_sharedfile_description(request):
+    """Changes description of a single library or user file. This checks if 
+    characters are correct, rights ok"""
+    if not request.method == 'POST':
+        return JsonResponse({'error': 'Must use POST'}, status=405)
+    data =  json.loads(request.body.decode('utf-8'))
+    try:
+        sfile = StoredFile.objects.filter(pk=data['sf_id'], deleted=False).get()
+        desc = data['desc']
+    except StoredFile.DoesNotExist:
+        return JsonResponse({'error': 'File does not exist'}, status=403)
+    except KeyError:
+        return JsonResponse({'error': 'Incorrectly called description update'}, status=400)
+
+    if request.user.id not in get_file_owners(sfile):
+        return JsonResponse({'error': 'Not authorized to update description of this file'}, status=403)
+
+    if lf := LibraryFile.objects.filter(sfile=sfile):
+        lf.update(description=desc)
+    elif uf := UserFile.objects.filter(sfile=sfile):
+        uf.update(description=desc)
+    else:
+        return JsonResponse({'error': 'File is not a shared file'}, status=403)
+    return JsonResponse({'msg': 'Updated file description'})
 
 
 def zip_instrument_upload_pkg(prod, runtransferfile):

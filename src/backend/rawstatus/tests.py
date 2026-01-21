@@ -1674,6 +1674,53 @@ class TestRenameFile(BaseIntegrationTest):
         self.assertIn('already exists. Please choose', rj['error'])
 
 
+class TestUpdateFileDescription(BaseIntegrationTest):
+    url = '/files/description/'
+
+    def test_renamefile(self):
+        newdesc = 'New description'
+        self.user.is_superuser = True
+        self.user.save()
+        # Lib file
+        kwargs_postdata = {'sf_id': self.sflib.pk, 'desc': newdesc}
+        resp = self.post_json(data=kwargs_postdata)
+        self.assertEqual(resp.status_code, 200)
+        self.lf.refresh_from_db()
+        self.assertEqual(self.lf.description, newdesc)
+        # User file
+        uploadtoken = rm.UploadToken.objects.create(user=self.user, token='whocares1234',
+                expires=timezone.now() + timedelta(1), expired=False,
+                producer=self.prod, filetype=self.ft, uploadtype=rm.UploadFileType.LIBRARY)
+        uf = rm.UserFile.objects.create(sfile=self.tmpsf, description='new uf',
+                upload=uploadtoken)
+        kwargs_postdata = {'sf_id': self.tmpsf.pk, 'desc': newdesc}
+        resp = self.post_json(data=kwargs_postdata)
+        self.assertEqual(resp.status_code, 200)
+        uf.refresh_from_db()
+        self.assertEqual(uf.description, newdesc)
+
+    def test_fails(self):
+        # Try with non-existing file
+        resp = self.post_json(data={'sf_id': -1000, 'desc': self.f3sf.filename})
+        self.assertEqual(resp.status_code, 403)
+        rj = resp.json()
+        self.assertEqual('File does not exist', rj['error'])
+
+        # Try with no file ownership 
+        resp = self.post_json(data={'sf_id': self.sflib.pk, 'desc': 'balbalabl'}) 
+        self.assertEqual(resp.status_code, 403)
+        rj = resp.json()
+        self.assertEqual('Not authorized to update description of this file', rj['error'])
+
+        self.user.is_superuser = True
+        self.user.save()
+
+        resp = self.post_json(data={'sf_id': self.f3sf.pk, 'desc': 'balbalabl'}) 
+        self.assertEqual(resp.status_code, 403)
+        rj = resp.json()
+        self.assertEqual('File is not a shared file', rj['error'])
+
+
 class TestDeleteJobFile(BaseIntegrationTest):
     jobname = 'purge_files'
 

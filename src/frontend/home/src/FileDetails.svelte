@@ -52,6 +52,25 @@ async function renameFile(newname, fnid) {
   }
 }
 
+
+async function updateFileDescription(desc, fnid) {
+  if (desc !== items[fnid].desc) {
+    const resp = await postJSON('/files/description/', {
+      desc: desc,
+      sf_id: fnid});
+    if (!resp.ok) {
+      const msg = `Something went wrong trying to rename the file: ${resp.error}`;
+      notif.errors[msg] = 1;
+      updateNotif();
+    } else {
+      items[fnid].desc = desc;
+      notif.messages[resp.msg] = 1;
+      updateNotif();
+    }
+  }
+}
+
+
 // This function seems general, but I'm not sure, you could put file specific stuff in it
 // maybe with a callback
 async function fetchDetails(ids) {
@@ -146,7 +165,14 @@ onMount(async() => {
   {/each}
 
   {#if fn.description}
-  <p><span class="has-text-weight-bold">Description:</span>{fn.description}</p>
+  <div class="field is-grouped">
+    <p class="control is-expanded">
+      <input class="input is-small" bind:value={fn.description} type="text"> 
+    </p>
+    <p class="control">
+      <a on:click={updateFileDescription(fn.description, fnid)} class="button is-small is-primary">Update</a>
+    </p>
+  </div>
   {/if}
   <div class="field is-grouped">
     <p class="control is-expanded">
