@@ -664,7 +664,7 @@ class TestUploadScript(BaseIntegrationTest):
             out = re.sub('.* - INFO - .producer.main - ', '', out)
             self.assertEqual(out, exp)
 
-    def do_transfer_dset_assoc(self, *, ds_exists, ds_hasfiles):
+    def do_transfer_dset_assoc(self, *, ds_hasfiles):
         self.f3raw.delete()
         self.token = 'prodtoken_noadminprod'
         self.uploadtoken = rm.UploadToken.objects.create(user=self.user, token=self.token,
@@ -695,18 +695,18 @@ class TestUploadScript(BaseIntegrationTest):
         sp = self.run_script(False, config=os.path.join(tmpdir, 'config.json'), session=True)
         sleep(5)
         newraw = rm.RawFile.objects.last()
-        newsf = rm.StoredFileLoc.objects.last()
+        self.newsf = rm.StoredFileLoc.objects.last()
         self.assertEqual(newraw.pk, lastraw.pk + 1)
-        self.assertEqual(newsf.sfile_id, lastsf.pk + 1)
+        self.assertEqual(self.newsf.sfile_id, lastsf.pk + 1)
         self.assertFalse(newraw.claimed)
-        # Run rsync
+        # Run rsync from web
         self.run_job()
         mvjobs = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare', kwargs__dss_id=self.olddss.pk,
-                kwargs__sfloc_ids=[newsf.sfile.storedfileloc_set.first().pk])
+                kwargs__sfloc_ids=[self.newsf.sfile.storedfileloc_set.first().pk])
 
-        qcjobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow', kwargs__sfloc_id=newsf.pk,
+        qcjobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow', kwargs__sfloc_id=self.newsf.pk,
                 kwargs__params=['--instrument', self.msit.name])
-        classifytask = jm.Task.objects.filter(job__funcname='classify_msrawfile', job__kwargs__sfloc_id=newsf.pk)
+        classifytask = jm.Task.objects.filter(job__funcname='classify_msrawfile', job__kwargs__sfloc_id=self.newsf.pk)
         self.assertEqual(mvjobs.count(), 0)
         self.assertEqual(qcjobs.count(), 0)
         # Run classify
@@ -718,9 +718,8 @@ class TestUploadScript(BaseIntegrationTest):
             self.assertEqual(mvjobs.count(), 0)
         else:
             self.assertTrue(newraw.claimed)
-            self.assertEqual(mvjobs.count(), 1)
+            self.assertEqual(mvjobs.filter(state=jj.Jobstates.HOLD).count(), 1)
         self.assertEqual(qcjobs.count(), 0)
-        sleep(4)
 
         self.assertEqual(classifytask.filter(state=states.SUCCESS).count(), 1)
         # Must kill this script, it will keep scanning outbox
@@ -752,12 +751,45 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertFalse(os.path.exists(os.path.join(outbox, self.f3sf.filename)))
 
     def test_transfer_dset_assoc_hasfiles(self):
-        self.do_transfer_dset_assoc(ds_exists=True, ds_hasfiles=True)
+        self.do_transfer_dset_assoc(ds_hasfiles=True)
 
     def test_transfer_dset_assoc(self):
         self.oldds.datasetcomponentstate_set.filter(dtcomp=self.dtcompfiles).update(
                 state=dm.DCStates.NEW)
-        self.do_transfer_dset_assoc(ds_exists=True, ds_hasfiles=False)
+        self.do_transfer_dset_assoc(ds_hasfiles=False)
+        # Accept files and start convert job to make sure that waits for the accepted file rsync
+        # Especially done since that job is created in code in rawstatus/views instead of in
+        # jobs/jobs.py:create_job
+        self.url = '/datasets/save/files/pending/'
+        resp = self.post_json({'dataset_id': self.oldds.pk, 'accepted_files': [self.newsf.sfile_id],
+            'rejected_files': []})
+        self.assertEqual(resp.status_code, 200)
+        self.url = '/createmzml/'
+        am.NfConfigFile.objects.create(serverprofile=self.anaprofile2, nfpipe=self.nfwv, nfconfig=self.nfc_lf)
+        resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pwiz.pk,
+            'dsid': self.oldds.pk})
+        self.assertEqual(resp.status_code, 200)
+        backupjobs = jm.Job.objects.filter(funcname='create_pdc_archive',
+                kwargs__sfloc_id=self.newsf.sfile.storedfileloc_set.first().pk)
+        mvjobs = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare',
+                kwargs__dss_id=self.olddss.pk, kwargs__sfloc_ids=[self.newsf.sfile.storedfileloc_set.first().pk])
+        mzmljobs = jm.Job.objects.filter(funcname='convert_dataset_mzml',
+                kwargs__dss_id=self.olddss.pk, kwargs__pwiz_id=self.pwiz.pk)
+        self.assertEqual(mvjobs.count(), 1)
+        self.assertEqual(backupjobs.count(), 1)
+        self.assertEqual(mzmljobs.count(), 1)
+        self.assertEqual(mvjobs.filter(state=jj.Jobstates.PENDING).count(), 1)
+        self.assertEqual(backupjobs.filter(state=jj.Jobstates.PENDING).count(), 1)
+        self.assertEqual(mzmljobs.filter(state=jj.Jobstates.PENDING).count(), 1)
+        self.run_job()
+        self.assertEqual(mvjobs.filter(state=jj.Jobstates.PROCESSING).count(), 1)
+        self.assertEqual(mzmljobs.filter(state=jj.Jobstates.PENDING).count(), 1)
+        self.assertEqual(backupjobs.filter(state=jj.Jobstates.PENDING).count(), 1)
+        self.run_job()
+        self.assertEqual(backupjobs.filter(state=jj.Jobstates.PROCESSING).count(), 1)
+        backupjobs.get().task_set.update(state=states.SUCCESS)
+        self.run_job()
+        self.assertEqual(mzmljobs.filter(state=jj.Jobstates.PROCESSING).count(), 1)
 
     def test_classify_fail_nometadata_and_renew_token(self):
         # This file is of filetype self.ft which is is_folder

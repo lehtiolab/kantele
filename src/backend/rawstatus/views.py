@@ -26,7 +26,7 @@ from celery import states as taskstates
 from kantele import settings
 from rawstatus.models import (RawFile, Producer, StoredFile, FileServer, ServerShare, StoredFileLoc,
         ShareFunction, FileserverShare, StoredFileType, UserFile, MSFileData, PDCBackedupFile, 
-        UploadToken, UploadFileType, DataSecurityClass)
+        UploadToken, UploadFileType, DataSecurityClass, FileJob)
 from rawstatus import jobs as rsjobs
 from rawstatus.tasks import search_raws_downloaded
 from analysis.models import (Analysis, LibraryFile, AnalysisResultFile, UniProtFasta, EnsemblFasta,
@@ -527,13 +527,22 @@ def classified_rawfile_treatment(request):
                     dss_mvjobs.append(mvjob_kw)
 
             if not rsjob_error:
+                jname = 'rsync_dset_files_to_servershare'
                 for mvkw in dss_mvjobs:
-                    jwrap = jobmap['rsync_dset_files_to_servershare'](False)
-                    # Calling job creation directly because creating a HOLD job
-                    mvkw.update(jwrap.on_create_addkwargs(**mvkw))
-                    job, _cr = jm.Job.objects.get_or_create(state=jj.Jobstates.HOLD,
-                            funcname='rsync_dset_files_to_servershare', kwargs=mvkw,
-                            timestamp=timezone.now())
+                    # Create job here instead of in jobs.py, because we should not create this
+                    # job multiple times, esp not if user manages to put another job in 
+                    # between, so filter first to see if exists
+                    # get_or_create is harder since you also need to do addkwargs before
+                    if not jm.Job.objects.filter(funcname=jname,
+                            kwargs__sfloc_ids=mvkw['sfloc_ids'], kwargs__dss_id=mvkw['dss_id'],
+                            kwargs__dstshare_id=mvkw['dstshare_id']):
+                        jwrap = jobmap['rsync_dset_files_to_servershare'](False)
+                        mvkw.update(jwrap.on_create_addkwargs(**mvkw))
+                        jwrap.update_sourcefns_lastused(**mvkw)
+                        job = jm.Job.objects.create(funcname=jname, timestamp=timezone.now(),
+                                state=jj.Jobstates.HOLD, kwargs=mvkw)
+                        FileJob.objects.create(rawfile_id=sfloc.sfile.rawfile.pk,
+                                job_id=job.pk)
         else:
             print(f'Classify task error for task {data["task_id"]} - dataset {dsid} already has '
                     'files, more files cannot be added automatically via rawfile classification')
