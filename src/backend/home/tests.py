@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 from shutil import copytree, copy
 from django.utils import timezone
+from django.contrib.auth.models import User
 
 from kantele import settings
 from kantele.tests import BaseTest, BaseIntegrationTest
@@ -34,7 +35,7 @@ class MzmlTests(BaseIntegrationTest):
 
 
 class TestCreateMzmls(MzmlTests):
-    url = '/createmzml/'
+    url = '/mzml/create/'
 
     def test_fail_requests(self):
         # GET
@@ -113,8 +114,7 @@ class TestCreateMzmls(MzmlTests):
         # 1. to rsyncable area (here: open ssnewstorage)
         # 2. to remote
         self.anaserver.delete()
-        oldpw = am.Proteowizard.objects.create(version_description='older', nf_version=self.nfwv,
-                params={'mzmltool': 'msconvert'})
+        oldpw = am.Proteowizard.objects.create(version_description='older', nf_version=self.nfwv)
         self.f3mzml.pwiz = oldpw
         self.f3mzml.save()
 
@@ -257,7 +257,7 @@ class TestCreateMzmls(MzmlTests):
                 path='libfiles', active=True, purged=False)
         copy(os.path.join(self.newstorctrl.path, self.sflibloc.path, self.sflib.filename),
                 os.path.join(self.oldstorctrl.path, anasflib.path, self.sflib.filename))
-        refineurl = '/refinemzml/'
+        refineurl = '/mzml/refine/'
         resp = self.cl.post(refineurl, content_type='application/json', data={'dsid': self.ds.pk,
             'dbid': self.sflib.pk, 'wfid': self.refinewf.pk})
         self.assertEqual(resp.status_code, 200)
@@ -346,7 +346,7 @@ class TestCreateMzmls(MzmlTests):
 
 
 class TestRefineMzmls(MzmlTests):
-    url = '/refinemzml/'
+    url = '/mzml/refine/'
 
     def test_fail_requests(self):
         # GET
@@ -472,4 +472,49 @@ class TestRefineMzmls(MzmlTests):
         self.run_job() # set to done
         j2.refresh_from_db()
         self.assertEqual(j2.state, Jobstates.DONE)
+
+
+class TestDeleteMzmls(BaseTest):
+    url = '/mzml/delete/'
+
+    def test_fails(self):
+        resp = self.cl.get(self.url)
+        self.assertEqual(resp.status_code, 405)
+        resp = self.cl.post(self.url, content_type='application/json', data={'hello': 'test'})
+        self.assertEqual(resp.status_code, 400)
+        resp = self.cl.post(self.url, content_type='application/json', data={'dsid': -1, 'pwiz_id': -1, 'refined': False})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'Dataset does not exist or is deleted')
+        resp = self.cl.post(self.url, content_type='application/json', data={'dsid': self.ds.pk, 'pwiz_id': -1, 'refined': False})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'Proteowizard version does not exist')
+
+        username='otheruser'
+        email = 'other@test.com'
+        password='12345678'
+        otheruser = User(username=username, email=email)
+        otheruser.set_password(password)
+        otheruser.save() 
+        dm.DatasetOwner.objects.filter(dataset=self.ds, user=self.user).update(user=otheruser)
+        resp = self.cl.post(self.url, content_type='application/json', data={'dsid': self.ds.pk,
+            'pwiz_id': self.pwiz.pk, 'refined': False})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'File is in a dataset which you are not '
+                'authorized to change')
+        self.f3sfmz.delete()
+        dm.DatasetOwner.objects.filter(dataset=self.ds, user=otheruser).update(user=self.user)
+        resp = self.cl.post(self.url, content_type='application/json', data={'dsid': self.ds.pk,
+            'pwiz_id': self.pwiz.pk, 'refined': False})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()['error'], 'Cannot find specified mzML files to delete, '
+                'inform admin')
+        
+    def test_mzmlfile(self):
+        rmjob = jm.Job.objects.filter(funcname='purge_files')
+        self.assertFalse(rmjob.exists())
+        resp = self.cl.post(self.url, content_type='application/json', data={'dsid': self.ds.pk,
+            'pwiz_id': self.pwiz.pk, 'refined': False})
+        self.assertEqual(resp.status_code, 200)
+        rmjob = rmjob.filter(kwargs__sfloc_ids=[self.f3mzsss.pk])
+        self.assertTrue(rmjob.exists())
 

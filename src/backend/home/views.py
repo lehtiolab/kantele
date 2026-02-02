@@ -908,6 +908,7 @@ def parse_mzml_pwiz(pwiz_sets, qset, numname):
                     'refined': pw['mzmlfile__refined'], 
                     'refineready': False,
                     'id': pw['pk'], 
+                    'ask_force_delete': False,
                     'version': pw['version_description']}
         pwset[numname] += pw['nummz']
         if 'created' not in pwset:
@@ -1000,9 +1001,9 @@ def fetch_dset_details(dset):
             if not state:
                 raise RuntimeError('Something went wrong getting mzMLs')
             pws['state'] = state
-        info['pwiz_sets'] = [x for x in pw_sets.values()]
+        info['pwiz_sets'] = pw_sets
         info['pwiz_versions'] =  {x.id: x.version_description for x in anmodels.Proteowizard.objects.exclude(
-            pk__in=[x['id'] for x in info['pwiz_sets']]).exclude(active=False)}
+            pk__in=[x['id'] for x in info['pwiz_sets'].values()]).exclude(active=False)}
 
         # Tracking pipeline
         dspipeq = cm.DatasetPipeline.objects.filter(dataset=dset)
@@ -1291,6 +1292,39 @@ def refine_mzmls(request):
             wftype=anmodels.UserWorkflow.WFTypeChoices.SPEC)
     anmodels.NextflowSearch.objects.update_or_create(analysis=analysis, defaults={
         'nfwfversionparamset_id': data['wfid'], 'job_id': job['id'], 'workflow_id': uwf.pk, 'token': ''})
+    return JsonResponse({})
+
+
+@login_required
+@require_POST
+def delete_mzmls(request):
+    data = json.loads(request.body.decode('utf-8'))
+    try:
+        dset = dsmodels.Dataset.objects.filter(pk=data['dsid'], deleted=False).values('pk',
+                'deleted', 'runname__experiment__project__ptype_id').get()
+        pwiz = anmodels.Proteowizard.objects.filter(pk=data['pwiz_id']).values('pk').get()
+        refined = data['refined']
+    except KeyError:
+        return JsonResponse({'error': 'Bad request data'}, status=400)
+    except anmodels.Proteowizard.DoesNotExist:
+        return JsonResponse({'error': 'Proteowizard version does not exist'}, status=400)
+    except dsmodels.Dataset.DoesNotExist:
+        return JsonResponse({'error': 'Dataset does not exist or is deleted'}, status=403)
+    if not check_ownership(request.user, dset['runname__experiment__project__ptype_id'],
+                dset['pk'], dset['deleted']):
+        return JsonResponse({'error': 'File is in a dataset which you are not authorized to '
+            'change'}, status=403)
+
+    sfile_q = filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dset['pk'],
+            mzmlfile__pwiz_id=data['pwiz_id'], mzmlfile__refined=refined)
+    sfloc_q = filemodels.StoredFileLoc.objects.filter(sfile__in=sfile_q, active=True)
+    if not sfile_q.exists() or not sfloc_q.exists():
+        return JsonResponse({'error': 'Cannot find specified mzML files to delete, inform admin'},
+                status=403)
+    # sfloc is set to purged=True in the post-job-view for purge
+    sfile_q.update(deleted=True)
+    create_job('purge_files', sfloc_ids=[x['pk'] for x in sfloc_q.values('pk')])
+    sfloc_q.update(active=False)
     return JsonResponse({})
 
 

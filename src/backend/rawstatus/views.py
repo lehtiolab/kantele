@@ -1393,7 +1393,7 @@ def delete_file(request):
     elif hasattr(sfile.rawfile, 'datasetrawfile'):
         dset = dsmodels.Dataset.objects.filter(datasetrawfile__rawfile=sfile.rawfile).values('pk',
                 'runname__experiment__project__ptype_id', 'deleted').get()
-        if not data.get('force'):
+        if sfloc_q.filter(sfile__mzmlfile__isnull=True) and not data.get('force'):
             return JsonResponse({'error': 'File is in a dataset, force delete, archive entire set, '
                 'or remove it from dataset first'}, status=402)
         elif dsviews.check_ownership(request.user, dset['runname__experiment__project__ptype_id'],

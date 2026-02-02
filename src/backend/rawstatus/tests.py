@@ -764,7 +764,7 @@ class TestUploadScript(BaseIntegrationTest):
         resp = self.post_json({'dataset_id': self.oldds.pk, 'accepted_files': [self.newsf.sfile_id],
             'rejected_files': []})
         self.assertEqual(resp.status_code, 200)
-        self.url = '/createmzml/'
+        self.url = '/mzml/create/'
         am.NfConfigFile.objects.create(serverprofile=self.anaprofile2, nfpipe=self.nfwv, nfconfig=self.nfc_lf)
         resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pwiz.pk,
             'dsid': self.oldds.pk})
