@@ -401,7 +401,7 @@ def get_files_transferstate(request):
         up_dst = rsjobs.create_upload_dst_web(rfn.pk, sfn.filetype.filetype)
         dstsharefun, dstpath = UPLOAD_DESTINATIONS[upload.uploadtype]
         if sfnss := sfn.storedfileloc_set.filter(servershare__function=dstsharefun).first():
-            # 2026-01 Very old in-dataset files will not have an UPLOAD_DEST==tmp annotation
+            # TODO 2026-01: Very old in-dataset files will not have an UPLOAD_DEST==INBOX annotation
             # so ony fetch rsync jobs for newer files (using this if sfnss block)
             # They should be sfn.checked = True so should not be an issue with last_rsjob
             rsync_jobs = jm.Job.objects.filter(funcname='rsync_transfer_fromweb',
@@ -422,11 +422,14 @@ def get_files_transferstate(request):
         if sfn.checked:
             # File transfer and check finished
             tstate = 'done'
-            has_backupjob = jm.Job.objects.filter(funcname='create_pdc_archive',
-                    kwargs__sfloc_id=sfnss.pk, state__in=jj.JOBSTATES_WAIT).exists()
-            if not has_backupjob and not PDCBackedupFile.objects.filter(storedfile_id=sfn.id):
-                # No already-backedup PDC file, then do some processing work
-                process_file_confirmed_ready(rfn, sfn, sfnss, upload, desc)
+            if sfnss:
+                # As in above TODO we do not check backup job for files without an INBOX-sfnss
+                # as those are old
+                has_backupjob = jm.Job.objects.filter(funcname='create_pdc_archive',
+                        kwargs__sfloc_id=sfnss.pk, state__in=jj.JOBSTATES_WAIT).exists()
+                if not has_backupjob and not PDCBackedupFile.objects.filter(storedfile_id=sfn.id):
+                    # No already-backedup PDC file, then do some processing work
+                    process_file_confirmed_ready(rfn, sfn, sfnss, upload, desc)
         # FIXME this is too hardcoded data model which will be changed one day,
         # needs to be in Job class abstraction!
 
@@ -453,10 +456,12 @@ def get_files_transferstate(request):
             sfn.save()
             tstate = 'transfer'
 
-        else:
+        elif sfnss:
             # There is an unlikely rsync job which is canceled, requeue it
             create_job('rsync_transfer_fromweb', sfloc_id=sfnss.pk, src_path=up_dst)
             tstate = 'wait'
+        else:
+            raise RuntimeError(f'Could not determine what to do with this file {rfn.name}')
 
     response = {'transferstate': tstate, 'fn_id': rfn.pk}
     return JsonResponse(response)
