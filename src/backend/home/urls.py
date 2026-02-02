@@ -23,6 +23,7 @@ urlpatterns = [
     path('refresh/dataset/<int:dset_id>', views.refresh_dataset),
     path('refresh/file/<int:fn_id>', views.refresh_file),
     path('refresh/analysis/<int:anid>', views.refresh_analysis, name="analysisrefresh"),
-    path('createmzml/', views.create_mzmls),
-    path('refinemzml/', views.refine_mzmls),
+    path('mzml/create/', views.create_mzmls),
+    path('mzml/refine/', views.refine_mzmls),
+    path('mzml/delete/', views.delete_mzmls),
 ]

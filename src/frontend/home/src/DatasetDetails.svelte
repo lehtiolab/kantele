@@ -37,7 +37,7 @@ function new_owners(allowners, oldowners) {
 }
 
 async function convertDset(dsid, pwiz_id) {
-  const resp = await postJSON('createmzml/', {dsid: dsid, pwiz_id: pwiz_id});
+  const resp = await postJSON('mzml/create/', {dsid: dsid, pwiz_id: pwiz_id});
   if (!resp.ok) {
     const msg = `Something went wrong trying to queue dataset mzML conversion: ${resp.error}`;
     showError(msg);
@@ -49,7 +49,7 @@ async function convertDset(dsid, pwiz_id) {
 }
 
 async function refineDset(dsid, wfid, dbid) {
-  const resp = await postJSON('refinemzml/', {dsid: dsid, wfid: wfid, dbid: dbid});
+  const resp = await postJSON('mzml/refine/', {dsid: dsid, wfid: wfid, dbid: dbid});
   if (!resp.ok) {
     const msg = `Something went wrong trying to queue precursor refining: ${resp.error}`;
     showError(msg);
@@ -57,6 +57,25 @@ async function refineDset(dsid, wfid, dbid) {
     cleanFetchDetails(dsetIds);
     const msg = 'Queued dataset for mzML precursor refining';
     showError(msg);
+  }
+}
+
+async function deleteMzmls(dsid, pwsets_id, force) {
+  if (!force) {
+    //pwiz.ask_force_delete = true;
+    dsets[dsid].pwiz_sets[pwsets_id].ask_force_delete = true;
+    setTimeout(() => { dsets[dsid].pwiz_sets[pwsets_id].ask_force_delete = false} , flashtime);
+  } else {
+    const pwiz = dsets[dsid].pwiz_sets[pwsets_id];
+    const resp = await postJSON('mzml/delete/', {dsid: dsid, pwiz_id: pwiz.id, refined: pwiz.refined});
+    if (!resp.ok) {
+      const msg = `Something went wrong trying to delete mzMLs: ${resp.error}`;
+      showError(msg);
+    } else {
+      cleanFetchDetails(dsetIds);
+      const msg = 'Queued deletion of mzMLs';
+      showError(msg);
+    }
   }
 }
 
@@ -220,9 +239,16 @@ onMount(async() => {
     <label class="label">Conversion mzML results / pipeline version(s)</label>
     <table class="table">
       <tbody>
-        {#each dset.pwiz_sets as pw}
+        {#each Object.entries(dset.pwiz_sets) as [pwid, pw]}
         <tr>
           <td>
+            {#if pw.state !== 'No mzmls'}
+              {#if pw.ask_force_delete}
+                <button class="button is-small is-danger" on:click={e => deleteMzmls(dsid, pwid, true)}>Are you sure?</button>
+              {:else}
+                <button class="button is-small is-danger is-outlined" on:click={e => deleteMzmls(dsid, pwid, false)} >Delete mzMLs</button>
+              {/if}
+            {/if}
             {#if (pw.state === 'Incomplete' && pw.refined && pw.active)}
             <div class="select is-small">
               <select bind:value={refine_v_touse[dset.id]}>
