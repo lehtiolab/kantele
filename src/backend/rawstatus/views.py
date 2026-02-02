@@ -400,17 +400,22 @@ def get_files_transferstate(request):
         # then you will not get correct behaviour - better in DB?
         up_dst = rsjobs.create_upload_dst_web(rfn.pk, sfn.filetype.filetype)
         dstsharefun, dstpath = UPLOAD_DESTINATIONS[upload.uploadtype]
-        sfnss = sfn.storedfileloc_set.filter(servershare__function=dstsharefun).first()
-        rsync_jobs = jm.Job.objects.filter(funcname='rsync_transfer_fromweb',
-                kwargs__sfloc_id=sfnss.pk, kwargs__src_path=up_dst).order_by('timestamp')
-        # fetching from DB here to avoid race condition in if/else block
-        try:
-            last_rsjob = rsync_jobs.last()
-        except jm.Job.DoesNotExist:
+        if sfnss := sfn.storedfileloc_set.filter(servershare__function=dstsharefun).first():
+            # 2026-01 Very old in-dataset files will not have an UPLOAD_DEST==tmp annotation
+            # so ony fetch rsync jobs for newer files (using this if sfnss block)
+            # They should be sfn.checked = True so should not be an issue with last_rsjob
+            rsync_jobs = jm.Job.objects.filter(funcname='rsync_transfer_fromweb',
+                    kwargs__sfloc_id=sfnss.pk, kwargs__src_path=up_dst).order_by('timestamp')
+            # fetching from DB here to avoid race condition in if/else block
+            try:
+                last_rsjob = rsync_jobs.last()
+            except jm.Job.DoesNotExist:
+                last_rsjob = False
+            # Refresh to make sure we dont get race condition where it is checked
+            # while we fetching jobs above and the non-checked/done job will result
+            # in a retransfer
+        else:
             last_rsjob = False
-        # Refresh to make sure we dont get race condition where it is checked
-        # while we fetching jobs above and the non-checked/done job will result
-        # in a retransfer
         sfn.refresh_from_db()
 
         sfnss = StoredFileLoc.objects.filter(sfile=sfn, servershare__function=dstsharefun).first()
