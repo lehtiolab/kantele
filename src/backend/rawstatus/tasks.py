@@ -583,7 +583,7 @@ def classify_msrawfile(self, token, fnid, ftypename, sharepath, path, fname):
                     else:
                         errors.append(f'Unexpected error reading file: {str(e)}')
                 try:
-                    mstime_min = float(cur.fetchone()[0])
+                    mstime_min = float(cur.fetchone()[0]) / 60.
                 except (TypeError, ValueError):
                     errors.append('Could not determine MS time for raw file')
                 con.close()
