@@ -204,7 +204,7 @@ class TestUploadScript(BaseIntegrationTest):
         classifytask = jm.Task.objects.filter(job__funcname='classify_msrawfile', job__kwargs__sfloc_id=sss.pk)
         self.assertEqual(classifytask.filter(state=states.SUCCESS).count(), 1)
         self.assertFalse(new_raw.claimed) # not QC
-        self.assertEqual(new_raw.msfiledata.mstime, 123.456)
+        self.assertEqual(new_raw.msfiledata.mstime, 123.456/60)
         self.assertEqual(jm.Job.objects.filter(funcname='create_pdc_archive', kwargs__sfloc_id=sss.pk).count(), 1)
         self.assertTrue(sf.checked)
         zipboxpath = os.path.join(os.getcwd(), 'zipbox', f'{self.f3sf.filename}.zip')
@@ -260,7 +260,7 @@ class TestUploadScript(BaseIntegrationTest):
             self.fail()
         self.f3raw.refresh_from_db()
         self.f3sf.refresh_from_db()
-        self.assertEqual(self.f3raw.msfiledata.mstime, 123.456)
+        self.assertEqual(self.f3raw.msfiledata.mstime, 123.456/60)
         self.assertTrue(self.f3sf.checked)
         self.assertEqual(self.f3sf.md5, self.f3raw.source_md5)
         zipboxpath = os.path.join(os.getcwd(), 'zipbox', f'{self.f3sf.filename}.zip')
@@ -356,7 +356,7 @@ class TestUploadScript(BaseIntegrationTest):
             spout, sperr = sp.communicate()
             self.fail()
         newsf = rm.StoredFile.objects.last()
-        self.assertEqual(newsf.rawfile.msfiledata.mstime, 123.456)
+        self.assertEqual(newsf.rawfile.msfiledata.mstime, 123.456/60)
         self.assertEqual(newsf.pk, lastsf.pk + 1)
         self.assertEqual(rawfn.pk, newsf.rawfile_id)
         self.assertEqual(newsf.filename, self.f3sf.filename)
@@ -471,7 +471,7 @@ class TestUploadScript(BaseIntegrationTest):
         qcjobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow',
                 kwargs__sfloc_id=dstsfloc.pk, kwargs__params=['--instrument', self.msit.name, '--dia'])
         self.assertTrue(newraw.claimed)
-        self.assertEqual(newraw.msfiledata.mstime, 123.456)
+        self.assertEqual(newraw.msfiledata.mstime, 123.456/60)
         self.assertEqual(classifytask.filter(state=states.SUCCESS).count(), 1)
         self.assertEqual(dashm.QCRun.objects.filter(rawfile=newraw).count(), 1)
         self.assertEqual(rsjobs.count(), 1)
@@ -630,7 +630,7 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertEqual(classifyjob.count(), 1)
         newraw.refresh_from_db()
         self.assertFalse(newraw.claimed)
-        self.assertEqual(newraw.msfiledata.mstime, 123.456)
+        self.assertEqual(newraw.msfiledata.mstime, 123.456/60)
         self.assertEqual(classifytask.filter(state=states.SUCCESS).count(), 1)
         self.assertEqual(rsjobs.count(), 0)
         self.assertEqual(qcjobs.count(), 0)
@@ -712,7 +712,7 @@ class TestUploadScript(BaseIntegrationTest):
         # Run classify
         self.run_job()
         newraw.refresh_from_db()
-        self.assertEqual(newraw.msfiledata.mstime, 123.456)
+        self.assertEqual(newraw.msfiledata.mstime, 123.456/60)
         if ds_hasfiles:
             self.assertFalse(newraw.claimed)
             self.assertEqual(mvjobs.count(), 0)
@@ -852,7 +852,7 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertFalse(new_raw.claimed) # not QC
         self.assertFalse(jm.Job.objects.filter(funcname='create_pdc_archive').exists())
         self.assertTrue(sf.checked)
-        self.assertTrue(rm.MSFileData.objects.filter(rawfile=new_raw, mstime=123.456, success=False,
+        self.assertTrue(rm.MSFileData.objects.filter(rawfile=new_raw, mstime=123.456/60, success=False,
             errmsg='File reader did not generate report').exists())
 
         zipboxpath = os.path.join(os.getcwd(), 'zipbox', f'{self.f3sf.filename}.zip')
