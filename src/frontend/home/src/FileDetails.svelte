@@ -164,6 +164,13 @@ onMount(async() => {
   </div>
   {/each}
 
+  {#if fn.extrainfo}
+  <div>
+    <span class="has-text-weight-bold">Info: </span>
+    <span>{fn.extrainfo}</span>
+  </div>
+  {/if}
+
   {#if fn.description}
   <div class="field is-grouped">
     <p class="control is-expanded">

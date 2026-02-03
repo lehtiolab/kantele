@@ -857,6 +857,7 @@ def get_file_info(request, file_id):
             'renameable': False if is_mzml else True,
             'deleted': sfile.deleted,
             'ask_force_delete': False,
+            'description': False, 'extrainfo': False,
             'restorable': hasattr(sfile, 'pdcbackedupfile') and sfile.pdcbackedupfile.success,
             'all_storlocs': {x.id: {'name': x.name, 'id': x.pk, 'description': x.description}
                 for x in sfile.get_allowed_shares()}
@@ -867,16 +868,13 @@ def get_file_info(request, file_id):
         info['storage_shares'].append(x['servershare_id'])
 
     if hasattr(sfile, 'libraryfile'):
-        desc = sfile.libraryfile.description
+        info['description'] = sfile.libraryfile.description
     elif hasattr(sfile, 'userfile'):
-        desc = sfile.userfile.description
+        info['description'] = sfile.userfile.description
     elif msferr := filemodels.MSFileData.objects.filter(rawfile=sfile.rawfile_id, success=False):
-        desc = msferr.get().errmsg
+        info['extrainfo'] = msferr.get().errmsg
     elif msf := filemodels.MSFileData.objects.filter(rawfile=sfile.rawfile_id, success=True):
-        desc = f'MS time: {msf.get().mstime}'
-    else:
-        desc = False
-    info['description'] = desc
+        info['extrainfo'] = f'MS time: {msf.get().mstime}'
     if hasattr(sfile.rawfile, 'datasetrawfile'):
         info['dataset'] = sfile.rawfile.datasetrawfile.dataset_id
         if is_mzml:

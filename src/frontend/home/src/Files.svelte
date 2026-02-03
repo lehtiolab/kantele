@@ -50,6 +50,7 @@ async function getFileDetails(fnId) {
     ${resp.servers.map(x => `<div class="has-text-primary">${x[0]} / ${x[1]} </div>`)}
     </p>
     ${resp.description ? `<p><span class="has-text-weight-bold">Description:</span> ${resp.description}</p>` : ''}
+    ${resp.extrainfo ? `<p><span class="has-text-weight-bold">Info:</span> ${resp.extrainfo}</p>` : ''}
     `;
 }
 
