@@ -57,7 +57,7 @@ class BaseTest(TestCase):
         self.ssinbox = rm.ServerShare.objects.create(name='inbox', max_security=2,
                 function=rm.ShareFunction.INBOX, maxdays_data=1)
         self.sslib = rm.ServerShare.objects.create(name='libshare', max_security=1,
-                function=rm.ShareFunction.LIBRARY)
+                function=rm.ShareFunction.LIBRARY, maxdays_data=1)
         self.inboxctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
                 share=self.ssinbox, path=os.path.join(self.rootdir, 'inbox'))
         self.libctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,

@@ -72,6 +72,9 @@ JOBRUNNER_INTERVAL = 5
 
 # Lifespan for mzML files, in days
 MAX_MZML_STORAGE_TIME_POST_ANALYSIS = int(os.environ.get('MAX_MZML_STORAGE_TIME_POST_ANALYSIS', -1))
+# Amount of days before dset expiry to message a user
+DATASET_EXPIRY_DAYS_MESSAGE = 30
+ANALYSIS_EXPIRY_DAYS_MESSAGE = 30
 
 # Upload token lifespan
 MAX_TIME_UPLOADTOKEN = 24 * 3600 # for user uploads

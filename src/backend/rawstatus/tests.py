@@ -1861,14 +1861,14 @@ class TestDeleteJobFile(BaseIntegrationTest):
 
 
 class TestAutoDelete(BaseIntegrationTest):
-
-    def test(self):
+    def setUp(self):
+        super().setUp()
         exp_ldu = timezone.now() - timedelta(days=3)
         # Not expired file in analysis local raw
         anadss = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.analocalstor,
                 storage_loc_ui=self.storloc, storage_loc=self.storloc, startdate=timezone.now())
         rm.PDCBackedupFile.objects.create(success=True, storedfile=self.f3sf, pdcpath='f3sf')
-        f3sssana = rm.StoredFileLoc.objects.create(sfile=self.f3sf, servershare=self.analocalstor,
+        self.f3sssana = rm.StoredFileLoc.objects.create(sfile=self.f3sf, servershare=self.analocalstor,
                 path=self.storloc, active=True, purged=False)
         # raw file in analysis local raw
         dm.DatasetServer.objects.filter(pk=self.olddss.pk).update(last_date_used=exp_ldu)
@@ -1891,7 +1891,7 @@ class TestAutoDelete(BaseIntegrationTest):
         reportsf = rm.StoredFile.objects.create(rawfile=reportraw, md5=reportraw.source_md5,
                 filetype=self.lft, checked=True, filename=reportraw.name)
         rm.PDCBackedupFile.objects.create(success=True, storedfile=reportsf, pdcpath='report')
-        reportsfl = rm.StoredFileLoc.objects.create(sfile=reportsf,
+        self.reportsfl = rm.StoredFileLoc.objects.create(sfile=reportsf,
                 servershare=self.ssweb, path='abbc123', active=True, purged=False)
         # Web report expired
         expreportraw = rm.RawFile.objects.create(name='report.html', producer=self.prod,
@@ -1900,9 +1900,13 @@ class TestAutoDelete(BaseIntegrationTest):
         expreportsf = rm.StoredFile.objects.create(rawfile=expreportraw, md5=expreportraw.source_md5,
                 filetype=self.lft, checked=True, filename=expreportraw.name)
         rm.PDCBackedupFile.objects.create(success=True, storedfile=expreportsf, pdcpath='expreport')
-        expreportsfl = rm.StoredFileLoc.objects.create(sfile=expreportsf,
+        self.expreportsfl = rm.StoredFileLoc.objects.create(sfile=expreportsf,
                 servershare=self.ssweb, path='abbc123', active=True, purged=False)
-        rm.StoredFileLoc.objects.filter(pk=expreportsfl.pk).update(last_date_used=exp_ldu)
+        rm.StoredFileLoc.objects.filter(pk=self.expreportsfl.pk).update(last_date_used=exp_ldu)
+
+        # Library file expired
+        rm.PDCBackedupFile.objects.create(success=True, storedfile=self.sfnfc, pdcpath='expreport')
+        rm.StoredFileLoc.objects.filter(pk=self.nfc_loc.pk).update(last_date_used=exp_ldu)
 
         # Analysis files not expired, one shared
         ana1 = am.Analysis.objects.create(user=self.user, name='ana1', base_rundir='ana1',
@@ -1914,7 +1918,7 @@ class TestAutoDelete(BaseIntegrationTest):
                 filetype=self.lft, checked=True, filename=anaraw.name)
         am.AnalysisResultFile.objects.create(analysis=ana1, sfile=anasf)
         rm.PDCBackedupFile.objects.create(success=True, storedfile=anasf, pdcpath='ana1')
-        anasfl = rm.StoredFileLoc.objects.create(sfile=anasf,
+        self.anasfl = rm.StoredFileLoc.objects.create(sfile=anasf,
                 servershare=self.ssanaruns, path=ana1.base_rundir, active=True, purged=False)
         anaraw2 = rm.RawFile.objects.create(name='ana2.html', producer=self.prod,
                 source_md5='ana2md5', size=100, claimed=True, date=timezone.now(),
@@ -1923,7 +1927,7 @@ class TestAutoDelete(BaseIntegrationTest):
                 filetype=self.lft, checked=True, filename=anaraw2.name)
         am.AnalysisResultFile.objects.create(analysis=ana1, sfile=anasf2)
         rm.PDCBackedupFile.objects.create(success=True, storedfile=anasf2, pdcpath='ana2')
-        anasfl2 = rm.StoredFileLoc.objects.create(sfile=anasf2,
+        self.anasfl2 = rm.StoredFileLoc.objects.create(sfile=anasf2,
                 servershare=self.ssanaruns, path=ana1.base_rundir, active=True, purged=False)
 
         # Analysis files expired
@@ -1936,61 +1940,183 @@ class TestAutoDelete(BaseIntegrationTest):
                 filetype=self.lft, checked=True, filename=anaraw3.name)
         am.AnalysisResultFile.objects.create(analysis=ana2, sfile=anasf3)
         rm.PDCBackedupFile.objects.create(success=True, storedfile=anasf3, pdcpath='ana3')
-        anasfl3 = rm.StoredFileLoc.objects.create(sfile=anasf3,
+        self.anasfl3 = rm.StoredFileLoc.objects.create(sfile=anasf3,
                 servershare=self.ssanaruns, path=ana2.base_rundir, active=True, purged=False)
-        rm.StoredFileLoc.objects.filter(pk=anasfl3.pk).update(last_date_used=exp_ldu)
+        rm.StoredFileLoc.objects.filter(pk=self.anasfl3.pk).update(last_date_used=exp_ldu)
 
         # Shared analysis file (not expired):
         am.AnalysisResultFile.objects.create(analysis=ana2, sfile=anasf2)
 
         # Analysis without shared files expired
-        ana3 = am.Analysis.objects.create(user=self.user, name='ana3', base_rundir='ana3',
+        self.ana3 = am.Analysis.objects.create(user=self.user, name='ana3', base_rundir='ana3',
                 securityclass=rm.DataSecurityClass.NOSECURITY)
         anaraw4 = rm.RawFile.objects.create(name='ana4.html', producer=self.prod,
                 source_md5='ana4md5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.ANALYSIS)
         anasf4 = rm.StoredFile.objects.create(rawfile=anaraw4, md5=anaraw4.source_md5,
                 filetype=self.lft, checked=True, filename=anaraw4.name)
-        am.AnalysisResultFile.objects.create(analysis=ana3, sfile=anasf4)
+        am.AnalysisResultFile.objects.create(analysis=self.ana3, sfile=anasf4)
         rm.PDCBackedupFile.objects.create(success=True, storedfile=anasf4, pdcpath='ana4')
-        anasfl4 = rm.StoredFileLoc.objects.create(sfile=anasf4,
-                servershare=self.ssanaruns, path=ana3.base_rundir, active=True, purged=False)
-        rm.StoredFileLoc.objects.filter(pk=anasfl4.pk).update(last_date_used=exp_ldu)
+        self.anasfl4 = rm.StoredFileLoc.objects.create(sfile=anasf4,
+                servershare=self.ssanaruns, path=self.ana3.base_rundir, active=True, purged=False)
+        rm.StoredFileLoc.objects.filter(pk=self.anasfl4.pk).update(last_date_used=exp_ldu)
 
-        call_command('delete_expired_files')
 
-        for fn in [f3sssana, self.oldsss, self. tmpsss, reportsfl, expreportsfl, anasfl, anasfl2,
-                anasfl3, anasfl4]:
+    def test_dry_run(self):
+        call_command('delete_expired_files', dry_run=True)
+
+        # Refresh everything
+        for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
+                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
             fn.refresh_from_db()
 
-        self.assertTrue(f3sssana.active)
-        self.assertFalse(jm.Job.objects.filter(funcname='purge_files',
-            state=jj.Jobstates.PENDING, kwargs__sfloc_ids=[f3sssana.pk]).exists())
-        self.assertFalse(jm.Job.objects.filter(funcname='remove_dset_files_servershare',
-            state=jj.Jobstates.PENDING, kwargs__sfloc_ids=[f3sssana.pk]).exists())
-        self.assertFalse(self.oldsss.active)
-        self.assertTrue(jm.Job.objects.filter(funcname='remove_dset_files_servershare',
-            state=jj.Jobstates.PENDING, kwargs__sfloc_ids=[self.oldsss.pk]).exists())
-        self.assertFalse(jm.Job.objects.filter(funcname='purge_files',
-            state=jj.Jobstates.PENDING, kwargs__sfloc_ids=[self.oldsss.pk]).exists())
+        rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
+        dsrmjob = jm.Job.objects.filter(funcname='remove_dset_files_servershare',
+                state=jj.Jobstates.PENDING)
 
-        for fn in [self.f3sssinbox, reportsfl, anasfl, anasfl2]:
+        for fn in [self.oldsss, self.f3sssana, self.f3sssinbox, self.reportsfl, self.anasfl,
+                self.anasfl2, self.tmpsss,  self.expreportsfl, self.anasfl3, self.anasfl4,
+                self.nfc_loc, self.f3mzsss]:
             self.assertTrue(fn.active)
-            self.assertFalse(jm.Job.objects.filter(funcname='purge_files',
-                state=jj.Jobstates.PENDING, kwargs__sfloc_ids=[fn.pk]).exists())
-            self.assertFalse(jm.Job.objects.filter(funcname='remove_dset_files_servershare',
-                state=jj.Jobstates.PENDING, kwargs__sfloc_ids=[fn.pk]).exists())
+            self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+            self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
 
-        for fn in [self.tmpsss,  expreportsfl, anasfl3, anasfl4]:
+        self.ana3.refresh_from_db()
+        self.assertFalse(self.ana3.deleted)
+
+    def test_full(self):
+        call_command('delete_expired_files')
+
+        # Refresh everything
+        for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
+                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
+            fn.refresh_from_db()
+
+        rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
+        dsrmjob = jm.Job.objects.filter(funcname='remove_dset_files_servershare',
+                state=jj.Jobstates.PENDING)
+
+        self.assertFalse(self.oldsss.active)
+        self.assertTrue(dsrmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
+        self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
+
+        for fn in [self.f3sssana, self.f3sssinbox, self.reportsfl, self.anasfl, self.anasfl2]:
+            self.assertTrue(fn.active)
+            self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+            self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+
+        for fn in [self.tmpsss,  self.expreportsfl, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
             self.assertFalse(fn.active)
-            self.assertTrue(jm.Job.objects.filter(funcname='purge_files',
-                state=jj.Jobstates.PENDING, kwargs__sfloc_ids__contains=fn.pk).exists())
-            self.assertFalse(jm.Job.objects.filter(funcname='remove_dset_files_servershare',
-                state=jj.Jobstates.PENDING, kwargs__sfloc_ids=[fn.pk]).exists())
+            self.assertTrue(rmjob.filter(kwargs__sfloc_ids__contains=fn.pk).exists())
+            self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
 
-        self.assertFalse(ana3.deleted)
-        ana3.refresh_from_db()
-        self.assertTrue(ana3.deleted)
+        self.assertFalse(self.ana3.deleted)
+        self.ana3.refresh_from_db()
+        self.assertTrue(self.ana3.deleted)
+
+    def test_analysis(self):
+        call_command('delete_expired_files', analysis=True)
+
+        # Refresh everything
+        for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
+                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
+            fn.refresh_from_db()
+
+        rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
+        dsrmjob = jm.Job.objects.filter(funcname='remove_dset_files_servershare',
+                state=jj.Jobstates.PENDING)
+
+        # Not deleting old ds file, tmp file, newer ana files
+        for fn in [self.oldsss, self.tmpsss,  self.f3sssana, self.f3sssinbox, self.reportsfl, self.anasfl, self.anasfl2, self.expreportsfl, self.nfc_loc, self.f3mzsss]:
+            self.assertTrue(fn.active)
+            self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+            self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+
+        for fn in [self.anasfl3, self.anasfl4]:
+            self.assertFalse(fn.active)
+            self.assertTrue(rmjob.filter(kwargs__sfloc_ids__contains=fn.pk).exists())
+            self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+
+        self.assertFalse(self.ana3.deleted)
+        self.ana3.refresh_from_db()
+        self.assertTrue(self.ana3.deleted)
+
+    def test_inbox(self):
+        call_command('delete_expired_files', inbox=True)
+
+        # Refresh everything
+        for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
+                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
+            fn.refresh_from_db()
+
+        rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
+        dsrmjob = jm.Job.objects.filter(funcname='remove_dset_files_servershare',
+                state=jj.Jobstates.PENDING)
+
+        # Not deleting old ds file, ana files, newer inbox
+        for fn in [self.oldsss, self.f3sssana, self.reportsfl, self.anasfl, self.anasfl2, self.expreportsfl, self.anasfl3, self.anasfl4, self.f3sssinbox, self.nfc_loc, self.f3mzsss]:
+            self.assertTrue(fn.active)
+            self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+            self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+
+        for fn in [self.tmpsss]:
+            self.assertFalse(fn.active)
+            self.assertTrue(rmjob.filter(kwargs__sfloc_ids__contains=fn.pk).exists())
+            self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+
+        self.ana3.refresh_from_db()
+        self.assertFalse(self.ana3.deleted)
+
+
+    def test_datasets(self):
+        call_command('delete_expired_files', datasets=True)
+
+        # Refresh everything
+        for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
+                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
+            fn.refresh_from_db()
+
+        rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
+        dsrmjob = jm.Job.objects.filter(funcname='remove_dset_files_servershare',
+                state=jj.Jobstates.PENDING)
+
+        self.assertFalse(self.oldsss.active)
+        self.assertTrue(dsrmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
+        self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
+
+        for fn in [self.f3sssana, self.f3sssinbox, self.reportsfl, self.anasfl, self.anasfl2, self.tmpsss,  self.expreportsfl, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
+            self.assertTrue(fn.active)
+            self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+            self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+
+        self.ana3.refresh_from_db()
+        self.assertFalse(self.ana3.deleted)
+
+    def test_library_and_report(self):
+        call_command('delete_expired_files', library=True, reports=True, mzml=True)
+
+        # Refresh everything
+        for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
+                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
+            fn.refresh_from_db()
+
+        rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
+        dsrmjob = jm.Job.objects.filter(funcname='remove_dset_files_servershare',
+                state=jj.Jobstates.PENDING)
+
+        for fn in [self.oldsss, self.f3sssana, self.f3sssinbox, self.anasfl, self.anasfl2, self.tmpsss,  self.anasfl3, self.anasfl4, self.reportsfl]:
+            self.assertTrue(fn.active)
+            self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+            self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+
+        for fn in [self.expreportsfl, self.nfc_loc, self.f3mzsss]:
+            self.assertFalse(fn.active)
+            self.assertTrue(rmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+            self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+
+        self.ana3.refresh_from_db()
+        self.assertFalse(self.ana3.deleted)
+
 
 
 class TestArchiveFile(BaseFilesTest):
