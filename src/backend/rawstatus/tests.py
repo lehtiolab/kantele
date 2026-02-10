@@ -1901,10 +1901,10 @@ class TestAutoDelete(BaseIntegrationTest):
         expreportraw = rm.RawFile.objects.create(name='report.html', producer=self.prod,
                 source_md5='expreportmd5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.QC)
-        expreportsf = rm.StoredFile.objects.create(rawfile=expreportraw, md5=expreportraw.source_md5,
+        self.expreportsf = rm.StoredFile.objects.create(rawfile=expreportraw, md5=expreportraw.source_md5,
                 filetype=self.lft, checked=True, filename=expreportraw.name)
-        rm.PDCBackedupFile.objects.create(success=True, storedfile=expreportsf, pdcpath='expreport')
-        self.expreportsfl = rm.StoredFileLoc.objects.create(sfile=expreportsf,
+        rm.PDCBackedupFile.objects.create(success=True, storedfile=self.expreportsf, pdcpath='expreport')
+        self.expreportsfl = rm.StoredFileLoc.objects.create(sfile=self.expreportsf,
                 servershare=self.ssweb, path='abbc123', active=True, purged=False)
         rm.StoredFileLoc.objects.filter(pk=self.expreportsfl.pk).update(last_date_used=exp_ldu)
 
@@ -1940,11 +1940,11 @@ class TestAutoDelete(BaseIntegrationTest):
         anaraw3 = rm.RawFile.objects.create(name='ana3.html', producer=self.prod,
                 source_md5='ana3md5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.ANALYSIS)
-        anasf3 = rm.StoredFile.objects.create(rawfile=anaraw3, md5=anaraw3.source_md5,
+        self.anasf3 = rm.StoredFile.objects.create(rawfile=anaraw3, md5=anaraw3.source_md5,
                 filetype=self.lft, checked=True, filename=anaraw3.name)
-        am.AnalysisResultFile.objects.create(analysis=self.ana2, sfile=anasf3)
-        rm.PDCBackedupFile.objects.create(success=True, storedfile=anasf3, pdcpath='ana3')
-        self.anasfl3 = rm.StoredFileLoc.objects.create(sfile=anasf3,
+        am.AnalysisResultFile.objects.create(analysis=self.ana2, sfile=self.anasf3)
+        rm.PDCBackedupFile.objects.create(success=True, storedfile=self.anasf3, pdcpath='ana3')
+        self.anasfl3 = rm.StoredFileLoc.objects.create(sfile=self.anasf3,
                 servershare=self.ssanaruns, path=self.ana2.base_rundir, active=True, purged=False)
         rm.StoredFileLoc.objects.filter(pk=self.anasfl3.pk).update(last_date_used=exp_ldu)
 
@@ -1957,11 +1957,11 @@ class TestAutoDelete(BaseIntegrationTest):
         anaraw4 = rm.RawFile.objects.create(name='ana4.html', producer=self.prod,
                 source_md5='ana4md5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.ANALYSIS)
-        anasf4 = rm.StoredFile.objects.create(rawfile=anaraw4, md5=anaraw4.source_md5,
+        self.anasf4 = rm.StoredFile.objects.create(rawfile=anaraw4, md5=anaraw4.source_md5,
                 filetype=self.lft, checked=True, filename=anaraw4.name)
-        am.AnalysisResultFile.objects.create(analysis=self.ana3, sfile=anasf4)
-        rm.PDCBackedupFile.objects.create(success=True, storedfile=anasf4, pdcpath='ana4')
-        self.anasfl4 = rm.StoredFileLoc.objects.create(sfile=anasf4,
+        am.AnalysisResultFile.objects.create(analysis=self.ana3, sfile=self.anasf4)
+        rm.PDCBackedupFile.objects.create(success=True, storedfile=self.anasf4, pdcpath='ana4')
+        self.anasfl4 = rm.StoredFileLoc.objects.create(sfile=self.anasf4,
                 servershare=self.ssanaruns, path=self.ana3.base_rundir, active=True, purged=False)
         rm.StoredFileLoc.objects.filter(pk=self.anasfl4.pk).update(last_date_used=exp_ldu)
 
@@ -1983,7 +1983,8 @@ class TestAutoDelete(BaseIntegrationTest):
 
         # Refresh everything
         for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
-                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
+                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss,
+                self.oldds, self.tmpsf, self.anasf3, self.anasf4]:
             fn.refresh_from_db()
 
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
@@ -2000,10 +2001,22 @@ class TestAutoDelete(BaseIntegrationTest):
 
         self.ana3.refresh_from_db()
         self.assertFalse(self.ana3.deleted)
+        self.assertFalse(self.oldds.deleted)
+
+        self.assertFalse(hm.UserMessage.objects.exists())
+
+        # Sfile deleted check
+        for sf in [self.tmpsf, self.oldsf, self.f3sfmz, self.expreportsf, self.anasf3,
+                self.anasf4, self.sfnfc]:
+            sf.refresh_from_db()
+            try:
+                self.assertFalse(sf.deleted)
+            except AssertionError:
+                print(f'AssertionError: File {sf} marked as deleted!')
+                raise
+            
 
     def test_full(self):
-        # FIXME check if sf.deleted = true
-
         call_command('delete_expired_files')
 
         # Refresh everything
@@ -2026,7 +2039,7 @@ class TestAutoDelete(BaseIntegrationTest):
             self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
             self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
 
-        for fn in [self.tmpsss,  self.expreportsfl, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
+        for fn in [self.tmpsss, self.expreportsfl, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
             # Deleted
             self.assertFalse(fn.active)
             self.assertTrue(rmjob.filter(kwargs__sfloc_ids__contains=fn.pk).exists())
@@ -2035,8 +2048,18 @@ class TestAutoDelete(BaseIntegrationTest):
         self.assertFalse(self.ana3.deleted)
         self.ana3.refresh_from_db()
         self.assertTrue(self.ana3.deleted)
-
         self.assertTrue(self.oldds.deleted)
+
+        # Sfile deleted check
+        for sf in [self.tmpsf, self.oldsf, self.f3sfmz, self.expreportsf, self.anasf3, self.anasf4,
+                self.sfnfc]:
+            sf.refresh_from_db()
+            try:
+                self.assertTrue(sf.deleted)
+            except AssertionError:
+                print(f'AssertionError: File {sf} not deleted!')
+                raise
+            
         self.assertTrue(self.usm_ds_del.exists())
         self.assertTrue(self.usm_ds_exp.exists())
         self.assertTrue(self.usm_ana_del.exists())
@@ -2047,7 +2070,8 @@ class TestAutoDelete(BaseIntegrationTest):
 
         # Refresh everything
         for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
-                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
+                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss,
+                self.oldds]:
             fn.refresh_from_db()
 
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
@@ -2068,7 +2092,24 @@ class TestAutoDelete(BaseIntegrationTest):
         self.assertFalse(self.ana3.deleted)
         self.ana3.refresh_from_db()
         self.assertTrue(self.ana3.deleted)
+        self.assertFalse(self.oldds.deleted)
 
+        # Sfile deleted check
+        for sf in [self.tmpsf, self.oldsf, self.f3sfmz, self.expreportsf, self.sfnfc]:
+            sf.refresh_from_db()
+            try:
+                self.assertFalse(sf.deleted)
+            except AssertionError:
+                print(f'AssertionError: File {sf} marked as deleted!')
+                raise
+        for sf in [self.anasf3, self.anasf4]:
+            sf.refresh_from_db()
+            try:
+                self.assertTrue(sf.deleted)
+            except AssertionError:
+                print(f'AssertionError: File {sf} not marked as deleted!')
+                raise
+            
         self.assertFalse(self.usm_ds_del.exists())
         self.assertFalse(self.usm_ds_exp.exists())
         self.assertTrue(self.usm_ana_del.exists())
@@ -2079,7 +2120,8 @@ class TestAutoDelete(BaseIntegrationTest):
 
         # Refresh everything
         for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
-                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
+                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss,
+                self.oldds]:
             fn.refresh_from_db()
 
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
@@ -2102,13 +2144,29 @@ class TestAutoDelete(BaseIntegrationTest):
 
         self.assertFalse(hm.UserMessage.objects.exists())
 
+        # Sfile deleted check
+        for sf in [self.oldsf, self.f3sfmz, self.expreportsf, self.sfnfc, self.anasf3, self.anasf4]:
+            sf.refresh_from_db()
+            try:
+                self.assertFalse(sf.deleted)
+            except AssertionError:
+                print(f'AssertionError: File {sf} marked as deleted!')
+                raise
+        for sf in [self.tmpsf]:
+            sf.refresh_from_db()
+            try:
+                self.assertTrue(sf.deleted)
+            except AssertionError:
+                print(f'AssertionError: File {sf} not marked as deleted!')
+                raise
 
     def test_datasets(self):
         call_command('delete_expired_files', datasets=True)
 
         # Refresh everything
         for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
-                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
+                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss,
+                self.oldds]:
             fn.refresh_from_db()
 
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
@@ -2119,6 +2177,7 @@ class TestAutoDelete(BaseIntegrationTest):
         self.assertTrue(dsrmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
         self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
 
+        # Files not deleted
         for fn in [self.f3sssana, self.f3sssinbox, self.reportsfl, self.anasfl, self.anasfl2, self.tmpsss,  self.expreportsfl, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
             self.assertTrue(fn.active)
             self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
@@ -2126,6 +2185,22 @@ class TestAutoDelete(BaseIntegrationTest):
 
         self.ana3.refresh_from_db()
         self.assertFalse(self.ana3.deleted)
+
+        # Sfile deleted check
+        for sf in [self.f3sfmz, self.expreportsf, self.sfnfc, self.anasf3, self.anasf4, self.tmpsf]:
+            sf.refresh_from_db()
+            try:
+                self.assertFalse(sf.deleted)
+            except AssertionError:
+                print(f'AssertionError: File {sf} marked as deleted!')
+                raise
+        for sf in [self.oldsf]:
+            sf.refresh_from_db()
+            try:
+                self.assertTrue(sf.deleted)
+            except AssertionError:
+                print(f'AssertionError: File {sf} not marked as deleted!')
+                raise
 
         self.assertTrue(self.usm_ds_del.exists())
         self.assertTrue(self.usm_ds_exp.exists())
@@ -2137,7 +2212,8 @@ class TestAutoDelete(BaseIntegrationTest):
 
         # Refresh everything
         for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
-                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
+                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss,
+                self.oldds]:
             fn.refresh_from_db()
 
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
@@ -2156,6 +2232,22 @@ class TestAutoDelete(BaseIntegrationTest):
 
         self.ana3.refresh_from_db()
         self.assertFalse(self.ana3.deleted)
+
+        # Sfile deleted check
+        for sf in [self.f3sfmz, self.expreportsf, self.sfnfc]:
+            sf.refresh_from_db()
+            try:
+                self.assertTrue(sf.deleted)
+            except AssertionError:
+                print(f'AssertionError: File {sf} not marked as deleted!')
+                raise
+        for sf in [self.oldsf, self.tmpsf, self.anasf3, self.anasf4]:
+            sf.refresh_from_db()
+            try:
+                self.assertFalse(sf.deleted)
+            except AssertionError:
+                print(f'AssertionError: File {sf} marked as deleted!')
+                raise
 
         self.assertFalse(hm.UserMessage.objects.exists())
 

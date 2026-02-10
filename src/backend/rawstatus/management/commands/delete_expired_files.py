@@ -78,7 +78,7 @@ class Command(BaseCommand):
                             create_job('remove_dset_files_servershare', dss_id=dss_exp['pk'],
                                     sfloc_ids=dssrmsfl_ids)
                             nr_dsssfl = dssrmsfl.update(active=False)
-                            rm.StoredFile.objects.filter(storedfileloc__in=dssrmsfl).exclude(
+                            rm.StoredFile.objects.filter(storedfileloc__pk__in=dssrmsfl_ids).exclude(
                                 storedfileloc__active=True).update(deleted=True)
                             dss_nr = dss_exps.filter(pk=dss_exp['pk']).update(active=False)
                             print(f'Queued expired dss {dss_exp["pk"]} from dset '
@@ -106,7 +106,7 @@ class Command(BaseCommand):
                             msgtype=hm.DsetMsgTypes.DELETED, dset_id=dset['pk'])
 
             # Now weve set expired dsets, create usermessaeg for those that are "soon to expire"
-            if not options["dry_run"]:
+            if not options['dry_run']:
                 for ds_soon in dm.Dataset.objects.annotate(nr_active=Count('datasetserver__id',
                         filter=Q(datasetserver__active=True)), nr_soon=Count('datasetserver__id',
                         filter=Q(datasetserver__active=True,
@@ -175,17 +175,18 @@ class Command(BaseCommand):
             # a message, so if an analysis has files shared with another (due to them outputting the
             # exact same file), but the second analysis is much newer, this analysis will not get
             # a message
-            for ana_soon in am.Analysis.objects.annotate(
-                    nr_active=Count('analysisresultfile__sfile__storedfileloc',
-                    filter=Q(analysisresultfile__sfile__storedfileloc__active=True)),
-                    nr_soon=Count('analysisresultfile__sfile__storedfileloc',
-                    filter=Q(analysisresultfile__sfile__storedfileloc__active=True,
-                    analysisresultfile__sfile__storedfileloc__last_date_used__lt=timezone.now() + 
-                        timedelta(days=settings.ANALYSIS_EXPIRY_DAYS_MESSAGE) - 
-                        timedelta(days=1) * F('analysisresultfile__sfile__storedfileloc__servershare__maxdays_data')))
-                    ).filter(nr_active__gt=0, nr_soon=F('nr_active')).values('pk', 'user_id'):
-                hm.UserMessage.create_message(ana_soon['user_id'],
-                        msgtype=hm.AnalysisMsgTypes.DELETE_SOON, analysis_id=ana_soon['pk'])
+            if not options['dry_run']:
+                for ana_soon in am.Analysis.objects.annotate(
+                        nr_active=Count('analysisresultfile__sfile__storedfileloc',
+                        filter=Q(analysisresultfile__sfile__storedfileloc__active=True)),
+                        nr_soon=Count('analysisresultfile__sfile__storedfileloc',
+                        filter=Q(analysisresultfile__sfile__storedfileloc__active=True,
+                        analysisresultfile__sfile__storedfileloc__last_date_used__lt=timezone.now() + 
+                            timedelta(days=settings.ANALYSIS_EXPIRY_DAYS_MESSAGE) - 
+                            timedelta(days=1) * F('analysisresultfile__sfile__storedfileloc__servershare__maxdays_data')))
+                        ).filter(nr_active__gt=0, nr_soon=F('nr_active')).values('pk', 'user_id'):
+                    hm.UserMessage.create_message(ana_soon['user_id'],
+                            msgtype=hm.AnalysisMsgTypes.DELETE_SOON, analysis_id=ana_soon['pk'])
 
         # Other files (tmp, library, web report)
         functions = []
@@ -205,12 +206,14 @@ class Command(BaseCommand):
                 other_nr = other_fns_rm.count()
                 print(f'Dry run, could queue {other_nr} expired files from share {share.name} for deletion')
             else:
+                other_nr = 0
                 for chunk in chunk_iter(other_fns_rm.values('pk'), 100):
                     rm_other_pks = [x['pk'] for x in chunk]
                     create_job('purge_files', sfloc_ids=rm_other_pks)
+                    other_nr += rm.StoredFileLoc.objects.filter(pk__in=rm_other_pks).update(
+                            active=False)
                     rm.StoredFile.objects.filter(storedfileloc__in=rm_other_pks).exclude(
                             storedfileloc__active=True).update(deleted=True)
-                other_nr = other_fns_rm.update(active=False)
                 print(f'Queued {other_nr} expired files from share {share.name} for deletion')
 
         if run_all or options['mzml']:
@@ -222,10 +225,11 @@ class Command(BaseCommand):
                 nr_mzml = activefns_mzml.count()
                 print(f'Dry run, could queue {nr_mzml} expired mzML files for deletion')
             else:
+                nr_mzml = 0
                 for chunk in chunk_iter(activefns_mzml.values('pk'), 100):
                     rm_mzml_pks = [x['pk'] for x in chunk]
                     create_job('purge_files', sfloc_ids=rm_mzml_pks)
+                    nr_mzml += rm.StoredFileLoc.objects.filter(pk__in=rm_mzml_pks).update(active=False)
                     rm.StoredFile.objects.filter(storedfileloc__in=rm_mzml_pks).exclude(
                             storedfileloc__active=True).update(deleted=True)
-                nr_mzml = activefns_mzml.update(active=False)
                 print(f'Queued {nr_mzml} expired mzML files for deletion')
