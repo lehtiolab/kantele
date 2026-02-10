@@ -30,7 +30,6 @@ class UserMessage(models.Model):
     def create_message(cls, user_id, *, msgtype, dset_id=False, analysis_id=False):
         usermsg = cls(user_id=user_id)
         if dset_id and not DatasetMessage.objects.filter(dset_id=dset_id, msgtype=msgtype).exists():
-            dsmsg = DatasetMessage(dset_id=dset_id, msgtype=msgtype, msg=DatasetMessage)
             usermsg.save()
             dsmsg = DatasetMessage.objects.create(dset_id=dset_id, msgtype=msgtype, msg=usermsg)
             usermsg.txt = dsmsg.get_msg()
@@ -55,7 +54,7 @@ class DatasetMessage(models.Model):
         proj = dm.Project.objects.filter(experiment__runname__dataset=self.dset).values('name').get()
         msgmap = {
                 DsetMsgTypes.DELETE_SOON: f'Your dataset {self.dset_id} from project '
-                                f'{proj["name"]}  will expire in less than '
+                                f'{proj["name"]} will expire in less than '
                                 f'{settings.DATASET_EXPIRY_DAYS_MESSAGE} days',
                 DsetMsgTypes.DELETED: f'Your dataset {self.dset_id} from project '
                                 f'{proj["name"]} has expired and has been removed from storage',

@@ -28,6 +28,7 @@ from analysis import models as am
 from analysis import models as am
 from jobs import models as jm
 from jobs import jobs as jj
+from home import models as hm
 
 
 class BaseFilesTest(BaseTest):
@@ -722,6 +723,8 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertEqual(qcjobs.count(), 0)
 
         self.assertEqual(classifytask.filter(state=states.SUCCESS).count(), 1)
+        self.assertTrue(hm.UserMessage.objects.filter(user=self.user, txt='Your dataset '
+            f'{self.oldds.pk} from project {self.oldp.name} has new files that can be accepted').exists())
         # Must kill this script, it will keep scanning outbox
         try:
             spout, sperr = sp.communicate(timeout=1)
@@ -1863,6 +1866,7 @@ class TestDeleteJobFile(BaseIntegrationTest):
 class TestAutoDelete(BaseIntegrationTest):
     def setUp(self):
         super().setUp()
+        # maxdays_data = 1 on shares, so -3 would work
         exp_ldu = timezone.now() - timedelta(days=3)
         # Not expired file in analysis local raw
         anadss = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.analocalstor,
@@ -1931,21 +1935,21 @@ class TestAutoDelete(BaseIntegrationTest):
                 servershare=self.ssanaruns, path=ana1.base_rundir, active=True, purged=False)
 
         # Analysis files expired
-        ana2 = am.Analysis.objects.create(user=self.user, name='ana2', base_rundir='ana2',
+        self.ana2 = am.Analysis.objects.create(user=self.user, name='ana2', base_rundir='ana2',
                 securityclass=rm.DataSecurityClass.NOSECURITY)
         anaraw3 = rm.RawFile.objects.create(name='ana3.html', producer=self.prod,
                 source_md5='ana3md5', size=100, claimed=True, date=timezone.now(),
                 usetype=rm.UploadFileType.ANALYSIS)
         anasf3 = rm.StoredFile.objects.create(rawfile=anaraw3, md5=anaraw3.source_md5,
                 filetype=self.lft, checked=True, filename=anaraw3.name)
-        am.AnalysisResultFile.objects.create(analysis=ana2, sfile=anasf3)
+        am.AnalysisResultFile.objects.create(analysis=self.ana2, sfile=anasf3)
         rm.PDCBackedupFile.objects.create(success=True, storedfile=anasf3, pdcpath='ana3')
         self.anasfl3 = rm.StoredFileLoc.objects.create(sfile=anasf3,
-                servershare=self.ssanaruns, path=ana2.base_rundir, active=True, purged=False)
+                servershare=self.ssanaruns, path=self.ana2.base_rundir, active=True, purged=False)
         rm.StoredFileLoc.objects.filter(pk=self.anasfl3.pk).update(last_date_used=exp_ldu)
 
         # Shared analysis file (not expired):
-        am.AnalysisResultFile.objects.create(analysis=ana2, sfile=anasf2)
+        am.AnalysisResultFile.objects.create(analysis=self.ana2, sfile=anasf2)
 
         # Analysis without shared files expired
         self.ana3 = am.Analysis.objects.create(user=self.user, name='ana3', base_rundir='ana3',
@@ -1961,6 +1965,18 @@ class TestAutoDelete(BaseIntegrationTest):
                 servershare=self.ssanaruns, path=self.ana3.base_rundir, active=True, purged=False)
         rm.StoredFileLoc.objects.filter(pk=self.anasfl4.pk).update(last_date_used=exp_ldu)
 
+        # messages
+        self.usm_ds_del = hm.UserMessage.objects.filter(user=self.user, txt='Your dataset '
+                f'{self.oldds.pk} from project {self.oldp.name} has expired and has been '
+                'removed from storage')
+        self.usm_ds_exp = hm.UserMessage.objects.filter(user=self.user, txt=f'Your dataset '
+                f'{self.ds.pk} from project {self.p1.name} will expire in less than '
+                f'{settings.DATASET_EXPIRY_DAYS_MESSAGE} days')
+        self.usm_ana_del = hm.UserMessage.objects.filter(user=self.user, txt=f'Your analysis '
+                f'{self.ana3.pk} / {self.ana3.name} has expired and has been removed from storage')
+        self.usm_ana_exp = hm.UserMessage.objects.filter(user=self.user, txt=f'Your analysis '
+                f'{self.ana2.pk} / {self.ana2.name} will expire in less than '
+                f'{settings.ANALYSIS_EXPIRY_DAYS_MESSAGE} days')
 
     def test_dry_run(self):
         call_command('delete_expired_files', dry_run=True)
@@ -1977,6 +1993,7 @@ class TestAutoDelete(BaseIntegrationTest):
         for fn in [self.oldsss, self.f3sssana, self.f3sssinbox, self.reportsfl, self.anasfl,
                 self.anasfl2, self.tmpsss,  self.expreportsfl, self.anasfl3, self.anasfl4,
                 self.nfc_loc, self.f3mzsss]:
+            # Nothing deleted, dry run
             self.assertTrue(fn.active)
             self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
             self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
@@ -1985,11 +2002,14 @@ class TestAutoDelete(BaseIntegrationTest):
         self.assertFalse(self.ana3.deleted)
 
     def test_full(self):
+        # FIXME check if sf.deleted = true
+
         call_command('delete_expired_files')
 
         # Refresh everything
         for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
-                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
+                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss,
+                self.oldds]:
             fn.refresh_from_db()
 
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
@@ -2001,11 +2021,13 @@ class TestAutoDelete(BaseIntegrationTest):
         self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
 
         for fn in [self.f3sssana, self.f3sssinbox, self.reportsfl, self.anasfl, self.anasfl2]:
+            # Not deleted
             self.assertTrue(fn.active)
             self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
             self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
 
         for fn in [self.tmpsss,  self.expreportsfl, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
+            # Deleted
             self.assertFalse(fn.active)
             self.assertTrue(rmjob.filter(kwargs__sfloc_ids__contains=fn.pk).exists())
             self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
@@ -2013,6 +2035,12 @@ class TestAutoDelete(BaseIntegrationTest):
         self.assertFalse(self.ana3.deleted)
         self.ana3.refresh_from_db()
         self.assertTrue(self.ana3.deleted)
+
+        self.assertTrue(self.oldds.deleted)
+        self.assertTrue(self.usm_ds_del.exists())
+        self.assertTrue(self.usm_ds_exp.exists())
+        self.assertTrue(self.usm_ana_del.exists())
+        self.assertTrue(self.usm_ana_exp.exists())
 
     def test_analysis(self):
         call_command('delete_expired_files', analysis=True)
@@ -2041,6 +2069,11 @@ class TestAutoDelete(BaseIntegrationTest):
         self.ana3.refresh_from_db()
         self.assertTrue(self.ana3.deleted)
 
+        self.assertFalse(self.usm_ds_del.exists())
+        self.assertFalse(self.usm_ds_exp.exists())
+        self.assertTrue(self.usm_ana_del.exists())
+        self.assertTrue(self.usm_ana_exp.exists())
+
     def test_inbox(self):
         call_command('delete_expired_files', inbox=True)
 
@@ -2067,6 +2100,8 @@ class TestAutoDelete(BaseIntegrationTest):
         self.ana3.refresh_from_db()
         self.assertFalse(self.ana3.deleted)
 
+        self.assertFalse(hm.UserMessage.objects.exists())
+
 
     def test_datasets(self):
         call_command('delete_expired_files', datasets=True)
@@ -2091,6 +2126,11 @@ class TestAutoDelete(BaseIntegrationTest):
 
         self.ana3.refresh_from_db()
         self.assertFalse(self.ana3.deleted)
+
+        self.assertTrue(self.usm_ds_del.exists())
+        self.assertTrue(self.usm_ds_exp.exists())
+        self.assertFalse(self.usm_ana_del.exists())
+        self.assertFalse(self.usm_ana_exp.exists())
 
     def test_library_and_report(self):
         call_command('delete_expired_files', library=True, reports=True, mzml=True)
@@ -2117,6 +2157,7 @@ class TestAutoDelete(BaseIntegrationTest):
         self.ana3.refresh_from_db()
         self.assertFalse(self.ana3.deleted)
 
+        self.assertFalse(hm.UserMessage.objects.exists())
 
 
 class TestArchiveFile(BaseFilesTest):

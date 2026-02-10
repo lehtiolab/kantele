@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from django.db.models import Max, F
+from django.db.models import Max, F, Count, Q
 
 from kantele import settings
 
@@ -52,18 +52,19 @@ class Command(BaseCommand):
         if run_all or options['datasets']:
             # Files in dset (dont delete half a dataset)
             # Loop over shares (not many) to be able to connect dss and sfloc via their share
+            remove_dsets = set()
             for share in rm.ServerShare.objects.filter(active=True, function=rm.ShareFunction.RAWDATA,
                     maxdays_data__gt=0):
                 total_rm_ds_fns = 0
 
                 dss_exps = dm.DatasetServer.objects.filter(storageshare=share, active=True,
                         last_date_used__lt=timezone.now() - timedelta(days=share.maxdays_data))
-                for dss_exp in dss_exps.values('dataset_id', 'pk'):
+                for dss_exp in dss_exps.values('dataset_id', 'pk', 'dataset__datasetowner__user'):
                     dss_sfl = activefns_raw.filter(servershare=share,
                             sfile__rawfile__datasetrawfile__dataset_id=dss_exp['dataset_id'])
                     dssrmsfl = activefns_raw_bup.filter(servershare=share,
                             sfile__rawfile__datasetrawfile__dataset_id=dss_exp['dataset_id'])
-                    if dss_sfl.count() == dssrmsfl.count():
+                    if dss_sfl.count() and dss_sfl.count() == dssrmsfl.count():
                         if options['dry_run']:
                             nr_dsssfl = dssrmsfl.count()
                             dss_nr = dss_exps.filter(pk=dss_exp['pk']).count()
@@ -77,11 +78,15 @@ class Command(BaseCommand):
                             create_job('remove_dset_files_servershare', dss_id=dss_exp['pk'],
                                     sfloc_ids=dssrmsfl_ids)
                             nr_dsssfl = dssrmsfl.update(active=False)
+                            rm.StoredFile.objects.filter(storedfileloc__in=dssrmsfl).exclude(
+                                storedfileloc__active=True).update(deleted=True)
                             dss_nr = dss_exps.filter(pk=dss_exp['pk']).update(active=False)
                             print(f'Queued expired dss {dss_exp["pk"]} from dset '
                                     f'{dss_exp["dataset_id"]} with {nr_dsssfl} files on share '
                                     f'{share.name} for deletion')
                         total_rm_ds_fns += nr_dsssfl
+                        remove_dsets.add(dss_exp['dataset_id'])
+
                     else:
                         # Possibilities:
                         # - old files with no backup, or on old backup system (dont delete!) FIXME back them up!
@@ -91,20 +96,30 @@ class Command(BaseCommand):
                         print(f'DSS {dss_exp["pk"]} for dataset {dss_exp["dataset_id"]}, has no '
                                 'deletable files, skipping auto-deletion')
 
-                # Now weve set expired dsets, the rest is "soon to expire", message users:
-                if not options["dry_run"]:
-                    for ds_soon in dm.Dataset.objects.filter(datasetserver__storageshare=share,
-                            datasetserver__active=True,
-                            datasetserver__last_date_used__lt=timezone.now() -
-                            timedelta(days=share.maxdays_data + settings.DATASET_EXPIRY_DAYS_MESSAGE)):
-                        # Test this to see if the joins are correctly done
-                        if ds_soon.datasetserver_set.filter(active=True).count() == 1:
-                            # found dataset with only one datasetserver active, msg each owner
-                            for ds_usr in ds_soon.filter(datasetowner__user_active=True).values('pk',
-                                    'datasetowner__user', 'runname__experiment__project__name'):
-                                hm.UserMessage.create_message(ds_usr['datasetowner__user'], 
-                                    msgtype=hm.DsetMsgTypes.DELETE_SOON, dset_id=ds_usr['pk'])
-                print(f'In total {total_rm_ds_fns} dataset files {"could" if options["dry_run"] else "will"}'
+            for dset in dm.Dataset.objects.filter(pk__in=remove_dsets).annotate(
+                    nr_active=Count('datasetserver__id', filter=Q(datasetserver__active=True))
+                    ).filter(nr_active=0).values('pk'):
+                dm.Dataset.objects.filter(pk=dset['pk']).update(deleted=True)
+                for ds_usr in dm.DatasetOwner.objects.filter(dataset_id=dset['pk'],
+                        user__is_active=True).values('user'):
+                    hm.UserMessage.create_message(ds_usr['user'],
+                            msgtype=hm.DsetMsgTypes.DELETED, dset_id=dset['pk'])
+
+            # Now weve set expired dsets, create usermessaeg for those that are "soon to expire"
+            if not options["dry_run"]:
+                for ds_soon in dm.Dataset.objects.annotate(nr_active=Count('datasetserver__id',
+                        filter=Q(datasetserver__active=True)), nr_soon=Count('datasetserver__id',
+                        filter=Q(datasetserver__active=True,
+                        datasetserver__last_date_used__lt=timezone.now() + 
+                            timedelta(days=settings.DATASET_EXPIRY_DAYS_MESSAGE) -
+                            timedelta(days=1) * F('datasetserver__storageshare__maxdays_data')))
+                        ).filter(nr_active__gt=0, nr_soon=F('nr_active')).values('pk'):
+                    for ds_usr in dm.DatasetOwner.objects.filter(dataset_id=ds_soon['pk'],
+                            user__is_active=True).values('user'):
+                        hm.UserMessage.create_message(ds_usr['user'], 
+                                msgtype=hm.DsetMsgTypes.DELETE_SOON, dset_id=ds_soon['pk'])
+
+            print(f'In total {total_rm_ds_fns} dataset files {"could" if options["dry_run"] else "will"}'
                         ' be deleted')
 
         if run_all or options['analysis']:
@@ -114,7 +129,6 @@ class Command(BaseCommand):
             # of the analysis files either!
             all_ana_fns = activefns_raw_bup.filter(sfile__analysisresultfile__isnull=False)
             all_rm_anas = set()
-            all_shared_sfls = set()
             for share in rm.ServerShare.objects.filter(active=True, maxdays_data__gt=0,
                     function__in=[rm.ShareFunction.ANALYSIS_DELIVERY, rm.ShareFunction.ANALYSISRESULTS]):
                 share_ana_fns = all_ana_fns.filter(servershare=share)
@@ -141,16 +155,37 @@ class Command(BaseCommand):
                             rm_ana_pks = [x['pk'] for x in chunk]
                             create_job('purge_files', sfloc_ids=rm_ana_pks)
                         ana_nr = rm_ana_sfl.update(active=False)
-                        # set deleted=True on analysis if all its files are inactive,
-                        # when a shared active file is there, currently dont delete, 
-                        # this may be done but we're not bothering now
-                        anas_removed = am.Analysis.objects.filter(pk__in=all_rm_anas).exclude(
-                                analysisresultfile__sfile__storedfileloc__active=True)
-                        anas_removed.update(deleted=True)
-                        for ana_msg in anas_removed.values('pk', 'user_id'):
-                            hm.UserMessage.create_message(ana_msg['user_id'],
-                                    msgtype=hm.AnalysisMsgTypes.DELETE_SOON, analysis_id=ana_msg['pk'])
-                        print(f'Queued {ana_nr} expired analysis result files from share {share.name} for deletion')
+                        rm.StoredFile.objects.filter(storedfileloc__in=rm_ana_pks).exclude(
+                                storedfileloc__active=True).update(deleted=True)
+                        print(f'Queued {ana_nr} expired analysis result files from share '
+                                f'{share.name} for deletion')
+
+            # set deleted=True on analysis if all its files are inactive,
+            # when a shared active file is there, currently dont delete, 
+            # this may be done but we're not bothering now
+            anas_removed = am.Analysis.objects.filter(pk__in=all_rm_anas).exclude(
+                    analysisresultfile__sfile__storedfileloc__active=True)
+            anas_removed.update(deleted=True)
+            for ana_msg in anas_removed.values('pk', 'user_id'):
+                hm.UserMessage.create_message(ana_msg['user_id'],
+                        msgtype=hm.AnalysisMsgTypes.DELETED, analysis_id=ana_msg['pk'])
+
+            # Create user messages for analyses that will soon be expired (i.e. all their result
+            # files will soon be deleted). We dont care about shared files here, since it is only
+            # a message, so if an analysis has files shared with another (due to them outputting the
+            # exact same file), but the second analysis is much newer, this analysis will not get
+            # a message
+            for ana_soon in am.Analysis.objects.annotate(
+                    nr_active=Count('analysisresultfile__sfile__storedfileloc',
+                    filter=Q(analysisresultfile__sfile__storedfileloc__active=True)),
+                    nr_soon=Count('analysisresultfile__sfile__storedfileloc',
+                    filter=Q(analysisresultfile__sfile__storedfileloc__active=True,
+                    analysisresultfile__sfile__storedfileloc__last_date_used__lt=timezone.now() + 
+                        timedelta(days=settings.ANALYSIS_EXPIRY_DAYS_MESSAGE) - 
+                        timedelta(days=1) * F('analysisresultfile__sfile__storedfileloc__servershare__maxdays_data')))
+                    ).filter(nr_active__gt=0, nr_soon=F('nr_active')).values('pk', 'user_id'):
+                hm.UserMessage.create_message(ana_soon['user_id'],
+                        msgtype=hm.AnalysisMsgTypes.DELETE_SOON, analysis_id=ana_soon['pk'])
 
         # Other files (tmp, library, web report)
         functions = []
@@ -173,6 +208,8 @@ class Command(BaseCommand):
                 for chunk in chunk_iter(other_fns_rm.values('pk'), 100):
                     rm_other_pks = [x['pk'] for x in chunk]
                     create_job('purge_files', sfloc_ids=rm_other_pks)
+                    rm.StoredFile.objects.filter(storedfileloc__in=rm_other_pks).exclude(
+                            storedfileloc__active=True).update(deleted=True)
                 other_nr = other_fns_rm.update(active=False)
                 print(f'Queued {other_nr} expired files from share {share.name} for deletion')
 
@@ -188,5 +225,7 @@ class Command(BaseCommand):
                 for chunk in chunk_iter(activefns_mzml.values('pk'), 100):
                     rm_mzml_pks = [x['pk'] for x in chunk]
                     create_job('purge_files', sfloc_ids=rm_mzml_pks)
+                    rm.StoredFile.objects.filter(storedfileloc__in=rm_mzml_pks).exclude(
+                            storedfileloc__active=True).update(deleted=True)
                 nr_mzml = activefns_mzml.update(active=False)
                 print(f'Queued {nr_mzml} expired mzML files for deletion')

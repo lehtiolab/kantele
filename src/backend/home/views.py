@@ -13,6 +13,7 @@ from django.db.models import Q, Sum, Count, F, Value
 from django.db.models.functions import Trunc
 from collections import OrderedDict, defaultdict
 
+from home import models as hm
 from kantele import settings
 from datasets import models as dsmodels
 from analysis import models as anmodels
