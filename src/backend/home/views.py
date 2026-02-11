@@ -1330,32 +1330,38 @@ def delete_mzmls(request):
 @login_required
 def show_messages(request):
     """Shows messages for admin and possibly also for normal users"""
-    # Candidate messages for admin and normal:
-    # purgable files
-    # analysis is done
-    # refine/convert is finished
-    # if we are serious about this then we need to know if the message has been read yet...
-    # Im not so interested in that, because then we need to generate the messages periodically or only 
-    # on completion of jobs etc.
-    # Maybe three types of message: 
-    #  - dynamic (resolve it and it disappear)
-    #  - notification from database (remove when read) - your job is done
-    #  - expiring at date - check out our new functionality, maintenance coming
-    max_age_old = 30 # days
-    out = {'olddef': '{} days'.format(max_age_old)}
-    if request.user.is_staff:
-        purgable = anmodels.Analysis.objects.select_related('nextflowsearch', 'analysisdeleted').filter(deleted=True, purged=False)
-        purgable_old = purgable.filter(analysisdeleted__date__lt=datetime.today() - timedelta(max_age_old))
-        if purgable:
-            purgable_ana = [x.nextflowsearch.id for x in purgable if hasattr(x, 'nextflowsearch')]
-        else:
-            purgable_ana = False
-        if purgable_old:
-            purgable_ana_old = [x.nextflowsearch.id for x in purgable_old if hasattr(x, 'nextflowsearch')]
-        else:
-            purgable_ana_old = False
-        out['purgable_analyses'] = purgable_ana
-        out['old_purgable_analyses'] = purgable_ana_old
-        return JsonResponse(out)
-    else:
-        return JsonResponse({'error': 'User is not admin'}, status=403)
+    out = {}
+    dsetmsgs = hm.DatasetMessage.objects.filter(msg__user=request.user, msg__deleted=False
+        ).values('msg_id', 'msg__txt', 'msg__shown', 'msg__date', 'dset_id')
+    anamsgs = hm.AnalysisMessage.objects.filter(msg__user=request.user, msg__deleted=False
+        ).values('msg_id', 'msg__txt', 'msg__shown', 'msg__date', 'analysis_id')
+    allmsgs = anamsgs.union(dsetmsgs)
+
+    out['messages'] = {x['msg_id']: {'txt': x['msg__txt'], 'shown': x['msg__shown'], 'date': x['msg__date'], 'link_id': x.get('dset_id', x.get('analysis_id')), 'linkpath': 'datasets' if x.get('dset_id') else 'analyses'} for x in allmsgs}
+
+    out['order'] = [x['msg_id'] for x in dsetmsgs.filter(msg__shown=False).union(
+        anamsgs.filter(msg__shown=False)).order_by('-msg__date')]
+    out['order'].extend([x['msg_id'] for x in dsetmsgs.filter(msg__shown=True).union(
+        anamsgs.filter(msg__shown=True)).order_by('-msg__date')])
+
+    out['nr_new'] = hm.UserMessage.objects.filter(user=request.user, deleted=False, shown=False
+            ).count()
+    return JsonResponse(out)
+
+
+@login_required
+@require_POST
+def set_msg_read(request):
+    data = json.loads(request.body.decode('utf-8'))
+    if msg := hm.UserMessage.objects.filter(pk__in=data['msgids']):
+        msg.update(shown=True)
+    return JsonResponse({})
+
+
+@login_required
+@require_POST
+def set_msg_deleted(request):
+    data = json.loads(request.body.decode('utf-8'))
+    if msg := hm.UserMessage.objects.filter(pk__in=data['msgids']):
+        msg.update(deleted=True)
+    return JsonResponse({})
