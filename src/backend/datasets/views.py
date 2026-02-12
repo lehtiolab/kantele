@@ -654,6 +654,7 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
         dssrmsfl_ids = [x['pk'] for x in dss_rmsfl.values('pk')]
         create_job('remove_dset_files_servershare', dss_id=rmdss.pk, sfloc_ids=dssrmsfl_ids)
         dss_rmsfl.update(active=False)
+        # No need to set sfile.delete=True since you cannot update storage to 0 shares with this
     alldss_q.exclude(storageshare_id__in=share_ids).update(active=False)
 
     return False
@@ -1220,8 +1221,10 @@ def archive_and_delete_dataset(dset):
                 create_job_without_check('remove_dset_files_servershare', **rmjobkw)
                 rmsfl.update(active=False)
                 create_job('delete_empty_directory', **rmdirkw)
-            filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=dset).update(
-                    deleted=True)
+            # Set files to deleted for UI, exclude those which are e.g. still on inbox because of
+            # them being relatively new
+            filemodels.StoredFile.objects.filter(rawfile__datasetrawfile__dataset=dset).exclude(
+                    storedfileloc__active=True).update(deleted=True)
         # Empty no-file-yet dsets also have dss, set all to non-active
         alldss.update(active=False)
 
@@ -1772,16 +1775,16 @@ def save_or_update_files(data, user_id):
         # Create job first so the dataset files are waited for by other jobs since that depends
         # on datasetrawfiles on job creation time
         for dss in alldss:
-            dssrmsfl = [x['pk'] for x in rmsfl.filter(servershare_id=dss['storageshare_id']).values('pk')]
-            if len(dssrmsfl):
+            if dssrmsfl := rmsfl.filter(servershare_id=dss['storageshare_id']):
                 # TODO maybe first rsync them back to tmpshare, in case
                 # they are "released"
-                create_job('remove_dset_files_servershare', dss_id=dss['pk'], sfloc_ids=dssrmsfl)
-        # All files deleted, so mark inactive and deleted (there would not exist files
-        # in INBOX for a dset-associated file)
-        rmsfl.update(active=False)
+                create_job('remove_dset_files_servershare', dss_id=dss['pk'],
+                        sfloc_ids=[x['pk'] for x in dssrmsfl.values('pk')])
+                # Do not set active=False for any files in inbox (if user eg made mistake
+                # and adds, saves, then removes files from dset)
+                dssrmsfl.update(active=False)
         filemodels.StoredFile.objects.filter(pk__in=removed_ids, checked=True, rawfile__claimed=True
-                ).update(deleted=True)
+                ).exclude(storedfileloc__active=True).update(deleted=True)
         models.DatasetRawFile.objects.filter(
             dataset_id=dset_id, rawfile__storedfile__id__in=removed_ids).delete()
         filemodels.RawFile.objects.filter(storedfile__pk__in=removed_ids).update(
