@@ -216,7 +216,7 @@ class Command(BaseCommand):
                             storedfileloc__active=True).update(deleted=True)
                 print(f'Queued {other_nr} expired files from share {share.name} for deletion')
 
-        if run_all or options['mzml']:
+        if (run_all or options['mzml']) and settings.MAX_MZML_STORAGE_TIME_POST_ANALYSIS:
             # Mzml dont get backed up, are intermediate files
             maxtime_mzml = timezone.now() - timedelta(settings.MAX_MZML_STORAGE_TIME_POST_ANALYSIS)
             activefns_mzml = rm.StoredFileLoc.objects.filter(active=True,
