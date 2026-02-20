@@ -720,11 +720,12 @@ class TestUploadScript(BaseIntegrationTest):
         else:
             self.assertTrue(newraw.claimed)
             self.assertEqual(mvjobs.filter(state=jj.Jobstates.HOLD).count(), 1)
+            self.assertTrue(hm.UserMessage.objects.filter(user=self.user, txt='Your dataset '
+            f'{self.oldds.pk} from project {self.oldp.name} has new files that '
+            'can be accepted').exists())
         self.assertEqual(qcjobs.count(), 0)
 
         self.assertEqual(classifytask.filter(state=states.SUCCESS).count(), 1)
-        self.assertTrue(hm.UserMessage.objects.filter(user=self.user, txt='Your dataset '
-            f'{self.oldds.pk} from project {self.oldp.name} has new files that can be accepted').exists())
         # Must kill this script, it will keep scanning outbox
         try:
             spout, sperr = sp.communicate(timeout=1)
