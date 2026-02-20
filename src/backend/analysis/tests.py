@@ -13,6 +13,7 @@ from django.contrib.auth.models import User
 from kantele.tests import BaseTest, BaseIntegrationTest
 from kantele import settings
 from analysis import models as am
+from home import models as hm
 from rawstatus import models as rm
 from jobs import models as jm
 from jobs import jobs as jj
@@ -796,6 +797,13 @@ class TestStoreAnalysis(AnalysisPageTest):
                 data={'analysis_id': resp.json()['analysis_id']})
         self.run_job() # rsync extra files
         self.run_job() # run the analysis
+        ana.refresh_from_db()
+        self.assertFalse(ana.editable)
+        usm_q = hm.UserMessage.objects.filter(user=ana.user, txt='Your analysis '
+                f'{ana.pk} / {ana.name} has finished running')
+        self.assertTrue(usm_q.exists())
+        self.assertTrue(hm.AnalysisMessage.objects.filter(analysis=ana, msg=usm_q.get().pk,
+            msgtype=hm.AnalysisMsgTypes.COMPLETED).exists())
         self.run_job() # rsync the results
         reports = rm.StoredFileLoc.objects.filter(sfile__filename='report.html', purged=False)
         self.assertEqual(reports.count(), 3) # analysisruns, web, analysis storage

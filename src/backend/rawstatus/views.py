@@ -37,6 +37,7 @@ from dashboard import models as dashmodels
 from jobs import models as jm
 from jobs import jobs as jj
 from jobs.jobutil import create_job, create_job_without_check, check_job_error, jobmap
+from home import models as hm
 
 
 UPLOAD_DESTINATIONS = {
@@ -518,17 +519,13 @@ def classified_rawfile_treatment(request):
         elif dsq.filter(datasetcomponentstate__dtcomp__component=dsmodels.DatasetUIComponent.FILES,
                 datasetcomponentstate__state=dsmodels.DCStates.NEW).exists():
             # Only accept files if file component state is NEW
-            # Make sure users cant use this file for something else:
-            sfloc.sfile.rawfile.claimed = True
-            sfloc.sfile.rawfile.save()
-            # Now make job
+            # First check job errors
             # FIXME return errors 
             dss_mvjobs = []
-            for dss in dsq.get().datasetserver_set.filter(active=True).values('pk', 'storage_loc',
-                    'storageshare_id'):
+            for dss in dsmodels.DatasetServer.objects.filter(dataset_id=dsid, active=True).values(
+                    'pk', 'storage_loc', 'storageshare_id'):
                 mvjob_kw = {'dss_id': dss['pk'], 'sfloc_ids': [sfloc.pk],
                         'dstshare_id': dss['storageshare_id']}
-                        
                 if rsjob_error := check_job_error('rsync_dset_files_to_servershare', **mvjob_kw):
                     # TODO this needs logging
                     print(f'Classify task error for task {data["task_id"]} trying to queue '
@@ -553,6 +550,15 @@ def classified_rawfile_treatment(request):
                                 state=jj.Jobstates.HOLD, kwargs=mvkw)
                         FileJob.objects.create(rawfile_id=sfloc.sfile.rawfile.pk,
                                 job_id=job.pk)
+            # Make sure users cant use this file for something else:
+            sfloc.sfile.rawfile.claimed = True
+            sfloc.sfile.rawfile.save()
+            # Inform user(s) of dataset
+            for dsown in dsmodels.DatasetOwner.objects.filter(dataset_id=dsid, user__is_active=True
+                    ).values('user_id'):
+                hm.UserMessage.create_message(dsown['user_id'], dset_id=dsid,
+                        msgtype=hm.DsetMsgTypes.FILES_ARRIVED)
+
         else:
             print(f'Classify task error for task {data["task_id"]} - dataset {dsid} already has '
                     'files, more files cannot be added automatically via rawfile classification')
