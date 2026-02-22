@@ -1006,7 +1006,7 @@ class TransferStateTest(BaseFilesTest):
         self.assertTrue(libq.exists())
         lf = libq.get()
         jobs = jm.Job.objects.filter(funcname='rename_file', kwargs={'sfloc_id': sfloc.pk,
-            'newname': f'libfile_{lf.pk}_{sflib.filename}'})
+            'oldname': sflib.filename, 'newname': f'libfile_{lf.pk}_{sflib.filename}'})
         self.assertEqual(jobs.count(), 1)
         jobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
                 kwargs__sfloc_id=sfloc.pk, kwargs__dstshare_id=remotesslib.pk,
@@ -1044,7 +1044,7 @@ class TransferStateTest(BaseFilesTest):
         self.assertEqual(pdcjobs.count(), 1)
         userfile = ufq.get()
         jobs = jm.Job.objects.filter(funcname='rename_file', kwargs={'sfloc_id': sfloc.pk,
-            'newname': f'userfile_{usrfraw.pk}_{sfusr.filename}'})
+            'oldname': sfusr.filename, 'newname': f'userfile_{usrfraw.pk}_{sfusr.filename}'})
         self.assertEqual(jobs.count(), 1)
 
     def test_transferstate_transfer(self):
