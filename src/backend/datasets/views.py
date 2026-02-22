@@ -901,12 +901,11 @@ def save_new_dataset(data, project, experiment, runname, user_id):
 
 @login_required
 @require_POST
-def move_project_cold(request):
+def close_project(request):
     '''Closes project:
         - Set to not active in DB
         - For each dataset, archive if needed, and remove from servers
     '''
-    # TODO close_project this should be called
     data = json.loads(request.body.decode('utf-8'))
     if 'item_id' not in data or not data['item_id']:
         return JsonResponse({'state': 'error', 'error': 'No project specified for closing'}, status=400)
@@ -921,7 +920,7 @@ def move_project_cold(request):
     result = {'errormsgs': []}
     for dso in dsetowners.distinct('dataset'):
         archived = archive_and_delete_dataset(dso.dataset)
-        if archived['state'] == 'error':
+        if archived['state'] == 'error' and not archived.get('close_project'):
             result.update({'state': 'error', 'error': 'Not all datasets could be updated.'})
             result['errormsgs'].append(archived['error'])
     # if any dataset cannot be cold stored, report it, do not mark proj as retired
@@ -1179,11 +1178,11 @@ def get_dset_storestate(dset_id, ds_deleted):
 def archive_and_delete_dataset(dset):
     # TODO - archiving datasets should not really be done anymore, is done on individual incoming files now
     # we can archive any non-archived dataset left on the system?
-
-    # FIXME dataset reactivating and archiving reports error when ok and vv? I mean, if you click archive and reactivate quickly, you will get error (still in active storage), and also in this func, storestate is not updated at same time as DB (it is result of jobs)
     if dset.deleted:
+        # This has a special error since it is also returned to close_project,
+        # which should be ok with already deleted dataset
         return {'state': 'error', 'error': 'Cannot archive dataset, it is already in '
-                'deleted state'}
+                'deleted state', 'close_project': 1}
     else:
         backing_up = False
         storestate, _ = get_dset_storestate(dset.pk, dset.deleted)

@@ -37,7 +37,7 @@ urlpatterns = [
     path('rename/project/', views.rename_project),
     path('merge/projects/', views.merge_projects),
     path('archive/dataset/', views.move_dataset_cold),
-    path('archive/project/', views.move_project_cold),
+    path('archive/project/', views.close_project),
     path('undelete/dataset/', views.move_dataset_active),
     #path('undelete/project/', views.move_project_active),
     path('purge/project/', views.purge_project),
