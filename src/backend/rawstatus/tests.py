@@ -1669,7 +1669,7 @@ class TestRenameFile(BaseIntegrationTest):
         self.f3sf.refresh_from_db()
         self.assertEqual(self.f3sf.filename, oldfn)
         job = jm.Job.objects.last()
-        self.assertEqual(job.kwargs, {'sfloc_id': self.f3sss.pk, 'newname': newname})
+        self.assertEqual(job.kwargs, {'sfloc_id': self.f3sss.pk, 'newname': newname, 'oldname': self.f3sf.filename})
         # Now run job
         self.run_job()
         job.refresh_from_db()

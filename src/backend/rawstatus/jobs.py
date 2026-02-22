@@ -312,7 +312,8 @@ class RenameFile(SingleFileJob):
         fss = rm.FileserverShare.objects.filter(share=sfloc.servershare).values('server__name',
                 'path').first()
         self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_FASTSTORAGE)
-        self.run_tasks.append((sfloc.sfile.filename, fss['path'], sfloc.path,
+        # Multiple sfloc are renamed in multiple jobs, so do not use sfile.filename for old name
+        self.run_tasks.append((kwargs['oldname'], fss['path'], sfloc.path,
             sfloc.path, sfloc.id, kwargs["newname"]))
 
 

@@ -745,7 +745,7 @@ def process_file_confirmed_ready(rfn, sfn, sfloc, upload, desc):
             elif upload.uploadtype == UploadFileType.USERFILE:
                 UserFile.objects.create(sfile=sfn, description=desc, upload=upload)
                 newname = f'userfile_{rfn.id}_{rfn.name}'
-            create_job('rename_file', sfloc_id=sfloc.pk, newname=newname)
+            create_job('rename_file', sfloc_id=sfloc.pk, newname=newname, oldname=sfn.filename)
             for ss in ServerShare.objects.exclude(pk=sfloc.servershare_id).filter(
                     function=ShareFunction.LIBRARY):
                 create_job('rsync_otherfiles_to_servershare', sfloc_id=sfloc.id, dstshare_id=ss.pk,
@@ -1034,8 +1034,8 @@ def rename_file(request):
         return JsonResponse({'error': 'Not authorized to rename this file'}, status=403)
     elif hasattr(sfile, 'mzmlfile'):
         return JsonResponse({'error': 'Files of this type cannot be renamed'}, status=403)
-    elif re.match('^[a-zA-Z_0-9\-]*$', newfilename) is None:
-        return JsonResponse({'error': 'Illegal characteres in new file name'}, status=403)
+    elif re.match('^[a-zA-Z_0-9\-\.]*$', newfilename) is None:
+        return JsonResponse({'error': 'Illegal characters in new file name'}, status=403)
     jobkws = []
     for sfloc in StoredFileLoc.objects.filter(sfile__rawfile__storedfile=sfile, active=True
             ).select_related('sfile__mzmlfile'):
@@ -1043,7 +1043,7 @@ def rename_file(request):
         refined = '_refined' if hasattr(sfloc.sfile, 'mzmlfile') and sfloc.sfile.mzmlfile.refined else ''
         fn_ext = os.path.splitext(sfloc.sfile.filename)[1]
         newname = f'{newfilename}{refined}{fn_ext}'
-        jobkw = {'sfloc_id': sfloc.pk, 'newname': newname}
+        jobkw = {'sfloc_id': sfloc.pk, 'newname': newname, 'oldname': sfile.filename}
         joberr = check_job_error('rename_file', **jobkw)
         if joberr:
             return JsonResponse({'error': joberr}, status=403)
