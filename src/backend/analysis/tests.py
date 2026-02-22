@@ -795,8 +795,18 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
         self.cl.post('/analysis/start/', content_type='application/json',
                 data={'analysis_id': resp.json()['analysis_id']})
+        self.user.is_superuser = True
+        self.user.save()
+        renameresp = self.cl.post('/files/rename/', content_type='application/json',
+                data={'sf_id': self.sflib.pk, 'newname': 'testnewname'})
+        self.user.is_superuser = False
+        self.user.save()
+        self.assertEqual(renameresp.status_code, 200)
+        renamejobs = jm.Job.objects.filter(funcname='rename_file')
+        self.assertTrue(renamejobs.exists())
         self.run_job() # rsync extra files
         self.run_job() # run the analysis
+        self.assertTrue(renamejobs.filter(state=jj.Jobstates.PENDING).exists())
         ana.refresh_from_db()
         self.assertFalse(ana.editable)
         usm_q = hm.UserMessage.objects.filter(user=ana.user, txt='Your analysis '
@@ -805,6 +815,7 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.assertTrue(hm.AnalysisMessage.objects.filter(analysis=ana, msg=usm_q.get().pk,
             msgtype=hm.AnalysisMsgTypes.COMPLETED).exists())
         self.run_job() # rsync the results
+        self.assertTrue(renamejobs.filter(state=jj.Jobstates.PROCESSING).exists())
         reports = rm.StoredFileLoc.objects.filter(sfile__filename='report.html', purged=False)
         self.assertEqual(reports.count(), 3) # analysisruns, web, analysis storage
         nfrunsfl = reports.filter(servershare=self.ssanaruns, path=ana.get_run_base_dir()).get()

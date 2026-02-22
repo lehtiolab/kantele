@@ -62,7 +62,7 @@ JOBSTATES_WAIT = [Jobstates.WAITING, Jobstates.PENDING, Jobstates.QUEUED, Jobsta
 JOBSTATES_RETRYABLE = [Jobstates.ERROR, Jobstates.CANCELED]
 
 # Jobrunner filters using this for get_jobs_with_single_sfloc_to_wait_for
-JOBSTATES_RUNNER_WAIT = [Jobstates.HOLD, Jobstates.QUEUED, Jobstates.PROCESSING, Jobstates.ERROR, Jobstates.REVOKING]
+JOBSTATES_RUNNER_WAIT = [Jobstates.PENDING, Jobstates.HOLD, Jobstates.QUEUED, Jobstates.PROCESSING, Jobstates.ERROR, Jobstates.REVOKING]
 
 
 class BaseJob:
@@ -233,15 +233,27 @@ class BaseJob:
     def get_jobs_with_single_sfloc_to_wait_for(self, **kwargs):
         '''Need to wait for non-dataset jobs on files involved in this job. One could
         add those to the get_sf_ids_for_filejobs but then you wouldnt be able to run two
-        analyses in parallel if theyd use the same DB.
-        However, a problem now is that such a file could be deleted mid-analysis,
-        in a parallel job - make sure these files are fairly stable
+        analyses in parallel if theyd use the same DB or server config file.
         '''
-        # FIXME make sure any single file job checks for these jobs as well.
         if sfpks := self._get_extrafiles_to_rsync(**kwargs):
+            # This is run for any job that has extrafiles (i.e. analysis jobs)
             all_sfl = StoredFileLoc.objects.filter(sfile_id__in=sfpks, active=True).values('pk')
             return Job.objects.filter(kwargs__sfloc_id__in=[x['pk'] for x in all_sfl])
+        elif sfl := kwargs.get('sfloc_id'):
+            jobs_to_wait = []
+            # Other way around, this single file job has to wait for analysis jobs
+            sf = StoredFile.objects.filter(storedfileloc__id=sfl).values('pk').get()
+            for job in Job.objects.filter(state__in=JOBSTATES_RUNNER_WAIT, kwargs__inputs__has_any_keys=[
+                        'singlefiles', 'multifiles']).values('pk', 'kwargs', 'timestamp', 'state'):
+                extrafn_sfpk = [
+                        *job['kwargs']['inputs'].get('singlefiles', {}).values(),
+                        *[y for x in job['kwargs']['inputs'].get('multifiles', {}).values() for y in x]
+                        ]
+                if sf['pk'] in extrafn_sfpk:
+                    jobs_to_wait.append(job['pk'])
+            return Job.objects.filter(pk__in=jobs_to_wait)
         else:
+            # Dset jobs etc are expected to wait via sfloc_ids anyway
             return Job.objects.none()
 
     def get_rf_ids_for_filejobs(self):
