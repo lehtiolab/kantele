@@ -20,7 +20,7 @@ from datasets import models as dm
 from rawstatus import models as rm
 from jobs import jobs as jj
 from jobs import views as jv
-from jobs.jobutil import create_job, jobmap
+from jobs.jobutil import create_job, check_job_error, jobmap, create_job_without_check
 from jobs import models as jm
 
 
@@ -1320,36 +1320,13 @@ def undelete_analysis(request):
 
 @login_required
 def delete_analysis(request):
+    # FIXME analysis can be properly deleted if its backed up
+    # right now this is only mark for deletion and it was for a previous
+    # setup where delete meant gone for ever
+    # There is a lot of old analyses that should be backed up or purged properly
+    # Maybe delete all those where no project is active anymore in delete_expired?
     if request.method != 'POST':
         return JsonResponse({'error': 'Must use POST'}, status=405)
-    req = json.loads(request.body.decode('utf-8'))
-    try:
-        analysis = am.Analysis.objects.select_related('nextflowsearch__job').get(pk=req['item_id'])
-    except am.Analysis.DoesNotExist:
-        return JsonResponse({'error': 'Analysis does not exist'}, status=403)
-    except KeyError:
-        return JsonResponse({'error': 'Bad request'}, status=400)
-    if analysis.deleted:
-        return JsonResponse({'error': 'Analysis is already deleted'}, status=403)
-    if analysis.user == request.user or request.user.is_staff:
-        if not analysis.deleted:
-            analysis.deleted = True
-            analysis.save()
-            am.AnalysisDeleted.objects.update_or_create(analysis=analysis)
-            if hasattr(analysis, 'nextflowsearch'):
-                jobq = jm.Job.objects.filter(nextflowsearch__analysis=analysis)
-                jv.cancel_or_revoke_job(jobq)
-        return JsonResponse({})
-    else:
-        return JsonResponse({'error': 'User is not authorized to delete this analysis'}, status=403)
-
-
-@login_required
-def purge_analysis(request):
-    if request.method != 'POST':
-        return JsonResponse({'error': 'Must use POST'}, status=405)
-    elif not request.user.is_staff:
-        return JsonResponse({'error': 'Only admin is authorized to purge analysis'}, status=403)
     req = json.loads(request.body.decode('utf-8'))
     try:
         analysis = am.Analysis.objects.get(pk=req['item_id'])
@@ -1357,32 +1334,90 @@ def purge_analysis(request):
         return JsonResponse({'error': 'Analysis does not exist'}, status=403)
     except KeyError:
         return JsonResponse({'error': 'Bad request'}, status=400)
-    if not analysis.deleted:
-        return JsonResponse({'error': 'Analysis is not deleted, cannot purge'}, status=403)
-    analysis.purged = True
-    analysis.save()
-    webshares = rm.ServerShare.objects.filter(function=rm.ShareFunction.REPORTS)
-    # Delete files on web share here since the job tasks run on storage cannot do that
-    webfiles = rm.StoredFileLoc.objects.filter(sfile__analysisresultfile__analysis__id=analysis.pk,
-            servershare__in=webshares, active=True)
-    for webfile in webfiles.values('path', 'sfile__filename'):
-        fpath = os.path.join(settings.WEBSHARE, webfile['path'], webfile['sfile__filename'])
-        os.unlink(fpath)
-    webfiles.update(active=False, purged=True)
-    sfiles = rm.StoredFile.objects.filter(analysisresultfile__analysis__id=analysis.pk)
-    sfiles.update(deleted=True)
-    sfls = rm.StoredFileLoc.objects.filter(sfile__in=sfiles, active=True)
-    # One job per servershare as empty dir deleter needs that
-    share_pks = defaultdict(list)
-    for sfl in sfls.values('pk', 'servershare_id', 'path'):
-        share_pks[f'{sfl["servershare_id"]}__{sfl["path"]}'].append(sfl['pk'])
-    for share_path, sfloc_ids in share_pks.items():
-        shareid, path = share_path.split('__')
-        purgejob = create_job('purge_files', sfloc_ids=sfloc_ids)
-        if not purgejob['error']:
-            rm.StoredFileLoc.objects.filter(pk__in=sfloc_ids).update(active=False)
-            rmdirjob = create_job('delete_empty_directory', sfloc_ids=sfloc_ids, path=path, share_id=shareid)
+    if analysis.deleted:
+        return JsonResponse({'error': 'Analysis is already deleted'}, status=403)
+    if analysis.user != request.user and not request.user.is_staff:
+        return JsonResponse({'error': 'User is not authorized to delete this analysis'}, status=403)
+    if errmsg := do_analysis_deletion(analysis):
+        return JsonResponse({'error': f'Could not delete analysis, {errmsg}'}, status=409)
     return JsonResponse({})
+
+
+def do_analysis_deletion(analysis):
+    '''Function to call when deleting analysis. Also used when 
+    projects are deleted. Checks if analysis is backed up'''
+    # FIXME analysisdeleted tracking no longer needed when we backup etc
+    # implement a log instead
+    am.AnalysisDeleted.objects.update_or_create(analysis=analysis)
+    if jobq := jm.Job.objects.filter(nextflowsearch__analysis=analysis).exclude(state__in=[
+                jj.Jobstates.ERROR, jj.Jobstates.DONE, jj.Jobstates.REVOKING, jj.Jobstates.CANCELED]):
+        jv.cancel_or_revoke_job(jobq)
+    if analysis.success_completed:
+        # Back up files if that for some reason (old analysis) hasnt happened earlier
+        backup_jobs = []
+        for sf in rm.StoredFile.objects.filter(analysisresultfile__analysis=analysis).exclude(
+                pdcbackedupfile__success=True).values('pk', 'filetype__is_folder'):
+            sfl_pks = [x['pk'] for x in rm.StoredFileLoc.objects.filter(sfile_id=sf['pk']).values('pk')]
+            do_backup = True
+            for exist_job in jm.Job.objects.filter(funcname='create_pdc_archive',
+                    kwargs__sfloc_id__in=sfl_pks).values('state'):
+                match exist_job['state']:
+                    case jj.Jobstates.WAITING | jj.Jobstates.HOLD:
+                        do_backup = False
+                        return 'Result file queued for backing up but job not running, please check'
+                    case x if x in jj.JOBSTATES_JOB_ACTIVE:
+                        do_backup = False
+                        continue
+                    case jj.Jobstates.ERROR:
+                        return 'Result file queued for backing up but job errored, please check'
+                    # If no backup exists and job is somehow in done/revoking/canceled,
+                    # keep looking for more jobs, if none exist -> do a backup
+            if do_backup and (sfl := rm.StoredFileLoc.objects.filter(pk__in=sfl_pks, active=True,
+                    servershare__fileservershare__server__can_backup=True).values('pk')):
+                jobkw = {'sfloc_id': sfl.first()['pk'], 'isdir': sf['filetype__is_folder']}
+                backup_jobs.append(jobkw)
+                if joberror := check_job_error('create_pdc_archive', **jobkw):
+                    return f'errors backing up result file(s): {joberror}'
+            elif do_backup:
+                return 'could not find copy of result file to back up'
+        for bupjob in backup_jobs:
+            create_job_without_check('create_pdc_archive', **bupjob)
+
+        # Delete files on web share here since the job tasks run on storage cannot do that
+        webshares = rm.ServerShare.objects.filter(function=rm.ShareFunction.REPORTS)
+        webfiles = rm.StoredFileLoc.objects.filter(sfile__analysisresultfile__analysis__id=analysis.pk,
+                servershare__in=webshares, active=True)
+        for webfile in webfiles.values('path', 'sfile__filename'):
+            fpath = os.path.join(settings.WEBSHARE, webfile['path'], webfile['sfile__filename'])
+            os.unlink(fpath)
+        webfiles.update(active=False, purged=True)
+        sfiles = rm.StoredFile.objects.filter(analysisresultfile__analysis__id=analysis.pk)
+        sfls = rm.StoredFileLoc.objects.filter(sfile__in=sfiles, active=True)
+        # One job per servershare as empty dir deleter needs that
+        share_pks = defaultdict(list)
+        for sfl in sfls.values('pk', 'servershare_id', 'path'):
+            share_pks[f'{sfl["servershare_id"]}__{sfl["path"]}'].append(sfl['pk'])
+        purgejobs, rmdirjobs = [], []
+        for share_path, sfloc_ids in share_pks.items():
+            shareid, path = share_path.split('__')
+            purgejobs.append(sfloc_ids)
+            if joberror := check_job_error('purge_files', sfloc_ids=sfloc_ids):
+                return f'error trying to queue delete files job: {joberror}'
+            rmdirkw = {'sfloc_ids': sfloc_ids, 'path': path, 'share_id': shareid}
+            rmdirjobs.append(rmdirkw)
+            if joberror := check_job_error('delete_empty_directory', sfloc_ids=sfloc_ids):
+                return f'error trying to queue delete files job: {joberror}'
+        for sfloc_ids in purgejobs:
+            create_job_without_check('purge_files', sfloc_ids=sfloc_ids)
+            rm.StoredFileLoc.objects.filter(pk__in=sfloc_ids).update(active=False)
+        for rmdirkw in rmdirjobs:
+            create_job_without_check('delete_empty_directory', **rmdirkw)
+        sfiles.update(deleted=True)
+
+    # No more errors, mark for deletion
+    analysis.deleted, analysis.purged = True, True
+    analysis.save()
+    return 0
 
 
 @login_required

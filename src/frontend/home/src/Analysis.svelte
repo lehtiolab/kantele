@@ -113,15 +113,6 @@ async function unDeleteAnalyses() {
   }
   updateNotif()
 }
-
-
-async function purgeAnalyses() {
-  for (let anid of selectedAnalyses) {
-    await treatItems('/analysis/purge/', 'analysis', 'purging', anid, notif);
-    refreshAnalysis(anid);
-  }
-  updateNotif()
-}
 </script>
 
 <Tabs tabshow="Analyses" notif={notif} />
@@ -130,11 +121,9 @@ async function purgeAnalyses() {
 {#if selectedAnalyses.length}
 <a class="button is-small" on:click={deleteAnalyses}>Delete analyses</a>
 <a class="button is-small" on:click={unDeleteAnalyses}>Undelete analyses</a>
-<a class="button is-small" on:click={purgeAnalyses}>Purge analyses</a>
 {:else}
 <a class="button is-small" disabled>Delete analyses</a>
 <a class="button is-small" disabled>Undelete analyses</a>
-<a class="button is-small" disabled>Purge analyses</a>
 {/if}
 
 <Table tab="Analyses"

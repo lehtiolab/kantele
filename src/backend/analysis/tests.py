@@ -845,22 +845,22 @@ class TestStoreAnalysis(AnalysisPageTest):
         j = jm.Job.objects.last()
         self.assertEqual(j.kwargs, {'sfloc_id': anasfl.pk, 'isdir': False})
 
-        # Now purge
+        # Now delete analysis
         j.state = jj.Jobstates.DONE
         j.save()
+        rm.PDCBackedupFile.objects.filter(storedfile_id=anasfl.sfile_id).update(success=True)
         self.user.is_staff = True
         self.user.save()
         resp = self.cl.post('/analysis/delete/', content_type='application/json', data={'item_id': ana.pk})
-        resp = self.cl.post('/analysis/purge/', content_type='application/json', data={'item_id': ana.pk})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(os.path.exists(webfn))
         self.assertTrue(os.path.exists(anafn))
         self.assertTrue(os.path.exists(nfrunfn))
         # Two purge jobs and two delete dir jobs, this test is getting slow
-        self.run_job()
-        self.run_job()
-        self.run_job()
-        self.run_job()
+        self.run_job() # purge files
+        self.run_job() # rm dir
+        self.run_job() # purge
+        self.run_job() # rm dir
         self.assertFalse(os.path.exists(anafn))
         self.assertFalse(os.path.exists(nfrunfn))
 
@@ -1240,11 +1240,6 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
 class TestDeleteAnalysis(BaseTest):
     url = '/analysis/delete/'
 
-    def setUp(self):
-        super().setUp()
-        self.ana = am.Analysis.objects.create(user=self.user, name='test', base_rundir='testdir',
-                securityclass=rm.DataSecurityClass.NOSECURITY)
-
     def test_fail_request(self):
         resp = self.cl.get(self.url)
         self.assertEqual(resp.status_code, 405)
@@ -1275,50 +1270,45 @@ class TestDeleteAnalysis(BaseTest):
         self.assertEqual(resp.status_code, 403)
         self.assertIn('Analysis is already deleted', resp.json()['error'])
         
-    def test_delete(self):
+    def test_delete_with_backup(self):
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.ana.pk})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(self.ana.deleted)
         self.ana.refresh_from_db()
         self.assertTrue(self.ana.deleted)
-        # FIXME test job revoked
+        self.assertTrue(jm.Job.objects.filter(funcname='create_pdc_archive',
+            kwargs={'sfloc_id': self.anasfile_sfl.pk, 'isdir': False}).exists())
 
-
-class TestPurgeAnalysis(BaseIntegrationTest):
-    url = '/analysis/purge/'
-
-    def setUp(self):
-        super().setUp()
-        self.ana = am.Analysis.objects.create(user=self.user, name='test', base_rundir='testdir',
-                deleted=True, securityclass=rm.DataSecurityClass.NOSECURITY)
-        self.user.is_staff = True
-        self.user.save()
-
-    def test_fail_request(self):
-        resp = self.cl.get(self.url)
-        self.assertEqual(resp.status_code, 405)
-        # wrong dict keys
-        resp = self.cl.post(self.url, content_type='application/json', data={'hello': 'test'})
-        self.assertEqual(resp.status_code, 400)
-
-        # No analysis
-        resp = self.cl.post(self.url, content_type='application/json',
-                data={'item_id': self.ana.pk + 1000})
-        self.assertEqual(resp.status_code, 403)
-        self.assertIn('Analysis does not exist', resp.json()['error'])
-
-        # Not allowed wrong user
-        self.user.is_staff = False
-        self.user.save()
+    def test_delete_without_backup(self):
+        rm.PDCBackedupFile.objects.create(storedfile=self.anasfile, success=True)
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.ana.pk})
-        self.assertEqual(resp.status_code, 403)
-        self.assertIn('Only admin is authorized to purge analysis', resp.json()['error'])
-        
-        # analysis not deleted
-        self.user.is_staff = True
-        self.user.save()
-        self.ana.deleted = False
-        self.ana.save()
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(self.ana.deleted)
+        self.ana.refresh_from_db()
+        self.assertTrue(self.ana.deleted)
+        self.assertFalse(jm.Job.objects.filter(funcname='create_pdc_archive',
+            kwargs={'sfloc_id': self.anasfile_sfl.pk, 'isdir': False}).exists())
+
+    def test_delete_without_backup_pending(self):
+        rm.PDCBackedupFile.objects.create(storedfile=self.anasfile, success=False)
+        job = jm.Job.objects.create(funcname='create_pdc_archive', timestamp=timezone.now(),
+            kwargs={'sfloc_id': self.anasfile_sfl.pk, 'isdir': False}, state=jj.Jobstates.PENDING)
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.ana.pk})
-        self.assertEqual(resp.status_code, 403)
-        self.assertIn('Analysis is not deleted', resp.json()['error'])
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(self.ana.deleted)
+        self.ana.refresh_from_db()
+        self.assertTrue(self.ana.deleted)
+        self.assertFalse(jm.Job.objects.exclude(pk=job.pk).filter(funcname='create_pdc_archive',
+            kwargs={'sfloc_id': self.anasfile_sfl.pk, 'isdir': False}).exists())
+
+    def test_delete_fail_backup(self):
+        rm.PDCBackedupFile.objects.create(storedfile=self.anasfile, success=False)
+        job = jm.Job.objects.create(funcname='create_pdc_archive', timestamp=timezone.now(),
+            kwargs={'sfloc_id': self.anasfile_sfl.pk, 'isdir': False}, state=jj.Jobstates.WAITING)
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.ana.pk})
+        self.assertEqual(resp.status_code, 409)
+        self.assertFalse(self.ana.deleted)
+        self.ana.refresh_from_db()
+        self.assertFalse(self.ana.deleted)
+        self.assertFalse(jm.Job.objects.exclude(pk=job.pk).filter(funcname='create_pdc_archive',
+            kwargs={'sfloc_id': self.anasfile_sfl.pk, 'isdir': False}).exists())

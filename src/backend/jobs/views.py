@@ -316,7 +316,7 @@ def analysis_run_done(request):
     if 'task' in data:
         set_task_done(data['task'])
     # Defensively, since analysis should already be not editable upon launch:
-    am.Analysis.objects.filter(pk=data['analysis_id']).update(editable=False)
+    am.Analysis.objects.filter(pk=data['analysis_id']).update(editable=False, success_completed=True)
     ana = am.Analysis.objects.values('user', 'name').get(pk=data['analysis_id'])
     hm.UserMessage.create_message(ana['user'], msgtype=hm.AnalysisMsgTypes.COMPLETED,
             analysis_id=data['analysis_id'])

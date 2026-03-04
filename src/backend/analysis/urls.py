@@ -13,7 +13,6 @@ urlpatterns = [
     path('freeze/', views.freeze_analysis),
     path('unfreeze/', views.unfreeze_analysis),
     path('undelete/', views.undelete_analysis),
-    path('purge/', views.purge_analysis),
     path('dsets/<int:wfversion_id>/', views.get_datasets),
     path('baseanalysis/show/', views.get_base_analyses),
     path('baseanalysis/load/<int:wfversion_id>/<int:baseanid>/', views.load_base_analysis),

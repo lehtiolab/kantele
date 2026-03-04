@@ -287,6 +287,7 @@ class Analysis(models.Model):
     base_rundir = models.TextField()
     editable = models.BooleanField(default=True)
     securityclass = models.IntegerField(choices=filemodels.DataSecurityClass.choices)
+    success_completed = models.BooleanField(default=False)
 
     def get_fullname(self, wftype=False):
         if wftype:
