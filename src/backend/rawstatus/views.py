@@ -16,7 +16,6 @@ import json
 import shutil
 import zipfile
 from tempfile import NamedTemporaryFile, mkstemp
-from uuid import uuid4
 import requests
 from hashlib import md5
 from urllib.parse import urlsplit
@@ -70,7 +69,7 @@ def import_external_data(request):
     share = ServerShare.objects.get(pk=req['share_id'])
     proj = dsmodels.Project.objects.get(pk=settings.PX_PROJECT_ID)
     exp, created = dsmodels.Experiment.objects.get_or_create(name=req['dirname'], project_id=settings.PX_PROJECT_ID)
-    dscreatedata = {'datatype_id': dsviews.get_quantprot_id(), 'prefrac_id': False,
+    dscreatedata = {'datatype_id': dsmodels.Datatype.get_quantprot_id(), 'prefrac_id': False,
             'ptype_id': settings.LOCAL_PTYPE_ID}
     date = timezone.now()
     for indset in req['dsets']:
@@ -143,7 +142,7 @@ def browser_userupload(request):
     # create userfileupload model (incl. fake token)
     # FIXME hardcoded admin name!
     producer = Producer.objects.get(shortname='admin')
-    upload = create_upload_token(ftype.pk, request.user.id, producer, uploadtype)
+    upload = UploadToken.create_upload_token(ftype.pk, request.user.id, producer, uploadtype)
     # tmp write file 
     upfile = request.FILES['file']
     dighash = md5()
@@ -253,7 +252,7 @@ def instrument_check_in(request):
             # Keep the token bound to a client instrument
             upload.expired = True
             upload.save()
-            newtoken = create_upload_token(upload.filetype_id, upload.user_id, upload.producer, uploadtype)
+            newtoken = UploadToken.create_upload_token(upload.filetype_id, upload.user_id, upload.producer, uploadtype)
             response.update({'newtoken': newtoken.token, 'expires': datetime.strftime(newtoken.expires, '%Y-%m-%d, %H:%M')})
         else:
             response.update({'newtoken': False, 'expires': datetime.strftime(upload.expires, '%Y-%m-%d, %H:%M')})
@@ -269,7 +268,7 @@ def instrument_check_in(request):
             return JsonResponse({'error': 'File type does not exist'}, status=403)
         print('New token issued for a valid task ID without a token')
         user_op = get_operator_user()
-        newtoken = create_upload_token(ftype.pk, user_op.user_id, producer, uploadtype)
+        newtoken = UploadToken.create_upload_token(ftype.pk, user_op.user_id, producer, uploadtype)
         response.update({'newtoken': newtoken.token, 'expires': datetime.strftime(newtoken.expires, '%Y-%m-%d, %H:%M')})
 
     else:
@@ -317,19 +316,9 @@ def request_upload_token(request):
     if uploadtype not in [UploadFileType.RAWFILE, UploadFileType.USERFILE, UploadFileType.LIBRARY]:
         return JsonResponse({'success': False, 'msg': 'Can only upload raw, library, user files '})
 
-    ufu = create_upload_token(data['ftype_id'], request.user.id, producer, uploadtype)
+    ufu = UploadToken.create_upload_token(data['ftype_id'], request.user.id, producer, uploadtype)
     host = settings.KANTELEHOST or request.build_absolute_uri('/')
     return JsonResponse(ufu.parse_token_for_frontend(host))
-
-
-def create_upload_token(ftype_id, user_id, producer, uploadtype):
-    '''Generates a new UploadToken for a producer and stores it in DB'''
-    token = str(uuid4())
-    expi_sec = settings.MAX_TIME_PROD_TOKEN if producer.internal else settings.MAX_TIME_UPLOADTOKEN
-    expiry = timezone.now() + timedelta(seconds=expi_sec)
-    return UploadToken.objects.create(token=token, user_id=user_id, expired=False,
-            expires=expiry, filetype_id=ftype_id, producer=producer,
-            uploadtype=uploadtype)
 
 
 # /files/transferstate

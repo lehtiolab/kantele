@@ -20,7 +20,6 @@ from rawstatus.models import (RawFile, StoredFile, StoredFileLoc, ServerShare, S
         SwestoreBackedupFile, PDCBackedupFile, Producer, UploadToken, FileJob)
 from rawstatus import jobs as rj
 from analysis import models as am
-from analysis.views import write_analysis_log
 from dashboard import views as dashviews
 from datasets import views as dsviews
 from datasets.models import DatasetRawFile, Dataset, DatasetServer
@@ -313,7 +312,7 @@ def analysis_run_done(request):
             data['client_id'] not in settings.CLIENT_APIKEYS):
         return HttpResponseForbidden()
     if 'log' in data:
-        write_analysis_log(data['log'], data['analysis_id'])
+        am.Analysis.write_log(data['log'], data['analysis_id'])
     if 'task' in data:
         set_task_done(data['task'])
     # Defensively, since analysis should already be not editable upon launch:

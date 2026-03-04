@@ -2,6 +2,7 @@ import os
 import re
 from datetime import datetime, timedelta
 from base64 import b64encode
+from uuid import uuid4
 
 from django.db import models
 from django.utils import timezone
@@ -316,6 +317,16 @@ class UploadToken(models.Model):
     # ftype is encoded in token for upload, so need to bind Token to Filetype:
     filetype = models.ForeignKey(StoredFileType, on_delete=models.CASCADE)
     uploadtype = models.IntegerField(choices=UploadFileType.choices)
+
+    @classmethod
+    def create_upload_token(cls, ftype_id, user_id, producer, uploadtype):
+        '''Generates a new UploadToken for a producer and stores it in DB'''
+        token = str(uuid4())
+        expi_sec = settings.MAX_TIME_PROD_TOKEN if producer.internal else settings.MAX_TIME_UPLOADTOKEN
+        expiry = timezone.now() + timedelta(seconds=expi_sec)
+        return cls.objects.create(token=token, user_id=user_id, expired=False,
+                expires=expiry, filetype_id=ftype_id, producer=producer,
+                uploadtype=uploadtype)
 
     @staticmethod
     def validate_token(token, joinmodels):

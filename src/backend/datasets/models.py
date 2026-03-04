@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 from django.contrib.auth.models import User
 from rawstatus.models import RawFile, ServerShare, DataSecurityClass
 from jobs.models import Job
@@ -80,6 +81,11 @@ class Datatype(models.Model):
     def __str__(self):
         return self.name
 
+    @classmethod
+    def get_quantprot_id(cls):
+        return cls.objects.values('pk').get(name__icontains='quantitative')['pk']
+
+
 
 class DatasetUIComponent(models.IntegerChoices):
     FILES = 1, 'Files'
@@ -146,6 +152,35 @@ class DatasetServer(models.Model):
                 models.UniqueConstraint(fields=['storageshare', 'storage_loc_ui'], name='uni_dsloc_ui'),
                 models.UniqueConstraint(fields=['dataset', 'storageshare'], name='uni_dsshare'),
                 ]
+
+    @classmethod
+    def query_creator(cls, searchterms):
+        query = Q(runname__name__icontains=searchterms[0])
+        query |= Q(runname__experiment__name__icontains=searchterms[0])
+        query |= Q(runname__experiment__project__name__icontains=searchterms[0])
+        query |= Q(datatype__name__icontains=searchterms[0])
+        try:
+            float(searchterms[0])
+        except ValueError:
+            pass
+        else:
+            query |= Q(prefractionationdataset__hiriefdataset__hirief__start=searchterms[0])
+            query |= Q(prefractionationdataset__hiriefdataset__hirief__end=searchterms[0])
+        for term in searchterms[1:]:
+            subquery = Q(runname__name__icontains=term)
+            subquery |= Q(runname__experiment__name__icontains=term)
+            subquery |= Q(runname__experiment__project__name__icontains=term)
+            subquery |= Q(datatype__name__icontains=term)
+            try:
+                float(term)
+            except ValueError:
+                pass
+            else:
+                subquery |= Q(prefractionationdataset__hiriefdataset__hirief__start=term)
+                subquery |= Q(prefractionationdataset__hiriefdataset__hirief__end=term)
+            query &= subquery
+        return cls.objects.filter(query)
+
 
 
 class DatasetOwner(models.Model):

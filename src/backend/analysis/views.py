@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from tempfile import NamedTemporaryFile
 
-from django.utils import timezone
 from django.http import (HttpResponseForbidden, HttpResponse, JsonResponse,
         HttpResponseNotFound)
 from django.contrib.auth.decorators import login_required
@@ -18,10 +17,7 @@ from django.db.models import Q, Count
 from kantele import settings
 from analysis import models as am
 from datasets import models as dm
-from datasets.views import get_quantprot_id
 from rawstatus import models as rm
-from rawstatus.views import create_upload_token
-from home import views as hv
 from jobs import jobs as jj
 from jobs import views as jv
 from jobs.jobutil import create_job, jobmap
@@ -53,7 +49,7 @@ def get_analysis_init(request):
         dserrors.append('Deleted datasets can not be analysed')
     if dbdsets.filter(deleted=False).count() + deleted < len(dsids):
         dserrors.append('Some datasets could not be found, they may not exist')
-    qpid = get_quantprot_id()
+    qpid = dm.Datatype.get_quantprot_id()
     dsnames, dslocks, dssec = {}, {}, {}
     for d in dbdsets.select_related('runname__experiment__project',
             'datatype', 'prefractionationdataset__hiriefdataset',
@@ -278,7 +274,7 @@ def get_analysis(request, anid):
             'base_analysis': {},
             }
     dsets, dslocks, dssec = {}, {}, {}
-    qpid = get_quantprot_id()
+    qpid = dm.Datatype.get_quantprot_id()
     for x in ana.datasetanalysis_set.select_related('dataset__runname__experiment__project',
             'dataset__datatype', 'dataset__prefractionationdataset__hiriefdataset',
             'dataset__prefractionationdataset__prefractionation').all():
@@ -486,7 +482,7 @@ def get_datasets(request, wfversion_id):
         analysis_dsfiles = {x for x in has_filesamples}
     
     # FIXME accumulate errors across data sets and show all, but do not report other stuff if error
-    qpid = get_quantprot_id()
+    qpid = dm.Datatype.get_quantprot_id()
     for dset in dbdsets.select_related('runname__experiment__project', 'datatype', 'quantdataset',
             'prefractionationdataset__hiriefdataset', 'prefractionationdataset__prefractionation'):
         # For error reporting per dset:
@@ -1021,7 +1017,7 @@ def store_analysis(request):
         except am.ExternalAnalysis.DoesNotExist:
             upl_ft = rm.StoredFileType.objects.get(name=settings.ANALYSIS_FT_NAME)
             ana_prod = rm.Producer.objects.get(client_id=settings.ANALYSISCLIENT_APIKEY)
-            upl_token = create_upload_token(upl_ft.pk, request.user.pk, ana_prod,
+            upl_token = rm.UploadToken.create_upload_token(upl_ft.pk, request.user.pk, ana_prod,
                     rm.UploadFileType.ANALYSIS)
             exta = am.ExternalAnalysis.objects.create(analysis=analysis,
                     description=req['external_description'], last_token=upl_token)
@@ -1292,7 +1288,7 @@ def renew_token(request):
 
     # Invalidate old token and create new one
     analysis.externalanalysis.last_token.invalidate()
-    new_token = create_upload_token(analysis.externalanalysis.last_token.filetype.pk,
+    new_token = rm.UploadToken.create_upload_token(analysis.externalanalysis.last_token.filetype.pk,
             request.user.pk, analysis.externalanalysis.last_token.producer, 
             rm.UploadFileType.ANALYSIS)
     analysis.externalanalysis.last_token = new_token
@@ -1549,9 +1545,9 @@ def upload_servable_file(request):
 @login_required
 def find_datasets(request):
     searchterms = [x for x in request.GET['q'].split() if x != '']
-    dbdsets = hv.dataset_query_creator(searchterms).filter(deleted=False)
+    dbdsets = dm.Dataset.query_creator(searchterms).filter(deleted=False)
     dsets = {}
-    qpid = get_quantprot_id()
+    qpid = dm.Datatype.get_quantprot_id()
     for d in dbdsets.select_related('runname__experiment__project', 'datatype',
             'prefractionationdataset__hiriefdataset', 'prefractionationdataset__prefractionation'):
         prefrac, hrrange_id = get_dset_prefrac_hiriefrange(d)
@@ -1563,13 +1559,6 @@ def find_datasets(request):
 
 def get_servable_files(ana_resultfiles):
     return ana_resultfiles.filter(sfile__filename__in=settings.SERVABLE_FILENAMES)
-
-
-def write_analysis_log(logline, analysis_id):
-    entry = '[{}] - {}'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S'), logline)
-    analysis = am.Analysis.objects.get(pk=analysis_id)
-    analysis.log.append(entry)
-    analysis.save()
 
 
 # Have csrf exempt as this view is called by nextflow which cannot
@@ -1593,7 +1582,7 @@ def nextflow_analysis_log(request):
     else:
         # Not logging anything
         return HttpResponse()
-    write_analysis_log(logmsg, nfs.analysis_id)
+    am.Analysis.write_log(logmsg, nfs.analysis_id)
     return HttpResponse()
 
 
@@ -1613,5 +1602,5 @@ def format_dset_tag(quantprot_id, project, exp, dset, dtype, prefrac, hiriefrang
 
 def append_analysis_log(request):
     req = json.loads(request.body.decode('utf-8'))
-    write_analysis_log(req['message'], req['analysis_id'])
+    am.Analysis.write_log(req['message'], req['analysis_id'])
     return HttpResponse()

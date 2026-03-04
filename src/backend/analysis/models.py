@@ -3,6 +3,7 @@ import re
 from datetime import datetime
 
 from django.db import models
+from django.utils import timezone
 from django.contrib.auth.models import User
 
 from rawstatus import models as filemodels
@@ -304,6 +305,15 @@ class Analysis(models.Model):
 
     def get_public_output_dir(self):
         return os.path.join(self.user.username, self.get_run_base_dir())
+
+    @classmethod
+    def write_log(cls, logline, analysis_id):
+        entry = f'[{datetime.strftime(timezone.now(), "%Y-%m-%d %H:%M:%S")}] - {logline}'
+        analysis = cls.objects.get(pk=analysis_id)
+        analysis.log.append(entry)
+        analysis.save()
+
+
 
 
 # Can this be generalized to deleted log for also files?

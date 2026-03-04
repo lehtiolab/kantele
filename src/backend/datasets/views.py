@@ -501,7 +501,7 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
     existing_sfl = filemodels.StoredFileLoc.objects.filter(active=True,
             sfile__rawfile__datasetrawfile__dataset=dset)
     dsshare_upds, dsshare_mvjobs, rsync_jobs, retrieve_jobs = [], [], [], []
-    qpid = get_quantprot_id()
+    qpid = models.Datatype.get_quantprot_id()
     sfls_dss = {}
 
     if not len(share_ids):
@@ -764,10 +764,6 @@ def get_prefrac_ids():
             models.Prefractionation.objects.get(name__icontains='high_pH').id)
             
 
-def get_quantprot_id():
-    return models.Datatype.objects.get(name__icontains='quantitative').id
-
-
 @login_required
 def change_owners(request):
     data = json.loads(request.body.decode('utf-8'))
@@ -859,7 +855,7 @@ def get_or_create_px_dset(exp, px_acc, user_id):
         experiment.save()
         run = models.RunName(name=px_acc, experiment=experiment)
         run.save()
-        data = {'datatype_id': get_quantprot_id(), 'prefrac_id': False,
+        data = {'datatype_id': models.Datatype.get_quantprot_id(), 'prefrac_id': False,
                 'ptype_id': settings.LOCAL_PTYPE_ID}
         return save_new_dataset(data, project, experiment, run, user_id)
 
@@ -955,7 +951,7 @@ def merge_projects(request):
         return JsonResponse({'error': 'Only {projs.count()} of the {len(data["projids"])}'
             'project(s) you have passed exist in the system, possibly project ' 
             'input is out of date?'}, status=400)
-    qpid = get_quantprot_id()
+    qpid = models.Datatype.get_quantprot_id()
     for proj in projs[1:]:
         # Refresh oldexps with every merged project
         oldexps = {x.name: x for x in projs[0].experiment_set.all()}

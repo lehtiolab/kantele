@@ -81,43 +81,13 @@ def find_projects(userquery):
     return projects
 
 
-def dataset_query_creator(searchterms):
-    query = Q(runname__name__icontains=searchterms[0])
-    query |= Q(runname__experiment__name__icontains=searchterms[0])
-    query |= Q(runname__experiment__project__name__icontains=searchterms[0])
-    query |= Q(datatype__name__icontains=searchterms[0])
-    #query |= Q(user__username__icontains=searchterms[0])
-    try:
-        float(searchterms[0])
-    except ValueError:
-        pass
-    else:
-        query |= Q(prefractionationdataset__hiriefdataset__hirief__start=searchterms[0])
-        query |= Q(prefractionationdataset__hiriefdataset__hirief__end=searchterms[0])
-    for term in searchterms[1:]:
-        subquery = Q(runname__name__icontains=term)
-        subquery |= Q(runname__experiment__name__icontains=term)
-        subquery |= Q(runname__experiment__project__name__icontains=term)
-        subquery |= Q(datatype__name__icontains=term)
-        #subquery |= Q(user__username__icontains=term)
-        try:
-            float(term)
-        except ValueError:
-            pass
-        else:
-            subquery |= Q(prefractionationdataset__hiriefdataset__hirief__start=term)
-            subquery |= Q(prefractionationdataset__hiriefdataset__hirief__end=term)
-        query &= subquery
-    return dsmodels.Dataset.objects.filter(query)
-
-
 @login_required
 @require_GET
 def find_datasets(request):
     """Loop through comma-separated q-param in GET, do a lot of OR queries on
     datasets to find matches. String GET-derived q-params by AND."""
     if searchterms := [x for x in request.GET['q'].split(',') if x != '']:
-        dbdsets = dataset_query_creator(searchterms)
+        dbdsets = dm.Dataset.query_creator(searchterms)
     else:
         dbdsets = dsmodels.Dataset.objects.none()
     if request.GET.get('deleted', 'false') == 'false':
