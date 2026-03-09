@@ -461,6 +461,8 @@ def populate_analysis(analyses, user):
             infns = afv.union(adsi).values('pk', 'rawfile_id')
             infn_ds = dsmodels.Dataset.objects.filter(datasetrawfile__rawfile__in=[x['rawfile_id']
                 for x in infns]).distinct('pk').values('pk')
+            outfns = filemodels.StoredFile.objects.filter(analysisresultfile__analysis_id=ana['pk']
+                    ).values('pk')
             nfs = {'name': anmodels.Analysis.get_fullname(ananame),
                     'jobstate': ana['nextflowsearch__job__state'],
                     'jobid': ana['nextflowsearch__job_id'],
@@ -492,6 +494,7 @@ def populate_analysis(analyses, user):
             'purged': ana['purged'],
             'dset_ids': [x['pk'] for x in infn_ds],
             'fn_ids':  [x['pk'] for x in infns],
+            'outfiles': [x['pk'] for x in outfns],
             'mstulosq': tulos_filt,
             'actions': get_ana_actions(ana, user),
             **nfs,

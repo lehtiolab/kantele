@@ -1312,3 +1312,61 @@ class TestDeleteAnalysis(BaseTest):
         self.assertFalse(self.ana.deleted)
         self.assertFalse(jm.Job.objects.exclude(pk=job.pk).filter(funcname='create_pdc_archive',
             kwargs={'sfloc_id': self.anasfile_sfl.pk, 'isdir': False}).exists())
+
+
+class TestUndeleteAnalysis(BaseTest):
+    url = '/analysis/undelete/'
+
+    def test_fail_request(self):
+        resp = self.cl.get(self.url)
+        self.assertEqual(resp.status_code, 405)
+        # wrong dict keys
+        resp = self.cl.post(self.url, content_type='application/json', data={'hello': 'test'})
+        self.assertEqual(resp.status_code, 400)
+
+        # No analysis
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.ana.pk + 1000})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('Analysis does not exist', resp.json()['error'])
+
+        # analysis not deleted
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.ana.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn('Analysis is not deleted', resp.json()['error'])
+        
+        # Not allowed wrong user
+        user = User.objects.create(username='wrong', email='wrong2')
+        self.user.is_staff = False
+        self.user.save()
+        self.ana.user = user
+        self.ana.deleted = True
+        self.ana.save()
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.ana.pk})
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn('User is not authorized to undelete', resp.json()['error'])
+        
+    def test_undelete_with_backup_ok(self):
+        self.ana.deleted = True
+        self.ana.save()
+        rm.PDCBackedupFile.objects.create(storedfile=self.anasfile, success=True)
+        self.anasfile.deleted = True
+        self.anasfile.save()
+        self.anasfile_sfl.active = False
+        self.anasfile_sfl.save()
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.ana.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.ana.refresh_from_db()
+        self.assertFalse(self.ana.deleted)
+        self.assertTrue(jm.Job.objects.filter(funcname='restore_from_pdc_archive',
+            kwargs={'sfloc_id': self.anasfile_sfl.pk}).exists())
+
+    def test_delete_without_backup(self):
+        self.ana.deleted = True
+        self.ana.save()
+        resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.ana.pk})
+        self.assertEqual(resp.status_code, 409)
+        self.assertTrue(self.ana.deleted)
+        self.ana.refresh_from_db()
+        self.assertTrue(self.ana.deleted)
+        self.assertFalse(jm.Job.objects.filter(funcname='restore_from_pdc_archive').exists())

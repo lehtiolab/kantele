@@ -1305,26 +1305,51 @@ def undelete_analysis(request):
     req = json.loads(request.body.decode('utf-8'))
     try:
         analysis = am.Analysis.objects.get(pk=req['item_id'])
-    except am.Analysis.DoesNotExist:
-        return JsonResponse({'error': 'Analysis does not exist'}, status=403)
+    except (am.Analysis.DoesNotExist, KeyError):
+        return JsonResponse({'error': 'Analysis does not exist or wrongly specified'}, status=400)
     if not analysis.deleted:
         return JsonResponse({'error': 'Analysis is not deleted, cant undelete it'}, status=403)
-    if analysis.user == request.user or request.user.is_staff:
-        analysis.deleted = False
-        analysis.save()
-        am.AnalysisDeleted.objects.filter(analysis=analysis).delete()
-        return JsonResponse({})
-    else:
+    if not analysis.success_completed:
+        return JsonResponse({'error': 'Analysis was never completed, cant undelete it'}, status=403)
+    if analysis.user != request.user and not request.user.is_staff:
         return JsonResponse({'error': 'User is not authorized to undelete this analysis'}, status=403)
+
+    backedup_sfs = rm.StoredFile.objects.filter(analysisresultfile__analysis=analysis,
+            pdcbackedupfile__deleted=False)
+    if not backedup_sfs.count():
+        return JsonResponse({'error': 'There are no backed up result files, this analysis cannot be '
+            'restored'}, status=409)
+    nr_resfiles = analysis.analysisresultfile_set.count()
+    #if backedup_sfs.count() < nr_resfiles:
+    # TODO warn in case of fewer files than needed (need to impl warning in frontend, takes
+    # no messages now if not error
+
+    restore_sflpk = []
+    for sf in backedup_sfs.values('pk'):
+        if sfls := rm.StoredFileLoc.objects.filter(sfile_id=sf['pk'],
+                servershare__fileservershare__server__can_backup=True).values('pk'):
+            # Assume delivery area for user, otherwise first available
+            if not (sfl := sfls.filter(servershare__function=rm.ShareFunction.ANALYSIS_DELIVERY).first()):
+                sfl = sfls.first()
+            restore_sflpk.append(sfl['pk']) 
+            if joberr := check_job_error('restore_from_pdc_archive', sfloc_id=sfl['pk']):
+                return JsonResponse({'error': 'Error trying to restore backed up result files, '
+                    'cannot restore'}, status=409)
+    for r_sflpk in restore_sflpk:
+        create_job_without_check('restore_from_pdc_archive', sfloc_id=r_sflpk)
+    rm.StoredFileLoc.objects.filter(pk__in=restore_sflpk).update(active=True)
+    backedup_sfs.update(deleted=False)
+    analysis.deleted = False
+    analysis.purged = False
+    analysis.save()
+    am.AnalysisDeleted.objects.filter(analysis=analysis).delete()
+    return JsonResponse({})
 
 
 @login_required
 def delete_analysis(request):
-    # FIXME analysis can be properly deleted if its backed up
-    # right now this is only mark for deletion and it was for a previous
-    # setup where delete meant gone for ever
-    # There is a lot of old analyses that should be backed up or purged properly
-    # Maybe delete all those where no project is active anymore in delete_expired?
+    '''Sets deleted and queues delete jobs after checking if result files need
+    backing up'''
     if request.method != 'POST':
         return JsonResponse({'error': 'Must use POST'}, status=405)
     req = json.loads(request.body.decode('utf-8'))
@@ -1356,7 +1381,7 @@ def do_analysis_deletion(analysis):
         # Back up files if that for some reason (old analysis) hasnt happened earlier
         backup_jobs = []
         for sf in rm.StoredFile.objects.filter(analysisresultfile__analysis=analysis).exclude(
-                pdcbackedupfile__success=True).values('pk', 'filetype__is_folder'):
+                pdcbackedupfile__deleted=False).values('pk', 'filetype__is_folder'):
             sfl_pks = [x['pk'] for x in rm.StoredFileLoc.objects.filter(sfile_id=sf['pk']).values('pk')]
             do_backup = True
             for exist_job in jm.Job.objects.filter(funcname='create_pdc_archive',
