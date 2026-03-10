@@ -375,10 +375,16 @@ class UserFile(models.Model):
 
 
 class PDCBackedupFile(models.Model):
+    '''Status of backup:
+    !deleted && !success = backup will be made
+    !deleted && sucess = backup succeeded
+    deleted && success = backup deleted
+    deleted && !success = wtf
+    '''
     storedfile = models.OneToOneField(StoredFile, on_delete=models.CASCADE)
     pdcpath = models.TextField()
-    success = models.BooleanField()
-    deleted = models.BooleanField(default=False)
+    success = models.BooleanField() # True when success, will not change back!
+    deleted = models.BooleanField(default=False) # True when deleted
     is_dir = models.BooleanField(default=False)
 
 

@@ -1381,7 +1381,8 @@ def do_analysis_deletion(analysis):
         # Back up files if that for some reason (old analysis) hasnt happened earlier
         backup_jobs = []
         for sf in rm.StoredFile.objects.filter(analysisresultfile__analysis=analysis).exclude(
-                pdcbackedupfile__deleted=False).values('pk', 'filetype__is_folder'):
+                pdcbackedupfile__success=True, pdcbackedupfile__deleted=False).values('pk',
+                'filetype__is_folder'):
             sfl_pks = [x['pk'] for x in rm.StoredFileLoc.objects.filter(sfile_id=sf['pk']).values('pk')]
             do_backup = True
             for exist_job in jm.Job.objects.filter(funcname='create_pdc_archive',
@@ -1411,7 +1412,7 @@ def do_analysis_deletion(analysis):
         # Delete files on web share here since the job tasks run on storage cannot do that
         webshares = rm.ServerShare.objects.filter(function=rm.ShareFunction.REPORTS)
         webfiles = rm.StoredFileLoc.objects.filter(sfile__analysisresultfile__analysis__id=analysis.pk,
-                servershare__in=webshares, active=True)
+                servershare__in=webshares, active=True, purged=False)
         for webfile in webfiles.values('path', 'sfile__filename'):
             fpath = os.path.join(settings.WEBSHARE, webfile['path'], webfile['sfile__filename'])
             os.unlink(fpath)
@@ -1442,7 +1443,7 @@ def do_analysis_deletion(analysis):
     # No more errors, mark for deletion
     analysis.deleted, analysis.purged = True, True
     analysis.save()
-    return 0
+    return False
 
 
 @login_required

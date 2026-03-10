@@ -1306,6 +1306,8 @@ class TestDeleteAnalysis(BaseTest):
         job = jm.Job.objects.create(funcname='create_pdc_archive', timestamp=timezone.now(),
             kwargs={'sfloc_id': self.anasfile_sfl.pk, 'isdir': False}, state=jj.Jobstates.WAITING)
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.ana.pk})
+        self.assertIn('Result file queued for backing up but job not running, please check',
+                resp.json()['error'])
         self.assertEqual(resp.status_code, 409)
         self.assertFalse(self.ana.deleted)
         self.ana.refresh_from_db()
