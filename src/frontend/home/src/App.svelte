@@ -54,7 +54,7 @@ function deleteAllMessages() {
 
 onMount(async() => {
   fetchMessages();
-  setInterval(fetchMessages, 5000);
+  setInterval(fetchMessages, 30000);
 })
 
 </script>
