@@ -229,7 +229,7 @@ async function mergeProjects() {
   bind:selected={selectedProjs}
   fetchUrl="/show/projects"
   findUrl="/show/projects"
-  defaultQ="active:true"
+  defaultQ="active:true "
   show_deleted_or_q="type:cf, from:2025, to:20250801, from:202504, active:true/false/yes/no, user:username"
   getdetails={getProjDetails}
   fixedbuttons={fixedbuttons}

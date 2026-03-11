@@ -9,7 +9,7 @@ from rawstatus import tasks
 from rawstatus import models as rm
 from datasets import tasks as dstasks
 from datasets import models as dm
-from datasets.jobs import RsyncDatasetServershare, RemoveDatasetFilesFromServershare
+from datasets.jobs import RemoveDatasetFilesFromServershare
 from kantele import settings
 from jobs.jobs import SingleFileJob, MultiFileJob, DatasetJob
 
@@ -119,7 +119,8 @@ class RsyncOtherFileServershare(SingleFileJob):
 
 
 class RemoveFilesFromServershare(RemoveDatasetFilesFromServershare):
-    '''Does the same as rsync dset, but for when files are not in a dataset
+    '''Does the same as remove_dset_files_servershare, but for when files
+    are not in a dataset
     '''
     refname = 'purge_files'
 
@@ -139,7 +140,8 @@ class RemoveFilesFromServershare(RemoveDatasetFilesFromServershare):
         return []
 
     def get_rf_ids_for_filejobs(self):
-        """This is run before running job, to define files used by
+        """Copied from singlefile job, since this is otherwise inheriting from dataset job.
+        This is run before running job, to define files used by
         the job (so it cant run if if files are in use by other job)"""
         return [x['sfile__rawfile_id'] for x in self.getfiles_query(**self.job.kwargs
             ).values('sfile__rawfile_id')]
@@ -202,7 +204,7 @@ class CreatePDCArchive(SingleFileJob):
                 rm.PDCBackedupFile.objects.get_or_create(storedfile_id=sfloc['sfile_id'],
                         is_dir=isdir, defaults={'pdcpath': '', 'success': False})
             else:
-                raise RuntimeError('Cannot find server to backup file from, please'
+                raise RuntimeError('Cannot find server to backup file from, please '
                         'configure system for backups')
         return {}
 
@@ -251,7 +253,7 @@ class BackupPDCDataset(DatasetJob):
             fss = rm.FileserverShare.objects.filter(server__can_backup=True,
                     share=sfloc.servershare).values('path').first()
             if not fss:
-                raise RuntimeError('Cannot find server to backup file from, please'
+                raise RuntimeError('Cannot find server to backup file from, please '
                         'configure system for backups')
             isdir = (hasattr(sfloc.sfile.rawfile.producer, 'msinstrument') and sfloc.sfile.filetype.is_folder)
             pdcfile, _cr = rm.PDCBackedupFile.objects.get_or_create(storedfile_id=sfloc.sfile_id,
@@ -401,22 +403,24 @@ class DownloadPXProject(DatasetJob):
             if filename in px_stored and fn['fileSize'] == px_stored[filename].rawfile.size:
                 # Only download non-checked (i.e. non-confirmed already downloaded) files
                 pxsf = px_stored[filename]
-                self.run_tasks.append(((
+                self.run_tasks.append((
                     ftpurl.path, ftpurl.netloc, 
                     pxsf.id, pxsf.rawfile_id, fn['sha1sum'],
-                    fn['fileSize'], kwargs['sharename'], kwargs['dset_id']), {}))
+                    fn['fileSize'], kwargs['sharename'], kwargs['dset_id']))
 
 
 def upload_file_pdc_runtask(sfloc, isdir):
     """Generates the arguments for task to upload file to PDC. Reused in dataset jobs"""
     yearmonth = datetime.strftime(sfloc.sfile.regdate, '%Y%m')
+    # FIXME deprecate create here, since that is done in oncreate_addkwargs - but keep for now
+    # so any remaining old jobs can be resolved
     pdcfile, _cr = rm.PDCBackedupFile.objects.get_or_create(storedfile_id=sfloc.sfile_id,
             is_dir=isdir, defaults={'pdcpath': '', 'success': False})
     if not _cr and pdcfile.success and not pdcfile.deleted:
         return
     fss = rm.FileserverShare.objects.filter(server__can_backup=True, share=sfloc.servershare).values('path').first()
     if not fss:
-        raise RuntimeError('Cannot find server to backup file from, please'
+        raise RuntimeError('Cannot find server to backup file from, please '
                 'configure system for backups')
     fnpath = os.path.join(sfloc.path, sfloc.sfile.filename)
     return (sfloc.sfile.md5, yearmonth, fss['path'], fnpath, sfloc.sfile.id, isdir)
@@ -425,9 +429,9 @@ def upload_file_pdc_runtask(sfloc, isdir):
 def restore_file_pdc_runtask(sfloc):
     backupfile = rm.PDCBackedupFile.objects.get(storedfile_id=sfloc.sfile_id)
     fnpath = os.path.join(sfloc.path, sfloc.sfile.filename)
-    yearmonth = datetime.strftime(sfloc.sfile.regdate, '%Y%m')
     fss = rm.FileserverShare.objects.filter(server__can_backup=True,
             share=sfloc.servershare).values('path').first()
+           # share__function=rm.ShareFunction.INBOX).values('path').first()
     return (fss['path'], fnpath, backupfile.pdcpath, sfloc.id, backupfile.is_dir)
 
 

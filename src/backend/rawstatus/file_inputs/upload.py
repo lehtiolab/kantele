@@ -369,7 +369,6 @@ def register_and_transfer(regq, regdoneq, logqueue, ledger, config, configfn, do
         skipbox, kantelehost, clientname, descriptions):
     '''This process does the registration and the transfer of files'''
     # Start getting the leftovers from previous run
-    fnstate_url = urljoin(kantelehost, 'files/transferstate/')
     trf_url = urljoin(kantelehost, 'files/transfer/')
     newfns_found = False
     proc_log_configure(logqueue)

@@ -225,7 +225,7 @@ function inactivate(pid) {
   fetchUrl="sampleprep/pipeline/find/"
   findUrl="sampleprep/pipeline/find/"
   show_deleted_or_q="from:2025, to:20250801, from:202504, active:true/false/yes/no"
-  defaultQ="active:true"
+  defaultQ="active:true "
   fixedbuttons={[]}
   fields={tablefields}
   inactive={['inactive']}

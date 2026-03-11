@@ -39,8 +39,9 @@ def calc_md5(fnpath):
     return hash_md5.hexdigest()
 
 
-@shared_task(queue=settings.QUEUE_SEARCH_INBOX)
+@shared_task(bind=True)
 def search_raws_downloaded(serversharename, dirname):
+    # FIXME yet to transform to sfloc multiserver
     print('Scanning {} folder {} for import raws'.format(serversharename, dirname))
     raw_paths_found = []
     fullpath = os.path.join(settings.SHAREMAP[serversharename], dirname)
@@ -318,8 +319,8 @@ def rename_file(self, fn, srcsharepath, srcpath, dstpath, sfloc_id, newname):
     try:
         os.makedirs(dstdir, exist_ok=True)
     except Exception:
-            taskfail_update_db(self.request.id)
-            raise
+        taskfail_update_db(self.request.id)
+        raise
     if not os.path.isdir(dstdir):
         taskfail_update_db(self.request.id)
         raise RuntimeError('Directory {} is already on disk as a file name. '
@@ -518,6 +519,8 @@ def classify_msrawfile(self, token, fnid, ftypename, sharepath, path, fname):
                     '-i', f'/rawfile/{fname}', '-o', f'/outdir/outfn']
             subprocess.run(cmd)
             # TODO which errors do we get here?
+            # FIXME on QC pipeline we regularly get exit 5, may pertain to DISPLAY not set on headless
+            # but not sure, and sometimes it works fine also
             try:
                 with open(os.path.join(tmpdir, 'outfn.sum.csv')) as fp:
                     header = next(fp).strip().split(',')

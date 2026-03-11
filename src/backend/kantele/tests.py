@@ -3,6 +3,7 @@ import os
 import shutil
 from time import sleep
 from datetime import timedelta
+from unittest import TestCase
 
 from django.contrib.auth.models import User
 from django.test import TestCase, LiveServerTestCase, Client
@@ -32,6 +33,7 @@ class BaseTest(TestCase):
 
     def setUp(self):
         # Clean directory containing storage servers
+        print('--------', TestCase.id(self))
         self.rootdir = '/storage'
         for dirname in os.listdir(self.rootdir):
             if os.path.isdir(os.path.join(self.rootdir, dirname)):

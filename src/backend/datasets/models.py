@@ -113,6 +113,7 @@ class Dataset(models.Model):
     datatype = models.ForeignKey(Datatype, on_delete=models.CASCADE)
     securityclass = models.IntegerField(choices=DataSecurityClass.choices)
     deleted = models.BooleanField(default=False) # for UI only, indicate deleted from active storage
+    # deprecate purged
     purged = models.BooleanField(default=False) # for UI only, indicate permanent deleted from cold storage too
     locked = models.BooleanField(default=False)
 

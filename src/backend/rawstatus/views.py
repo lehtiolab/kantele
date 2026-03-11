@@ -351,7 +351,6 @@ def get_files_transferstate(request):
     elif upload.uploadtype in [UploadFileType.LIBRARY, UploadFileType.USERFILE] and not desc:
         return JsonResponse({'error': 'Library or user files need a description'}, status=403)
     elif upload.uploadtype == UploadFileType.ANALYSIS and not hasattr(upload, 'externalanalysis'):
-        # FIXME can we upload proper analysis files here too??? In theory, yes! At a speed cost
         return JsonResponse({'error': 'Analysis result uploads need an analysis_id to put them in'}, status=403)
 
     if not fnid:
@@ -563,7 +562,7 @@ def classified_rawfile_treatment(request):
 # /files/uploaded
 @require_POST
 def file_uploaded(request):
-    '''This is for uploading files from an instrument, so not from a user using the
+    '''This is for uploading files from an instrument or analysis, so not from a user using the
     upload script. We dont use a token since the scripts run on our own server.
     '''
     data =  json.loads(request.body.decode('utf-8'))
@@ -578,6 +577,9 @@ def file_uploaded(request):
     except KeyError as error:
         print(f'Request to upload instrument file with missing parameter, {error}')
         return JsonResponse({'error': 'Bad request'}, status=400)
+    if not (producer := Producer.objects.values('pk', 'internal', 'msinstrument__filetype',
+                'msinstrument__active').filter(client_id=instrument_id).first()):
+        return JsonResponse({'error': 'Upload producer not authorized'}, status=403)
 
     claimed = data.get('claimed')
     # For analysis we have the server in the run, otherwise this ID is from env var 
@@ -597,8 +599,6 @@ def file_uploaded(request):
         share_name = ServerShare.objects.values('name').get(pk=share_id)['name']
     else:
         return JsonResponse({'error': 'Bad request'}, status=400)
-    producer = Producer.objects.values('pk', 'internal', 'msinstrument__filetype',
-            'msinstrument__active').get(client_id=instrument_id)
     is_active_ms, analysis = False, False
     if producer['msinstrument__filetype'] is not None:
         filetype = producer['msinstrument__filetype']
@@ -645,8 +645,8 @@ def file_uploaded(request):
             # result (in which case they share it)
             sfl.save()
         if sensitive_data:
-            # Only dump in sens OK data storage, if that is set up, to do backups from
-            # and in the delivery storage if needed
+            # Only dump in sens OK data storage, 
+            # so use inbox, then do backup, deliver to secure delivery, delete.
             # TODO
             #rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sfl.pk,
             #    dstshare_id=dstshare['pk'], dstpath=analysis.get_public_output_dir())
@@ -921,6 +921,7 @@ def transfer_file(request):
         # Now transfer to dst share (library share on controller)
         dstshare = ServerShare.objects.filter(function=dstsharefun).first()
         dstsss = StoredFileLoc.objects.create(sfile=file_trf, servershare=dstshare, path=dstpath)
+
     create_job('rsync_transfer_fromweb', sfloc_id=dstsss.pk, src_path=upload_dst)
     return JsonResponse({'fn_id': fn_id, 'state': 'ok'})
 
@@ -1011,7 +1012,7 @@ def rename_file(request):
     mzML have to be renamed. The file needs renaming in ALL shares"""
     if not request.method == 'POST':
         return JsonResponse({'error': 'Must use POST'}, status=405)
-    data =  json.loads(request.body.decode('utf-8'))
+    data = json.loads(request.body.decode('utf-8'))
     try:
         sfile = StoredFile.objects.filter(pk=data['sf_id'], deleted=False).select_related(
             'mzmlfile', 'rawfile').get()

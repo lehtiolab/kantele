@@ -406,4 +406,4 @@ class FileJob(models.Model):
     '''
     rawfile = models.ForeignKey(RawFile, on_delete=models.CASCADE)
     job = models.ForeignKey(Job, on_delete=models.CASCADE)
-    #storedfile = models.ForeignKey(StoredFile, on_delete=models.CASCADE)
+

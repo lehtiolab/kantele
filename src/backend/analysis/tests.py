@@ -770,7 +770,7 @@ class TestStoreAnalysis(AnalysisPageTest):
             'analysisserver_id': self.anaserver.pk,
             }
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
-        timestamp = datetime.strftime(datetime.now(), '%Y%m%d_')
+
         self.assertEqual(resp.status_code, 200)
         ana = am.Analysis.objects.last()
         self.assertEqual(ana.analysissampletable.samples, {'hello': 'yes'})
@@ -797,6 +797,7 @@ class TestStoreAnalysis(AnalysisPageTest):
                 data={'analysis_id': resp.json()['analysis_id']})
         self.user.is_superuser = True
         self.user.save()
+        # Make sure rename lib file waits until analysis is finished
         renameresp = self.cl.post('/files/rename/', content_type='application/json',
                 data={'sf_id': self.sflib.pk, 'newname': 'testnewname'})
         self.user.is_superuser = False
@@ -814,7 +815,7 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.assertTrue(usm_q.exists())
         self.assertTrue(hm.AnalysisMessage.objects.filter(analysis=ana, msg=usm_q.get().pk,
             msgtype=hm.AnalysisMsgTypes.COMPLETED).exists())
-        self.run_job() # rsync the results
+        self.run_job() # rsync the results, rename job
         self.assertTrue(renamejobs.filter(state=jj.Jobstates.PROCESSING).exists())
         reports = rm.StoredFileLoc.objects.filter(sfile__filename='report.html', purged=False)
         self.assertEqual(reports.count(), 3) # analysisruns, web, analysis storage

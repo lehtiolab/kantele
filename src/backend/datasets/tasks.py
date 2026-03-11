@@ -10,7 +10,6 @@ from celery.exceptions import MaxRetriesExceededError
 from kantele import settings
 from jobs.post import get_session_cookies, update_db, taskfail_update_db
 from analysis.tasks import create_runname_dirname, prepare_nextflow_run, run_nextflow, register_mzmlfile, process_error_from_nf_log, copy_stage_files
-from rawstatus.tasks import calc_md5, delete_empty_dir
 
 # Updating stuff in tasks happens over the API, assume no DB is touched. This
 # avoids setting up auth for DB
@@ -38,12 +37,11 @@ def run_convert_mzml_nf(self, run, params, raws, ftype_name, nf_version, stagesc
     try:
         run_outdir = run_nextflow(run, params, run['dsspath'], gitwfdir, nf_version, scratchdir)
     except subprocess.CalledProcessError as e:
-        print(e)
         errmsg = process_error_from_nf_log(os.path.join(gitwfdir, '.nextflow.log'))
         taskfail_update_db(self.request.id, errmsg)
         raise RuntimeError('Error occurred converting mzML files: '
                            f'{basedir}\n\nERROR MESSAGE:\n{errmsg}')
-    # Technically we can dump straight to infile paths
+    # mzMLs go straight to infile paths
     token = False
     transfer_url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
     reg_session, reg_headers = get_session_cookies()

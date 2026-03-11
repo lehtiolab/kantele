@@ -183,6 +183,10 @@ def find_files(userquery):
                 query &= Q(deleted=True)
             case ['deleted', 'false']:
                 query &= Q(deleted=False)
+            case ['backup', 'false']:
+                query &= Q(pdcbackedupfile__success=False)
+            case ['backup', 'true']:
+                query &= Q(pdcbackedupfile__success=True)
             case ['type', ftype]:
                 match ftype:
                     case 'qc':
@@ -224,9 +228,10 @@ def getxbytes(bytes, op=50):
     if bytes is None:
         return '0B'
     if bytes >> op:
-        return '{}{}B'.format(bytes >> op, {0: '', 10: 'K', 20: 'M', 30: 'G', 40: 'T', 50: 'P'}[op])
+        unit = {0: '', 10: 'K', 20: 'M', 30: 'G', 40: 'T', 50: 'P'}[op]
+        return f'{bytes >> op}{unit}B'
     else:
-        return getxbytes(bytes, op-10)
+        return getxbytes(bytes, op - 10)
 
 
 def populate_files(dbfns):
@@ -1129,10 +1134,6 @@ def create_mzmls(request):
             create_job('rsync_dset_files_to_servershare', dss_id=dstshare_ids_dss[dstshare_id],
                     sfloc_ids=src_sflids_for_remote, dstshare_id=dstshare_id)
     return JsonResponse({})
-
-
-    
-
 
 
 @require_POST

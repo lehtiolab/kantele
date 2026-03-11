@@ -125,7 +125,6 @@ class BaseJob:
         return []
 
     def _select_rsync_server(self, srcshare_id, dstshare_id):
-        # Select file servers to rsync from/to - FIXME share code!
         '''Shares should already have been confirmed to be active?
         Or can we do that here?
         '''

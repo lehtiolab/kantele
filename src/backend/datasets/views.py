@@ -619,7 +619,8 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
 
         elif pre_alldss.exists():
             # there is a live dss somewhere, get it onto an rsync source first
-            # This is VERY similar to what we do in home/views for mzml, except the local storage
+            # This is VERY similar to what we do in home/views around L1050 and L1180
+            # for mzml, except the local storage
             src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
                 servershare=pre_alldss.first().storageshare,
                     sfile__rawfile__datasetrawfile__dataset=dset).values('pk')]
@@ -1151,6 +1152,7 @@ def purge_project(request):
 
 
 def get_dset_storestate(dset_id, ds_deleted):
+    # For archiving, reactivating, and showing on homepage
     '''Count SFLoc associated with a dataset (created when adding/removing), in different 
     servershares and in backup - return a state for the dataset (currently a string)'''
     dsf_c = filemodels.StoredFile.objects.exclude(mzmlfile__isnull=False).filter(
@@ -1298,7 +1300,9 @@ def reactivate_dataset(dset, share_ids, project, experiment, dtype, prefrac, hrr
             sfls_inbox.update(path=buppath, active=True)
 
             sflids = [x['pk'] for x in sfls_inbox.values('pk')]
+            # Queue restore job from backup
             create_job('reactivate_dataset', dss_id=bupdss.pk, sfloc_ids=sflids)
+            # Now move from restored to other areas
             if upd_stor_err := update_storage_shares(share_ids, project, experiment, dset,
                     dtype, prefrac, hrrange, user_id):
                 msg = json.loads(upd_stor_err.content)['error']
@@ -1756,7 +1760,6 @@ def save_or_update_files(data, user_id):
         elif len(removed_ids) > rmsfl.distinct('sfile_id').count():
             return {'error': 'Cannot find some of the files asked to remove on storage. '
                     'This should not happen. Contact admin' }, 403
-
 
     # Errors checked, now store DB records and queue move jobs
     if added_fnids:

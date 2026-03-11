@@ -135,14 +135,15 @@ def run_ready_jobs(job_fn_map, job_ds_map, active_jobs):
                 job.state = Jobstates.PROCESSING
                 if errmsg := jwrapper.check_error_on_running(**job.kwargs):
                     jwrapper.set_error(job, errmsg=errmsg)
+                    print(f'Error found in check: "{errmsg}" --- not executing this job')
                 else:
                     try:
                         jwrapper.run(**job.kwargs)
                     except RuntimeError as e:
-                        print('Error occurred, trying again automatically in next round')
+                        print(f'Error occurred: {e}, not executing this job')
                         jwrapper.set_error(job, errmsg=str(e))
                     except Exception as e:
-                        print(f'Error occurred: {e} --- not executing this job')
+                        print(f'Uncaught error occurred: {e} --- not executing this job')
                         jwrapper.set_error(job, errmsg=str(e))
                     else:
                         # PROCESSING state update saved here:

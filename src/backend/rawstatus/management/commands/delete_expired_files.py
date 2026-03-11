@@ -67,7 +67,6 @@ class Command(BaseCommand):
                     if dss_sfl.count() and dss_sfl.count() == dssrmsfl.count():
                         if options['dry_run']:
                             nr_dsssfl = dssrmsfl.count()
-                            dss_nr = dss_exps.filter(pk=dss_exp['pk']).count()
                             print(f'Dry run, would queue expired dss {dss_exp["pk"]} from dset '
                                     f'{dss_exp["dataset_id"]} with {nr_dsssfl} files on share '
                                     f'{share.name} for deletion')
@@ -80,7 +79,7 @@ class Command(BaseCommand):
                             nr_dsssfl = dssrmsfl.update(active=False)
                             rm.StoredFile.objects.filter(storedfileloc__pk__in=dssrmsfl_ids).exclude(
                                 storedfileloc__active=True).update(deleted=True)
-                            dss_nr = dss_exps.filter(pk=dss_exp['pk']).update(active=False)
+                            dm.DatasetServer.objects.filter(pk=dss_exp['pk']).update(active=False)
                             print(f'Queued expired dss {dss_exp["pk"]} from dset '
                                     f'{dss_exp["dataset_id"]} with {nr_dsssfl} files on share '
                                     f'{share.name} for deletion')
@@ -105,7 +104,7 @@ class Command(BaseCommand):
                     hm.UserMessage.create_message(ds_usr['user'],
                             msgtype=hm.DsetMsgTypes.DELETED, dset_id=dset['pk'])
 
-            # Now weve set expired dsets, create usermessaeg for those that are "soon to expire"
+            # Now weve set expired dsets, create usermessage for those that are "soon to expire"
             if not options['dry_run']:
                 for ds_soon in dm.Dataset.objects.annotate(nr_active=Count('datasetserver__id',
                         filter=Q(datasetserver__active=True)), nr_soon=Count('datasetserver__id',
