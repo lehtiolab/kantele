@@ -1433,6 +1433,54 @@ class TestArchiveProject(BaseTest):
         self.assertEqual(dm.ProjectLog.objects.last().message,
                 f'User {self.user.pk} closed project')
 
+    def test_delete_analysis_first_backup(self):
+        # When a project closes, also delete its analyses
+        dsa = am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.ds)
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.p1.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} closed project')
+        self.assertFalse(self.ana.deleted)
+        self.ana.refresh_from_db()
+        self.assertTrue(self.ana.deleted)
+        self.assertTrue(jm.Job.objects.filter(funcname='create_pdc_archive',
+            kwargs={'sfloc_id': self.anasfile_sfl.pk, 'isdir': False}).exists())
+
+    def test_delete_analysis_no_backup(self):
+        # When a project closes, also delete its analyses
+        # But do not delete when 2 projects are in one analysis and one of them
+        # is not the one being closed
+        rm.PDCBackedupFile.objects.create(storedfile=self.anasfile, pdcpath=self.anasfile.md5,
+                success=True)
+        dsa = am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.ds)
+        olddsa = am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.oldds)
+        olddss2 = dm.DatasetServer.objects.create(dataset=self.oldds, storageshare=self.ssnewstore,
+                storage_loc_ui=self.oldstorloc, storage_loc=self.oldstorloc, startdate=timezone.now())
+        oldssfl2 = rm.StoredFileLoc.objects.create(sfile=self.oldsf, servershare=self.ssnewstore,
+                path=self.oldstorloc, active=True, purged=False)
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.p1.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} closed project')
+        self.assertFalse(self.ana.deleted)
+        self.ana.refresh_from_db()
+        self.assertFalse(self.ana.deleted)
+
+        # Now also close the second project, which should delete the analysis
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.oldp.pk})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} closed project')
+        self.assertFalse(self.ana.deleted)
+        self.ana.refresh_from_db()
+        self.assertTrue(self.ana.deleted)
+        self.assertFalse(jm.Job.objects.filter(funcname='create_pdc_archive',
+            kwargs={'sfloc_id': self.anasfile_sfl.pk, 'isdir': False}).exists())
+
+
 
 # Currently disabled
 #class TestReactivateProject(BaseTest):

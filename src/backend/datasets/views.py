@@ -15,6 +15,7 @@ from django.utils import timezone
 from kantele import settings
 from datasets import models
 from analysis import models as am
+from analysis import views as av
 from rawstatus import models as filemodels
 from jobs.jobutil import create_job, check_job_error, create_job_without_check
 from jobs import models as jm
@@ -919,6 +920,17 @@ def close_project(request):
         if archived['state'] == 'error' and not archived.get('close_project'):
             result.update({'state': 'error', 'error': 'Not all datasets could be updated.'})
             result['errormsgs'].append(archived['error'])
+    # Find analysis from this closed project, archive if needed and delete from disk
+    all_ana = am.Analysis.objects.values('pk').filter(
+            datasetanalysis__dataset__runname__experiment__project__id=data['item_id'])
+    # Only delete analyses that are have more than one active project in their input
+    # files, so do a Count here
+    for ana_rm in am.Analysis.objects.filter(pk__in=all_ana,
+                datasetanalysis__dataset__runname__experiment__project__active=True).annotate(
+                        nrproj=Count('datasetanalysis__dataset__runname__experiment__project_id')
+                ).filter(nrproj=1):
+        av.do_analysis_deletion(ana_rm)
+
     # if any dataset cannot be cold stored, report it, do not mark proj as retired
     if result['errormsgs']:
         projquery.update(active=True)
@@ -1186,11 +1198,18 @@ def archive_and_delete_dataset(dset):
         if storestate == 'broken':
             return {'state': 'error', 'error': 'Cannot archive dataset, files missing on storage'}
         elif storestate == 'active-only':
-            srcdss = get_source_dss_for_transfers(alldss)
-            srcsfl = filemodels.StoredFileLoc.objects.exclude(sfile__mzmlfile__isnull=False).filter(
-                    sfile__rawfile__datasetrawfile__dataset__datasetserver=srcdss).values('pk')
-            create_job('backup_dataset', dss_id=srcdss.pk, sfloc_ids=[x['pk'] for x in srcsfl])
-            backing_up = True
+            if srcdss := get_source_dss_for_transfers(alldss):
+                if not (srcsfl := filemodels.StoredFileLoc.objects.exclude(sfile__mzmlfile__isnull=False
+                        ).filter(servershare=srcdss.storageshare,
+                        sfile__rawfile__datasetrawfile__dataset__datasetserver=srcdss).values(
+                            'pk', 'servershare')):
+                    return {'state': 'error', 'error': 'Cannot backup dataset, files are not found '
+                        'on share with backup connection. Please transfer to such a share'}
+                create_job('backup_dataset', dss_id=srcdss.pk, sfloc_ids=[x['pk'] for x in srcsfl])
+                backing_up = True
+            else:
+                return {'state': 'error', 'error': f'Could not find suitable dataset location to '
+                        'use to back up from, maybe dataset is on a remote server only?'}
 
         # If you reach this point, the dataset is either backed up or has a job queued for that, so queue delete job
         bup_msg = 'Files are already in backup'
