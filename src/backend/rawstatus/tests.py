@@ -1880,7 +1880,7 @@ class TestAutoDelete(BaseIntegrationTest):
         rm.PDCBackedupFile.objects.create(success=True, storedfile=self.oldsf, pdcpath='oldsf')
         rm.StoredFileLoc.objects.filter(pk=self.oldsss.pk).update(last_date_used=exp_ldu)
 
-        # f3sf inbox
+        # f3sf inbox, is also a dset file
         self.f3sssinbox.active = True
         self.f3sssinbox.save()
 
@@ -1985,7 +1985,7 @@ class TestAutoDelete(BaseIntegrationTest):
         # Refresh everything
         for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
                 self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss,
-                self.oldds, self.tmpsf, self.anasf3, self.anasf4]:
+                self.oldds, self.tmpsf, self.anasf3, self.anasf4, self.f3sssinbox]:
             fn.refresh_from_db()
 
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
@@ -2016,14 +2016,13 @@ class TestAutoDelete(BaseIntegrationTest):
                 print(f'AssertionError: File {sf} marked as deleted!')
                 raise
             
-
     def test_full(self):
         call_command('delete_expired_files')
 
         # Refresh everything
         for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
                 self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss,
-                self.oldds]:
+                self.oldds, self.f3sssinbox]:
             fn.refresh_from_db()
 
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
@@ -2034,13 +2033,13 @@ class TestAutoDelete(BaseIntegrationTest):
         self.assertTrue(dsrmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
         self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
 
-        for fn in [self.f3sssana, self.f3sssinbox, self.reportsfl, self.anasfl, self.anasfl2]:
+        for fn in [self.f3sssana, self.reportsfl, self.anasfl, self.anasfl2]:
             # Not deleted
             self.assertTrue(fn.active)
             self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
             self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
 
-        for fn in [self.tmpsss, self.expreportsfl, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
+        for fn in [self.tmpsss, self.f3sssinbox, self.expreportsfl, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
             # Deleted
             self.assertFalse(fn.active)
             self.assertTrue(rmjob.filter(kwargs__sfloc_ids__contains=fn.pk).exists())
@@ -2072,7 +2071,7 @@ class TestAutoDelete(BaseIntegrationTest):
         # Refresh everything
         for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
                 self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss,
-                self.oldds]:
+                self.oldds, self.f3sssinbox]:
             fn.refresh_from_db()
 
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
@@ -2122,7 +2121,7 @@ class TestAutoDelete(BaseIntegrationTest):
         # Refresh everything
         for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
                 self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss,
-                self.oldds]:
+                self.oldds, self.f3sssinbox]:
             fn.refresh_from_db()
 
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
@@ -2130,12 +2129,12 @@ class TestAutoDelete(BaseIntegrationTest):
                 state=jj.Jobstates.PENDING)
 
         # Not deleting old ds file, ana files, newer inbox
-        for fn in [self.oldsss, self.f3sssana, self.reportsfl, self.anasfl, self.anasfl2, self.expreportsfl, self.anasfl3, self.anasfl4, self.f3sssinbox, self.nfc_loc, self.f3mzsss]:
+        for fn in [self.oldsss, self.f3sssana, self.reportsfl, self.anasfl, self.anasfl2, self.expreportsfl, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss]:
             self.assertTrue(fn.active)
             self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
             self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
 
-        for fn in [self.tmpsss]:
+        for fn in [self.tmpsss, self.f3sssinbox]:
             self.assertFalse(fn.active)
             self.assertTrue(rmjob.filter(kwargs__sfloc_ids__contains=fn.pk).exists())
             self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
@@ -2161,13 +2160,55 @@ class TestAutoDelete(BaseIntegrationTest):
                 print(f'AssertionError: File {sf} not marked as deleted!')
                 raise
 
+    def test_inbox_not_expired(self):
+        self.ssinbox.maxdays_data = 1000
+        self.ssinbox.save()
+        call_command('delete_expired_files', inbox=True)
+
+        # Refresh everything
+        for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
+                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss,
+                self.oldds, self.f3sssinbox]:
+            fn.refresh_from_db()
+
+        rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
+        dsrmjob = jm.Job.objects.filter(funcname='remove_dset_files_servershare',
+                state=jj.Jobstates.PENDING)
+
+        # Not deleting old ds file, ana files, newer inbox
+        for fn in [self.oldsss, self.f3sssana, self.reportsfl, self.anasfl, self.anasfl2, self.expreportsfl, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss, self.tmpsss]:
+            self.assertTrue(fn.active)
+            self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+            self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+
+        # f3sssinbox is deleted since it is in a dataset
+        for fn in [self.f3sssinbox]:
+            self.assertFalse(fn.active)
+            self.assertTrue(rmjob.filter(kwargs__sfloc_ids__contains=fn.pk).exists())
+            self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
+
+        self.ana3.refresh_from_db()
+        self.assertFalse(self.ana3.deleted)
+
+        self.assertFalse(hm.UserMessage.objects.exists())
+
+        # Sfile deleted check
+        for sf in [self.oldsf, self.f3sfmz, self.expreportsf, self.sfnfc, self.anasf3, self.anasf4,
+                self.f3sf, self.tmpsf]:
+            sf.refresh_from_db()
+            try:
+                self.assertFalse(sf.deleted)
+            except AssertionError:
+                print(f'AssertionError: File {sf} marked as deleted!')
+                raise
+
     def test_datasets(self):
         call_command('delete_expired_files', datasets=True)
 
         # Refresh everything
         for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
                 self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss,
-                self.oldds]:
+                self.oldds, self.f3sssinbox]:
             fn.refresh_from_db()
 
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
@@ -2214,7 +2255,7 @@ class TestAutoDelete(BaseIntegrationTest):
         # Refresh everything
         for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
                 self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss,
-                self.oldds]:
+                self.oldds, self.f3sssinbox]:
             fn.refresh_from_db()
 
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)

@@ -188,14 +188,34 @@ class Command(BaseCommand):
                     hm.UserMessage.create_message(ana_soon['user_id'],
                             msgtype=hm.AnalysisMsgTypes.DELETE_SOON, analysis_id=ana_soon['pk'])
 
-        # Other files (tmp, library, web report)
+        # Other expired files (tmp, library, web report)
         functions = []
-        if run_all or options['inbox']:
-            functions.append(rm.ShareFunction.INBOX)
         if run_all or options['reports']:
             functions.append(rm.ShareFunction.REPORTS)
         if run_all or options['library']:
             functions.append(rm.ShareFunction.LIBRARY)
+        if run_all or options['inbox']:
+            functions.append(rm.ShareFunction.INBOX)
+            # also remove inbox files that have been put in a dataset:
+            # dset association, active dset file?
+            # dset sfloc needs not to be checked, since a dset can have been deleted already
+            # and removing a file from dset does not delete its sfloc
+            dset_fns_rm = activefns_raw_bup.filter(servershare__function=rm.ShareFunction.INBOX,
+                sfile__rawfile__datasetrawfile__isnull=False)
+            if options['dry_run']:
+                dset_fn_nr = dset_fns_rm.count()
+                print(f'Dry run, could queue {dset_fn_nr} dset-associated files from INBOX share(s) '
+                        'for deletion')
+            else:
+                dset_fn_nr = 0
+                for chunk in chunk_iter(dset_fns_rm.values('pk'), 100):
+                    rm_dsetfn_pks = [x['pk'] for x in chunk]
+                    create_job('purge_files', sfloc_ids=rm_dsetfn_pks)
+                    dset_fn_nr += rm.StoredFileLoc.objects.filter(pk__in=rm_dsetfn_pks).update(
+                            active=False)
+                    rm.StoredFile.objects.filter(storedfileloc__in=rm_dsetfn_pks).exclude(
+                            storedfileloc__active=True).update(deleted=True)
+                print(f'Queued {dset_fn_nr} dset-associated files from INBOX share(s) for deletion')
 
         for share in rm.ServerShare.objects.filter(active=True, maxdays_data__gt=0,
                 function__in=functions):
