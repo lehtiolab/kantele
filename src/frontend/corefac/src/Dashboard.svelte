@@ -209,7 +209,7 @@ async function replot(sortkey) {
 
     if (sortkey !== 'duration') {
       agg_y = { label: ylabels[sortkey], grid: true };
-      agg_col = colorscale;
+      agg_col = {...colorscale, legend: true, opacity: 0.3};
       agg_transform_in = {fx: sortkey_mod, x: 'state', fill: 'stage', opacity: 0.3};
       agg_x = {axis: null};
       agg_fx = {axis: 'bottom', tickRotate: rotation, label: xlabels[sortkey]};
@@ -268,10 +268,7 @@ async function replot(sortkey) {
     ms_agg_plot = Plot.plot({
       marginBottom: 75,
       marginTop: 75,
-      color: {
-             legend: true,
-              opacity: 0.3,
-          },
+      color: {...agg_col},
       y: { label: 'MS time(min)', grid: true },
       x: agg_x,
       fx: agg_fx,
@@ -283,10 +280,7 @@ async function replot(sortkey) {
       marginRight: 75,
       marginLeft: 75,
       marginBottom: 20,
-      color: {
-             legend: true,
-              opacity: 0.3,
-          },
+      color: {...colorscale, legend: true, opacity: 0.3},
       x: {axis: "top", label: 'MS time (min)', labelAnchor: 'center', grid: true,},
           y: {axis: "left", label: sortkey },
           marks: [
