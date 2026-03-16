@@ -1375,7 +1375,7 @@ def do_analysis_deletion(analysis):
     # implement a log instead
     am.AnalysisDeleted.objects.update_or_create(analysis=analysis)
     if jobq := jm.Job.objects.filter(nextflowsearch__analysis=analysis).exclude(state__in=[
-                jj.Jobstates.ERROR, jj.Jobstates.DONE, jj.Jobstates.REVOKING, jj.Jobstates.CANCELED]):
+                jj.Jobstates.DONE, jj.Jobstates.REVOKING, jj.Jobstates.CANCELED]):
         jv.cancel_or_revoke_job(jobq)
     if analysis.success_completed:
         # Back up files if that for some reason (old analysis) hasnt happened earlier
