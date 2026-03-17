@@ -29,12 +29,18 @@ class RenameDatasetStorageLoc(DatasetJob):
             raise RuntimeError('Dataset source files are spread over more than one location, please '
                     'contact admin to make sure files are consolicated before renaming path')
 
-        srcloc = srcloc.get()
-        fss = FileserverShare.objects.filter(share=srcloc['servershare__pk'], server__active=True
-                ).values('server__name', 'path').first()
-        self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_FASTSTORAGE)
-        self.run_tasks = [(fss['path'], srcloc['path'], kwargs['newpath'], 
-            [x['pk'] for x in srcsfs.values('pk')], kwargs['dss_id'])]
+        elif srcloc.count():
+            srcloc = srcloc.get()
+            fss = FileserverShare.objects.filter(share=srcloc['servershare__pk'], server__active=True
+                    ).values('server__name', 'path').first()
+            self.queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_FASTSTORAGE)
+            self.run_tasks = [(fss['path'], srcloc['path'], kwargs['newpath'], 
+                [x['pk'] for x in srcsfs.values('pk')], kwargs['dss_id'])]
+        else:
+            # There are no sfloc files in this job, e.g. empty dataset, so we will not rename
+            # on disk
+            dss = DatasetServer.objects.filter(pk=kwargs['dss_id'])
+            dss.update(storage_loc=kwargs['newpath'])
 
 
 class RsyncDatasetServershare(DatasetJob):

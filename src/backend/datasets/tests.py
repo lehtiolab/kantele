@@ -615,6 +615,36 @@ class RenameProjectTest(BaseIntegrationTest):
         self.assertTrue(os.path.exists(newtmpsf_path))
         self.assertTrue(newsfl.exists())
 
+    def test_rename_empty_dset(self):
+        newname = 'testnewname'
+        self.assertEqual(dm.Project.objects.filter(name=newname).count(), 0)
+        # make sure dset empty
+        self.f3raw.delete()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'projid': self.p1.pk, 'newname': newname})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.id} renamed project '
+            f'from {self.p1.name} to {newname}').exists())
+        old_loc = self.dss.storage_loc
+        new_loc = os.path.join(newname, self.exp1.name, self.dtype.name, self.run1.name)
+        renamejobs = jm.Job.objects.filter(funcname='rename_dset_storage_loc',
+                kwargs={'dss_id': self.dss.pk, 'newpath': new_loc,
+                    'sfloc_ids': []})
+        self.assertEqual(renamejobs.count(), 1)
+        self.p1.refresh_from_db()
+        self.assertEqual(self.p1.name, newname)
+        self.assertTrue(os.path.exists(self.f3path))
+        self.dss.refresh_from_db()
+        self.assertEqual(self.dss.storage_loc_ui, new_loc)
+        self.run_job()
+        self.assertTrue(os.path.exists(self.f3path))
+        self.assertEqual(self.dss.storage_loc, old_loc)
+        self.dss.refresh_from_db()
+        self.assertEqual(self.dss.storage_loc, new_loc)
+        self.assertFalse(os.path.exists(os.path.join(self.newstorctrl.path,
+            self.dss.storage_loc, self.f3sf.filename)))
+
+
 # FIXME write tests
 #class SaveAcquisition(BaseTest):
 #class SaveSampleprep(BaseTest):
