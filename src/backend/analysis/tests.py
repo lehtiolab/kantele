@@ -857,11 +857,16 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.assertFalse(os.path.exists(webfn))
         self.assertTrue(os.path.exists(anafn))
         self.assertTrue(os.path.exists(nfrunfn))
+        rmdirjobs = jm.Job.objects.filter(funcname='delete_empty_directory')
+        self.assertEqual(rmdirjobs.filter(state=jj.Jobstates.PENDING).count(), 2)
         # Two purge jobs and two delete dir jobs, this test is getting slow
         self.run_job() # purge files
         self.run_job() # rm dir
         self.run_job() # purge
         self.run_job() # rm dir
+        # Second rmdir job is executed but status is not resolved 
+        self.assertEqual(rmdirjobs.filter(state=jj.Jobstates.DONE).count(), 1)
+        self.assertEqual(rmdirjobs.filter(state=jj.Jobstates.PROCESSING).count(), 1)
         self.assertFalse(os.path.exists(anafn))
         self.assertFalse(os.path.exists(nfrunfn))
 

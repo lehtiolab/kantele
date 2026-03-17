@@ -1446,6 +1446,8 @@ class TestArchiveProject(BaseTest):
         self.assertTrue(self.ana.deleted)
         self.assertTrue(jm.Job.objects.filter(funcname='create_pdc_archive',
             kwargs={'sfloc_id': self.anasfile_sfl.pk, 'isdir': False}).exists())
+        self.assertTrue(jm.Job.objects.filter(funcname='purge_files').exists())
+        self.assertTrue(jm.Job.objects.filter(funcname='delete_empty_directory').exists())
 
     def test_delete_analysis_no_backup(self):
         # When a project closes, also delete its analyses
@@ -1453,12 +1455,31 @@ class TestArchiveProject(BaseTest):
         # is not the one being closed
         rm.PDCBackedupFile.objects.create(storedfile=self.anasfile, pdcpath=self.anasfile.md5,
                 success=True)
-        dsa = am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.ds)
-        olddsa = am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.oldds)
-        olddss2 = dm.DatasetServer.objects.create(dataset=self.oldds, storageshare=self.ssnewstore,
+        am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.ds)
+        am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.oldds)
+        dm.DatasetServer.objects.create(dataset=self.oldds, storageshare=self.ssnewstore,
                 storage_loc_ui=self.oldstorloc, storage_loc=self.oldstorloc, startdate=timezone.now())
-        oldssfl2 = rm.StoredFileLoc.objects.create(sfile=self.oldsf, servershare=self.ssnewstore,
+        rm.StoredFileLoc.objects.create(sfile=self.oldsf, servershare=self.ssnewstore,
                 path=self.oldstorloc, active=True, purged=False)
+
+        # Create another analysis of which files can be deleted, from
+        # only one project
+        ana2 = am.Analysis.objects.create(name='secondana', user=self.user, base_rundir='fakerundir',
+                securityclass=rm.DataSecurityClass.NOSECURITY, success_completed=True)
+        ana_raw2 = rm.RawFile.objects.create(name='ana2_file', producer=self.anaprod,
+                source_md5='testana21234', size=100, date=timezone.now(), claimed=True,
+                usetype=rm.UploadFileType.ANALYSIS)
+        anasfile2 = rm.StoredFile.objects.create(rawfile=ana_raw2, filetype=self.anaft,
+
+                filename=ana_raw2.name, md5=ana_raw2.source_md5)
+        am.AnalysisResultFile.objects.create(analysis=ana2, sfile=anasfile2)
+        
+        anasfile2_sfl = rm.StoredFileLoc.objects.create(sfile=anasfile2,
+                servershare=self.ssana, path=ana2.name, active=True, purged=False)
+        rm.PDCBackedupFile.objects.create(storedfile=anasfile2, pdcpath=anasfile2.md5,
+                success=True)
+        am.DatasetAnalysis.objects.create(analysis=ana2, dataset=self.ds)
+        self.assertFalse(jm.Job.objects.filter(funcname='remove_dset_files_servershare'))
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.p1.pk})
         self.assertEqual(resp.status_code, 200)
@@ -1467,6 +1488,18 @@ class TestArchiveProject(BaseTest):
         self.assertFalse(self.ana.deleted)
         self.ana.refresh_from_db()
         self.assertFalse(self.ana.deleted)
+        self.assertTrue(jm.Job.objects.filter(funcname='remove_dset_files_servershare'))
+        # Check analysis files being deleted
+        # Dataset files are deleted by remove_dset_files_servershare
+        # analysis files by purge_files
+        rmjob1 = jm.Job.objects.filter(funcname='purge_files', kwargs__sfloc_ids=[anasfile2_sfl.pk])
+        rmjob2 = jm.Job.objects.filter(funcname='purge_files').exclude(kwargs__sfloc_ids=[anasfile2_sfl.pk])
+        rmdirjob1 = jm.Job.objects.filter(funcname='delete_empty_directory', kwargs__path=anasfile2_sfl.path)
+        rmdirjob2 = jm.Job.objects.filter(funcname='delete_empty_directory', kwargs__path=self.anasfile_sfl.path)
+        self.assertTrue(rmjob1.exists())
+        self.assertFalse(rmjob2.exists())
+        self.assertFalse(rmdirjob2.exists())
+        self.assertTrue(rmdirjob1.exists())
 
         # Now also close the second project, which should delete the analysis
         resp = self.cl.post(self.url, content_type='application/json',
@@ -1479,6 +1512,8 @@ class TestArchiveProject(BaseTest):
         self.assertTrue(self.ana.deleted)
         self.assertFalse(jm.Job.objects.filter(funcname='create_pdc_archive',
             kwargs={'sfloc_id': self.anasfile_sfl.pk, 'isdir': False}).exists())
+        self.assertTrue(rmjob2.exists())
+        self.assertTrue(rmdirjob2.exists())
 
 
 

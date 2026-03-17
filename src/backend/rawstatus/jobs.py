@@ -349,11 +349,16 @@ class DeleteEmptyDirectory(MultiFileJob):
 
     # Cannot check_error_on_creation because it is often called in a check_error dry run where
     # files are not set to active=False
-    def check_error_on_running(self, **kwargs):
-        if rm.StoredFileLoc.objects.filter(servershare_id=kwargs['share_id'], path=kwargs['path'],
-                purged=False):
-            ssname = rm.ServerShare.objects.filter(pk=kwargs['share_id']).values('name').get()['name']
-            return f'Cannot queue job to delete dir {kwargs["path"]} on {ssname}, there are files in it'
+    # Checks to see if there are files in the dir are not what we want, you will notice that
+    # when it fails. But we should not queue this at all if dirs are not empty according to DB:
+    # e.g. when an analysis shares a result with another. Then just not delete that dir.
+
+    def files_in_dir_existing(self, **kwargs):
+        '''In special cases this can be called to make sure a dir is empty. Cases like
+        identical file produced by two analysis
+        '''
+        return rm.StoredFileLoc.objects.filter(servershare_id=kwargs['share_id'], path=kwargs['path'],
+                active=True).exists()
 
     def process(self, **kwargs):
         fss = rm.FileserverShare.objects.filter(share_id=kwargs['share_id'],

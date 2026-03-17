@@ -1431,13 +1431,17 @@ def do_analysis_deletion(analysis):
                 return f'error trying to queue delete files job: {joberror}'
             rmdirkw = {'sfloc_ids': sfloc_ids, 'path': path, 'share_id': shareid}
             rmdirjobs.append(rmdirkw)
-            if joberror := check_job_error('delete_empty_directory', sfloc_ids=sfloc_ids):
+            if joberror := check_job_error('delete_empty_directory', **rmdirkw):
                 return f'error trying to queue delete files job: {joberror}'
         for sfloc_ids in purgejobs:
             create_job_without_check('purge_files', sfloc_ids=sfloc_ids)
             rm.StoredFileLoc.objects.filter(pk__in=sfloc_ids).update(active=False)
+        jwrap = jobmap['delete_empty_directory'](False)
         for rmdirkw in rmdirjobs:
-            create_job_without_check('delete_empty_directory', **rmdirkw)
+            # Check first if not files exist in dir, e.g. in case of multiple
+            # analyses. Skip delete dir in that case
+            if not jwrap.files_in_dir_existing(**rmdirkw):
+                create_job_without_check('delete_empty_directory', **rmdirkw)
         sfiles.update(deleted=True)
 
     # No more errors, mark for deletion

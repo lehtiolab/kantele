@@ -262,26 +262,27 @@ class BaseTest(TestCase):
         # Analysis files
         self.ana = am.Analysis.objects.create(name='anatesttest', user=self.user, base_rundir='fakerundir',
                 securityclass=rm.DataSecurityClass.NOSECURITY, success_completed=True)
-        anaft = rm.StoredFileType.objects.create(name=settings.ANALYSIS_FT_NAME, filetype='ana',
+        self.anaft = rm.StoredFileType.objects.create(name=settings.ANALYSIS_FT_NAME, filetype='ana',
                 is_rawdata=False)
         self.anaprod = rm.Producer.objects.create(name='analysisprod', client_id=settings.ANALYSISCLIENT_APIKEY, shortname=settings.PRODUCER_ANALYSIS_NAME)
         self.ana_raw = rm.RawFile.objects.create(name='ana_file', producer=self.anaprod,
                 source_md5='kjlmnop1234', size=100, date=timezone.now(), claimed=True,
                 usetype=rm.UploadFileType.ANALYSIS)
-        self.anasfile = rm.StoredFile.objects.create(rawfile=self.ana_raw, filetype=anaft,
+        self.anasfile = rm.StoredFile.objects.create(rawfile=self.ana_raw, filetype=self.anaft,
 
                 filename=self.ana_raw.name, md5=self.ana_raw.source_md5)
         am.AnalysisResultFile.objects.create(analysis=self.ana, sfile=self.anasfile)
         
         self.anasfile_sfl = rm.StoredFileLoc.objects.create(sfile=self.anasfile,
-                servershare=self.ssana, path='', active=True, purged=False)
+                servershare=self.ssana, path=self.ana.name, active=True, purged=False)
         self.ana_raw2 = rm.RawFile.objects.create(name='ana_file2', producer=self.anaprod,
                 source_md5='anarawabc1234', size=100, date=timezone.now(), claimed=True,
                 usetype=rm.UploadFileType.ANALYSIS)
         self.anasfile2 = rm.StoredFile.objects.create(rawfile=self.ana_raw2,
-                filetype_id=self.ft.id, filename=self.ana_raw2.name, filetype=anaft,
+                filetype_id=self.ft.id, filename=self.ana_raw2.name, filetype=self.anaft,
                     md5=self.ana_raw2.source_md5)
-        rm.StoredFileLoc.objects.create(sfile=self.anasfile2, servershare=self.ssana, path='',
+        am.AnalysisResultFile.objects.create(analysis=self.ana, sfile=self.anasfile2)
+        rm.StoredFileLoc.objects.create(sfile=self.anasfile2, servershare=self.ssana, path=self.ana.name,
                 active=True, purged=False)
 
 
