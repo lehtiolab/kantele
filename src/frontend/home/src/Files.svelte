@@ -123,7 +123,7 @@ async function archiveFiles() {
 <Table tab="Files" bind:items={files}
   bind:notif={notif}
   bind:selected={selectedFiles}
-  show_deleted_or_q="from:365d, from:yyyymmdd, to:, deleted:true/false, backup:true/false type:raw/analysis/shared/qc"
+  search_examples="from:365d, from:yyyymmdd, to:, deleted:true/false, backup:true/false type:raw/analysis/shared/qc"
   defaultQ="from:30d "
   fetchUrl="/show/files"
   findUrl="/show/files"

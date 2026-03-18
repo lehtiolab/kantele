@@ -1610,7 +1610,7 @@ def upload_servable_file(request):
 @login_required
 def find_datasets(request):
     searchterms = [x for x in request.GET['q'].split() if x != '']
-    dbdsets = dm.Dataset.query_creator(searchterms).filter(deleted=False)
+    dbdsets = dm.Dataset.objects.filter(dm.Dataset.query_creator(searchterms), deleted=False)
     dsets = {}
     qpid = dm.Datatype.get_quantprot_id()
     for d in dbdsets.select_related('runname__experiment__project', 'datatype',

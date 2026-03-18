@@ -116,7 +116,7 @@ async function getJobDetails(jobId) {
   fetchUrl="/show/jobs"
   findUrl="/show/jobs"
   defaultQ="state:active "
-  show_deleted_or_q="from:2025, to:20250701, state:active state:waiting state:queued, state:error state:old"
+  search_examples="from:2025, to:20250701, state:active state:waiting state:queued, state:error state:old"
   getdetails={getJobDetails}
   fixedbuttons={fixedbuttons}
   fields={tablefields}

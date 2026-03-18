@@ -82,43 +82,70 @@ def find_projects(userquery):
     return projects
 
 
-@login_required
-@require_GET
-def find_datasets(request):
-    """Loop through comma-separated q-param in GET, do a lot of OR queries on
-    datasets to find matches. String GET-derived q-params by AND."""
-    if searchterms := [x for x in request.GET['q'].split(',') if x != '']:
-        dbdsets = dm.Dataset.query_creator(searchterms)
-    else:
-        dbdsets = dsmodels.Dataset.objects.none()
-    if request.GET.get('deleted', 'false') == 'false':
-        dbdsets = dbdsets.filter(deleted=False)
-    dsids = [x['pk'] for x in dbdsets.values('pk')]
-    dsets = populate_dset(dsids, dbdsets, request.user)
-    return JsonResponse({'items': dsets, 'order': list(dsets.keys())})
+def find_datasets(userquery):
+    searchterms = []
+    parsed_query = Q()
+    for q in [x for x in userquery.split(',') if x != '']:
+        match q.split(':'):
+            case ['from', date]:
+                if dt := parse_userquery(date, 'date'):
+                    parsed_query &= Q(date__gte=dt)
+            case ['to', date]:
+                if dt := parse_userquery(date, 'date'):
+                    parsed_query &= Q(date__lte=dt)
+            case ['type', projtype]:
+                ptypename = {'cf': settings.CF_PTYPE_NAME}.get(projtype) or projtype
+                parsed_query &= Q(runname__experiment__project__ptype__name__iexact=ptypename)
+            case ['deleted', yesno]:
+                parsed_query &= Q(deleted={'yes': True, 'true': True, 'no': False, 'false': False}[yesno])
+            case ['user', username]:
+                parsed_query &= Q(datasetowner__user__username=username)
+            case _:
+                searchterms.append(q)
+    dbdsets = dm.Dataset.objects.filter(parsed_query)
+    if searchterms:
+        dbdsets = dbdsets.filter(dm.Dataset.query_creator(searchterms))
+    return dbdsets
 
 
-@login_required
-@require_GET
-def find_analysis(request):
+def find_analysis(userquery):
     """Loop through comma-separated q-param in GET, do a lot of OR queries on
     analysis to find matches. String GET-derived q-params by AND."""
-    searchterms = [x for x in request.GET['q'].split(',') if x != '']
-    query = Q()
-    wftypes = zip(anmodels.UserWorkflow.WFTypeChoices.choices, anmodels.UserWorkflow.WFTypeChoices.names)
-    for term in searchterms:
-        subquery = Q(name__icontains=term)
-        subquery |= Q(nextflowsearch__workflow__name__icontains=term)
-        subquery |= Q(user__username__icontains=term)
-        # WF types is integerchoice, search as such
-        match_wftypes = [x[0][0] for x in wftypes if term in x[0][1] or term in x[1]]
-        subquery |= Q(nextflowsearch__workflow__wftype__in=match_wftypes)
-        query &= subquery
-    dbanalyses = anmodels.Analysis.objects.filter(query)
-    if request.GET['deleted'] == 'false':
-        dbanalyses = dbanalyses.filter(deleted=False)
-    items, it_order = populate_analysis(dbanalyses.order_by('-date'), request.user)
-    return JsonResponse({'items': items, 'order': it_order})
+    searchterms = []
+    parsed_query = Q()
+    for q in [x for x in userquery.split(',') if x != '']:
+        match q.split(':'):
+            case ['from', date]:
+                if dt := parse_userquery(date, 'date'):
+                    parsed_query &= Q(date__gte=dt)
+            case ['to', date]:
+                if dt := parse_userquery(date, 'date'):
+                    parsed_query &= Q(date__lte=dt)
+            case ['deleted', yesno]:
+                parsed_query &= Q(deleted={'yes': True, 'true': True, 'no': False, 'false': False}[yesno])
+            case ['type', wftypename]:
+                try:
+                    wftype = anmodels.UserWorkflow.WFTypeChoices[wftypename.upper()]
+                except KeyError:
+                    pass
+                else:
+                    parsed_query &= Q(nextflowsearch__workflow__wftype=wftype)
+            case ['success', yesno]:
+                parsed_query &= Q(success_completed={'yes': True, 'true': True, 'no': False, 'false': False}[yesno])
+            case ['user', username]:
+                parsed_query &= Q(user__username=username)
+            case _:
+                searchterms.append(q)
+    dbanalyses = anmodels.Analysis.objects.filter(parsed_query)
+    if searchterms:
+        freetextq = Q()
+        for term in searchterms:
+            subquery = Q(name__icontains=term)
+            subquery |= Q(nextflowsearch__workflow__name__icontains=term)
+            subquery |= Q(user__username__icontains=term)
+            freetextq &= subquery
+        dbanalyses = dbanalyses.filter(freetextq)
+    return dbanalyses
 
 
 @login_required
@@ -127,6 +154,8 @@ def show_analyses(request):
     if 'ids' in request.GET:
         ids = request.GET['ids'].split(',')
         dbanalyses = anmodels.Analysis.objects.filter(pk__in=ids)
+    elif userq := request.GET.get('q'):
+        dbanalyses = find_analysis(userq)
     else:
         # last 6month analyses of a user plus current analyses PENDING/PROCESSING
         run_ana = anmodels.Analysis.objects.select_related('nextflowsearch__workflow').filter(
@@ -159,12 +188,13 @@ def show_datasets(request):
     if 'ids' in request.GET:
         dsids = request.GET['ids'].split(',')
         dbdsets = dsmodels.Dataset.objects.filter(pk__in=dsids)
+    elif userq := request.GET.get('q'):
+        dbdsets = find_datasets(userq)
     else:
         # last month datasets of a user
         dbdsets = dsmodels.Dataset.objects.filter(deleted=False, datasetowner__user_id=request.user.id,
                                                   date__gt=datetime.today() - timedelta(30))
-        dsids = [x['pk'] for x in dbdsets.values('pk')]
-    dsets = populate_dset(dsids, dbdsets, request.user)
+    dsets = populate_dset(dbdsets, request.user)
     return JsonResponse({'items': dsets, 'order': list(dsets.keys())})
 
 
@@ -533,11 +563,11 @@ def get_proj_info(request, proj_id):
     return JsonResponse(info)
 
 
-def populate_dset(dsids, dbdsets, user):
+def populate_dset(dbdsets, user):
     dsets = OrderedDict()
     dsjobmap = defaultdict(list)
     for job in jm.Job.objects.filter(
-            filejob__rawfile__datasetrawfile__dataset_id__in=dsids
+            filejob__rawfile__datasetrawfile__dataset__in=dbdsets
             ).exclude(state__in=jj.JOBSTATES_DONE).distinct('pk').values('state', 'pk',
                     'filejob__rawfile__datasetrawfile__dataset_id'):
         dsid = job['filejob__rawfile__datasetrawfile__dataset_id']
@@ -773,7 +803,7 @@ def refresh_project(request, proj_id):
 @login_required
 def refresh_dataset(request, dset_id):
     dbdset = dsmodels.Dataset.objects.filter(pk=dset_id)
-    dsetdict = populate_dset([dset_id], dbdset, request.user)
+    dsetdict = populate_dset(dbdset, request.user)
     return JsonResponse(dsetdict[dset_id])
 
 
