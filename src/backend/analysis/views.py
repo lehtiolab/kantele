@@ -1374,9 +1374,9 @@ def do_analysis_deletion(analysis):
     # FIXME analysisdeleted tracking no longer needed when we backup etc
     # implement a log instead
     am.AnalysisDeleted.objects.update_or_create(analysis=analysis)
-    if jobq := jm.Job.objects.filter(nextflowsearch__analysis=analysis).exclude(state__in=[
-                jj.Jobstates.DONE, jj.Jobstates.REVOKING, jj.Jobstates.CANCELED]):
-        jv.cancel_or_revoke_job(jobq)
+    jm.Job.objects.filter(nextflowsearch__analysis=analysis).exclude(state__in=[
+                jj.Jobstates.DONE, jj.Jobstates.REVOKING, jj.Jobstates.CANCELED]).update(
+                state=jj.Jobstates.REVOKING)
     if analysis.success_completed:
         # Back up files if that for some reason (old analysis) hasnt happened earlier
         backup_jobs = []
@@ -1487,8 +1487,7 @@ def stop_analysis(request):
     if not request.user.is_superuser and not anaq.exists():
         return JsonResponse({'error': 'Analysis does not exist or you dont have permission'}, status=403)
     anaq.update(editable=True)
-    jobq = jm.Job.objects.filter(nextflowsearch__analysis_id=req['item_id'])
-    jv.cancel_or_revoke_job(jobq)
+    jm.Job.objects.filter(nextflowsearch__analysis_id=req['item_id']).update(state=jj.Jobstates.REVOKING)
     return JsonResponse({})
 
 
