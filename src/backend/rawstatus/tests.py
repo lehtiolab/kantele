@@ -478,6 +478,8 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertEqual(rsjobs.count(), 1)
         self.assertEqual(nfrsjobs.count(), 1)
         self.assertEqual(qcjobs.count(), 1)
+        self.run_job() # run backup
+        jm.Task.objects.filter(job__funcname='create_pdc_archive').update(state=states.SUCCESS)
         self.run_job() # run rsync to analysis of both raw and nfconfig files
         self.run_job() # run qc
         qcrun = dashm.QCRun.objects.last()
@@ -785,13 +787,13 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertEqual(mvjobs.filter(state=jj.Jobstates.PENDING).count(), 1)
         self.assertEqual(backupjobs.filter(state=jj.Jobstates.PENDING).count(), 1)
         self.assertEqual(mzmljobs.filter(state=jj.Jobstates.PENDING).count(), 1)
-        self.run_job()
-        self.assertEqual(mvjobs.filter(state=jj.Jobstates.PROCESSING).count(), 1)
-        self.assertEqual(mzmljobs.filter(state=jj.Jobstates.PENDING).count(), 1)
-        self.assertEqual(backupjobs.filter(state=jj.Jobstates.PENDING).count(), 1)
-        self.run_job()
+        self.run_job() # run backup
         self.assertEqual(backupjobs.filter(state=jj.Jobstates.PROCESSING).count(), 1)
         backupjobs.get().task_set.update(state=states.SUCCESS)
+        self.run_job() # run rsync
+        self.assertEqual(mvjobs.filter(state=jj.Jobstates.PROCESSING).count(), 1)
+        self.assertEqual(mzmljobs.filter(state=jj.Jobstates.PENDING).count(), 1)
+        #self.run_job()
         self.run_job()
         self.assertEqual(mzmljobs.filter(state=jj.Jobstates.PROCESSING).count(), 1)
 
