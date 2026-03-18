@@ -3,6 +3,7 @@ from datetime import timedelta, datetime
 import json
 from base64 import b64encode
 from celery import states as tstates
+from itertools import chain
 
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
@@ -1312,7 +1313,7 @@ def show_messages(request):
         ).values('msg_id', 'msg__txt', 'msg__shown', 'msg__date', 'dset_id')
     anamsgs = hm.AnalysisMessage.objects.filter(msg__user=request.user, msg__deleted=False
         ).values('msg_id', 'msg__txt', 'msg__shown', 'msg__date', 'analysis_id')
-    allmsgs = anamsgs.union(dsetmsgs)
+    allmsgs = chain(anamsgs, dsetmsgs)
 
     out['messages'] = {x['msg_id']: {'txt': x['msg__txt'], 'shown': x['msg__shown'], 'date': x['msg__date'], 'link_id': x.get('dset_id', x.get('analysis_id')), 'linkpath': 'datasets' if x.get('dset_id') else 'analyses'} for x in allmsgs}
 
