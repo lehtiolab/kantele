@@ -746,13 +746,16 @@ def populate_proj(dbprojs, user, showjobs=True, include_db_entry=False):
             ).annotate(greatdate=Greatest('dsmax', 'anamax')).order_by('-greatdate'
             ).values('pk', 'name', 'active', 'registered', 'ptype__name', 'greatdate'):
         order.append(proj['pk'])
+        dset_q = models.Dataset.objects.filter(runname__experiment__project_id=proj['pk'])
         projs[proj['pk']] = {
             'id': proj['pk'],
             'name': proj['name'],
             'inactive': proj['active'] == False,
             'start': datetime.strftime(proj['registered'], '%Y-%m-%d %H:%M'),
             'ptype': proj['ptype__name'],
-            'dset_ids': [x['pk'] for x in models.Dataset.objects.filter(runname__experiment__project_id=proj['pk']).values('pk')],
+            'dset_ids': [x['pk'] for x in dset_q.values('pk')],
+            'ana_ids': [x['pk'] for x in am.Analysis.objects.filter(
+                datasetanalysis__dataset__in=dset_q).values('pk').distinct('pk')],
             'details': False,
             'selected': False,
             'lastactive': datetime.strftime(proj['greatdate'], '%Y-%m-%d %H:%M') if proj['greatdate'] else '-',

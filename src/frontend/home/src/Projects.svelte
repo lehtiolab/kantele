@@ -31,6 +31,7 @@ $: newProjIsExternal = Boolean(newproj_ptype_id !== local_ptype_id);
 const tablefields = [
   {id: 'name', name: 'Name', type: 'str', multi: false},
   {id: 'datasets', name: '', help: 'Datasets', type: 'icon', icon: 'clipboard-list', multi: false, links: 'dset_ids', linkroute: '#/datasets'},
+  {id: 'analyses', name: '', help: 'Analyses', type: 'icon', icon: 'cogs', links: 'ana_ids', linkroute: '#/analyses'},
   {id: 'ptype', name: 'Type', type: 'str', multi: false},
   {id: 'start', name: 'Registered', type: 'str', multi: false},
   {id: 'lastactive', name: 'Last active', type: 'str', multi: false},
