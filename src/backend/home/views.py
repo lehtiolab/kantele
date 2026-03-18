@@ -551,19 +551,19 @@ def get_proj_info(request, proj_id):
             rawfile__datasetrawfile__dataset__runname__experiment__project=proj)
     nr_files = files.values('filetype__name').annotate(ftcount=Count('filetype__name')).order_by()
     dsets = dsmodels.Dataset.objects.filter(runname__experiment__project=proj)
-    info = {'owners': [x['datasetowner__user__username'] for x in dsets.values('datasetowner__user__username').distinct()],
+    info = {'id': proj_id,
+            'owners': [x['datasetowner__user__username'] for x in dsets.values('datasetowner__user__username').distinct()],
             'stored_total_xbytes': getxbytes(files.aggregate(Sum('rawfile__size'))['rawfile__size__sum']),
             'nrstoredfiles': {x['filetype__name']: x['ftcount'] for x in nr_files},
             'name': proj.name,
-            'pi': proj.pi.name,
+            'ptype_id': proj.ptype_id,
+            'pi_id': proj.pi_id,
+            'extref': proj.externalref,
             'regdate': datetime.strftime(proj.registered, '%Y-%m-%d %H:%M'),
             'type': proj.ptype.name,
             'instruments': [x['rawfile__producer__name'] for x in
                 files.values('rawfile__producer__name').distinct()],
             'nrdsets': dsets.count(),
-            'nrbackupfiles': filemodels.SwestoreBackedupFile.objects.filter(
-                storedfile__rawfile__datasetrawfile__dataset__runname__experiment__project_id=proj_id).count() + filemodels.PDCBackedupFile.objects.filter(
-                    storedfile__rawfile__datasetrawfile__dataset__runname__experiment__project_id=proj_id).count(),
         }
     return JsonResponse(info)
 
@@ -1047,18 +1047,15 @@ def fetch_dset_details(dset):
     else:
         nrstoredfiles = {nonms_dtypes[dset.datatype_id]: rawfiles.count()}
     info['nrstoredfiles'] = nrstoredfiles
-    info['nrbackupfiles'] = filemodels.PDCBackedupFile.objects.filter(
-        storedfile__rawfile__datasetrawfile__dataset_id=dset.id).count()
-    info['compstates'] = {
-dsmodels.DatasetUIComponent(x.dtcomp.component).name: x.state for x in
-                          dsmodels.DatasetComponentState.objects.filter(
-                              dataset_id=dset.id).select_related('dtcomp')}
+    info['compstates'] = {dsmodels.DatasetUIComponent(x.dtcomp.component).name: x.state for x in
+            dsmodels.DatasetComponentState.objects.filter(dataset_id=dset.id).select_related('dtcomp')}
     return info
 
 
 @login_required
 @require_POST
 def create_mzmls(request):
+    # FIXME this is really slow somehow
     '''It is assumed that a dataset's files all come from the same instrument,
     and therefore need the same parameters when creating mzML files'''
     data = json.loads(request.body.decode('utf-8'))

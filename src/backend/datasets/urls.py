@@ -34,7 +34,7 @@ urlpatterns = [
     path('save/samples/', views.save_samples),
     path('save/labelcheck/', views.save_labelcheck),
     path('save/owner/', views.change_owners, name="changeowner"),
-    path('rename/project/', views.rename_project),
+    path('update/project/', views.update_project),
     path('merge/projects/', views.merge_projects),
     path('archive/dataset/', views.move_dataset_cold),
     path('archive/project/', views.close_project),

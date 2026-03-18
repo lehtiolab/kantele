@@ -22,8 +22,8 @@ let newproj_name;
 let newproj_ptype_id = local_ptype_id;
 let newproj_piname;
 let newproj_newpiname = '';
-let newproj_pi_id;
-let newproj_extref;
+let newproj_pi_id = '';
+let newproj_extref = '';
 let projects;
 $: newProjIsExternal = Boolean(newproj_ptype_id !== local_ptype_id);
 
@@ -71,8 +71,8 @@ function setConfirm() {
 async function getProjDetails(projid) {
 	const resp = await getJSON(`/show/project/${projid}`);
   return `
-    <p><span class="has-text-weight-bold">Storage amount:</span> ${resp.stored_total_xbytes}</p>
-    <p><span class="has-text-weight-bold">Owners:</span> ${resp.owners.join(', ')}</p>
+    <p><span class="has-text-weight-bold">Storage amount: </span> ${resp.stored_total_xbytes}</p>
+    <p><span class="has-text-weight-bold">Owners: </span> ${resp.owners.join(', ')}</p>
     <hr>
     ${Object.entries(resp.nrstoredfiles).map(x => {return `<div>${x[1]} stored files of type ${x[0]}</div>`;}).join('')}
     <div>Instrument(s) used: <b>${resp.instruments.join(', ')}</b></div>
@@ -117,8 +117,8 @@ function cancelNewProject() {
   newproj_ptype_id = local_ptype_id;
   newproj_piname = '';
   newproj_newpiname = '';
-  newproj_pi_id = false;
-  newproj_extref = false;
+  newproj_pi_id = '';
+  newproj_extref = '';
 }
 
 async function saveProject() {

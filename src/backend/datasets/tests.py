@@ -496,8 +496,8 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
             state=dm.DCStates.OK).exists())
 
 
-class RenameProjectTest(BaseIntegrationTest):
-    url = '/datasets/rename/project/'
+class UpdateProjectTest(BaseIntegrationTest):
+    url = '/datasets/update/project/'
 
     def test_no_ownership_fail(self):
         run = dm.RunName.objects.create(name='someoneelsesrun', experiment=self.exp1)
@@ -508,36 +508,39 @@ class RenameProjectTest(BaseIntegrationTest):
         otheruser = User.objects.create(username='test', password='test')
         dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'projid': self.p1.pk, 'newname': 'testnewp'})
+                data={'projid': self.p1.pk, 'newname': 'testnewp', 'pi_id': self.p1.pi_id,
+                    'ptype_id': self.p1.ptype_id, 'extref': self.p1.externalref, 'newpiname': ''})
         self.assertEqual(resp.status_code, 403)
 
     def test_id_name_fails(self):
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'projid': self.p1.pk, 'newname': self.p1.name})
-        self.assertEqual(resp.status_code, 403)
-        resp = self.cl.post(self.url, content_type='application/json',
-                data={'projid': self.p1.pk+1000, 'newname': 'testnewname'})
+                data={'projid': self.p1.pk+1000, 'newname': 'testnewp', 'pi_id': self.p1.pi_id,
+                    'ptype_id': self.p1.ptype_id, 'extref': self.p1.externalref, 'newpiname': ''})
         self.assertEqual(resp.status_code, 404)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'projid': self.p1.pk, 'newname': 'testnewname with spaces'})
+                data={'projid': self.p1.pk, 'newname': 'testnewp with spaces', 'pi_id': self.p1.pi_id,
+                    'ptype_id': self.p1.ptype_id, 'extref': self.p1.externalref, 'newpiname': ''})
         self.assertEqual(resp.status_code, 403)
         self.assertIn(f'cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}',
                 json.loads(resp.content)['error'])
         oldp = dm.Project.objects.create(name='project to rename', pi=self.pi, ptype=self.ptype)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'projid': oldp.pk, 'newname': self.p1.name})
+                data={'projid': self.oldp.pk, 'newname': self.p1.name, 'pi_id': self.p1.pi_id,
+                    'ptype_id': self.p1.ptype_id, 'extref': self.p1.externalref, 'newpiname': ''})
         self.assertEqual(resp.status_code, 403)
-        self.assertIn('Cannot change name to existing name for project', resp.json()['error'])
+        self.assertIn(f'Cannot change name to existing name {self.p1.name}', resp.json()['error'])
         self.assertFalse(dm.ProjectLog.objects.exists())
 
     def test_rename_ok(self):
         newname = 'testnewname'
         self.assertEqual(dm.Project.objects.filter(name=newname).count(), 0)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'projid': self.p1.pk, 'newname': newname})
+                data={'projid': self.p1.pk, 'newname': newname, 'pi_id': '',
+                    'ptype_id': self.p1.ptype_id, 'extref': 'updated ext ref',
+                    'newpiname': 'new pi name'})
         self.assertEqual(resp.status_code, 200)
-        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.id} renamed project '
-            f'from {self.p1.name} to {newname}').exists())
+        self.assertTrue(dm.ProjectLog.objects.filter(message__startswith=f'User {self.user.id} updated project '
+            f'from {self.p1.name} -> {newname}').exists())
         old_loc = self.dss.storage_loc
         new_loc = os.path.join(newname, self.exp1.name, self.dtype.name, self.run1.name)
         renamejobs = jm.Job.objects.filter(funcname='rename_dset_storage_loc',
@@ -546,6 +549,8 @@ class RenameProjectTest(BaseIntegrationTest):
         self.assertEqual(renamejobs.count(), 1)
         self.p1.refresh_from_db()
         self.assertEqual(self.p1.name, newname)
+        self.assertEqual(self.p1.pi.name, 'new pi name')
+        self.assertEqual(self.p1.externalref, 'updated ext ref')
         self.assertTrue(os.path.exists(self.f3path))
         self.dss.refresh_from_db()
         self.assertEqual(self.dss.storage_loc_ui, new_loc)
@@ -561,16 +566,21 @@ class RenameProjectTest(BaseIntegrationTest):
         # first rename job http request, then add files, then jobs run:
         newname = 'testnewname'
         self.assertEqual(dm.Project.objects.filter(name=newname).count(), 0)
+        newpi = dm.PrincipalInvestigator.objects.create(name='new test pi updated')
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'projid': self.p1.pk, 'newname': newname})
+                data={'projid': self.p1.pk, 'newname': newname, 'pi_id': newpi.pk,
+                    'ptype_id': self.p1.ptype_id, 'extref': self.p1.externalref, 'newpiname': ''})
         self.assertEqual(resp.status_code, 200)
         new_loc = os.path.join(newname, self.exp1.name, self.dtype.name, self.run1.name)
         renamejobs = jm.Job.objects.filter(funcname='rename_dset_storage_loc',
                 kwargs={'dss_id': self.dss.pk, 'newpath': new_loc,
                     'sfloc_ids': [self.f3sss.pk, self.f3mzsss.pk]}) 
         self.assertEqual(renamejobs.count(), 1)
+        oldextref = self.p1.externalref
         self.p1.refresh_from_db()
         self.assertEqual(self.p1.name, newname)
+        self.assertEqual(self.p1.pi, newpi)
+        self.assertEqual(self.p1.externalref, oldextref)
         # add files results in a job and claimed files still on tmp
         mvresp = self.cl.post('/datasets/save/files/', content_type='application/json', data={
             'dataset_id': self.ds.pk, 'added_files': {self.tmpsf.pk: {'id': self.tmpsf.pk}},
@@ -621,10 +631,11 @@ class RenameProjectTest(BaseIntegrationTest):
         # make sure dset empty
         self.f3raw.delete()
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'projid': self.p1.pk, 'newname': newname})
+                data={'projid': self.p1.pk, 'newname': newname, 'pi_id': self.p1.pi_id,
+                    'ptype_id': self.p1.ptype_id, 'extref': self.p1.externalref, 'newpiname': ''})
         self.assertEqual(resp.status_code, 200)
-        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.id} renamed project '
-            f'from {self.p1.name} to {newname}').exists())
+        self.assertTrue(dm.ProjectLog.objects.filter(message__startswith=f'User {self.user.id} updated project '
+            f'from {self.p1.name} -> {newname}').exists())
         old_loc = self.dss.storage_loc
         new_loc = os.path.join(newname, self.exp1.name, self.dtype.name, self.run1.name)
         renamejobs = jm.Job.objects.filter(funcname='rename_dset_storage_loc',

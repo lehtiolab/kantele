@@ -6,6 +6,8 @@ from jobs.models import Job
 
 
 class PrincipalInvestigator(models.Model):
+    # Not for actual accounting (that would be external reference on the project table)
+    # more for staff to know who to contact for an active project
     name = models.TextField(max_length=100)
 
     def __str__(self):
