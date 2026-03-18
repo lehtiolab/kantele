@@ -354,13 +354,18 @@ def show_jobs(request):
         analysis = jv.get_job_analysis(job)
         items[job.id] = {'id': job.id, 'name': job.funcname,
                          'state': job.state,
-                         'canceled': job.state == jj.Jobstates.CANCELED,
+                         'canceled': job.state in [jj.Jobstates.CANCELED, jj.Jobstates.REVOKING],
                          'usr': ', '.join(ownership['usernames']),
                          'date': datetime.strftime(job.timestamp, '%Y-%m-%d'),
                          'analysis': analysis.id if analysis else False,
                          'actions': get_job_actions(job, ownership)}
-        items[job.id]['fn_ids'] = [x['pk'] for x in filemodels.StoredFile.objects.filter(
-            rawfile__in=job.filejob_set.all().values('rawfile')).values('pk')]
+        if sfloc := job.kwargs.get('sfloc_ids', False):
+            sfs = filemodels.StoredFile.objects.filter(storedfileloc__pk__in=sfloc)
+        elif slfoc := job.kwargs.get('sfloc_id', False):
+            sfs = filemodels.StoredFile.objects.filter(storedfileloc__pk=sfloc)
+        else:
+            sfs = filemodels.StoredFile.objects.none()
+        items[job.id]['fn_ids'] = [x['pk'] for x in sfs.values('pk')]
         if dss := job.kwargs.get('dss_id', False):
             dsets = dm.Dataset.objects.filter(datasetserver__pk=dss)
         elif dss := job.kwargs.get('dss_ids', False):
