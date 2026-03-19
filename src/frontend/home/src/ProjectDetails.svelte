@@ -110,5 +110,19 @@ onMount(async() => {
     <label class="label">External reference</label>
     <input class="input" type="text" bind:value={proj.extref} placeholder="Optional: reference to external system (e.g. iLab)">
   </div>
+
+  <hr />
+
+  <h5 class="title is-5">Log</h5>
+  <table class="table">
+  {#each proj.log as l}
+  <tr>
+    <td>{l.date}</td>
+    <td>{l.msg}</td>
+  </tr>
+  {/each}
+  </table>
+
   {/if}
+ 
 </DetailBox>

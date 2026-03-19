@@ -546,24 +546,28 @@ def populate_analysis(analyses, user):
 
 @login_required
 def get_proj_info(request, proj_id):
-    proj = dsmodels.Project.objects.filter(pk=proj_id).select_related('ptype', 'pi').get()
+    proj = dsmodels.Project.objects.filter(pk=proj_id).values('ptype_id', 'ptype__name', 'name',
+            'externalref', 'registered', 'pi_id').get()
     files = filemodels.StoredFile.objects.filter(mzmlfile__isnull=True,
-            rawfile__datasetrawfile__dataset__runname__experiment__project=proj)
+            rawfile__datasetrawfile__dataset__runname__experiment__project_id=proj_id)
     nr_files = files.values('filetype__name').annotate(ftcount=Count('filetype__name')).order_by()
-    dsets = dsmodels.Dataset.objects.filter(runname__experiment__project=proj)
+    dsets = dsmodels.Dataset.objects.filter(runname__experiment__project_id=proj_id)
     info = {'id': proj_id,
             'owners': [x['datasetowner__user__username'] for x in dsets.values('datasetowner__user__username').distinct()],
             'stored_total_xbytes': getxbytes(files.aggregate(Sum('rawfile__size'))['rawfile__size__sum']),
             'nrstoredfiles': {x['filetype__name']: x['ftcount'] for x in nr_files},
-            'name': proj.name,
-            'ptype_id': proj.ptype_id,
-            'pi_id': proj.pi_id,
-            'extref': proj.externalref,
-            'regdate': datetime.strftime(proj.registered, '%Y-%m-%d %H:%M'),
-            'type': proj.ptype.name,
+            'name': proj['name'],
+            'ptype_id': proj['ptype_id'],
+            'pi_id': proj['pi_id'],
+            'extref': proj['externalref'],
+            'regdate': datetime.strftime(proj['registered'], '%Y-%m-%d %H:%M'),
+            'type': proj['ptype__name'],
             'instruments': [x['rawfile__producer__name'] for x in
                 files.values('rawfile__producer__name').distinct()],
             'nrdsets': dsets.count(),
+            'log': [{'date': x['date'], 'msg': x['message']} for x in
+                dsmodels.ProjectLog.objects.filter(project_id=proj_id).order_by('date').values(
+                    'date', 'message')],
         }
     return JsonResponse(info)
 
