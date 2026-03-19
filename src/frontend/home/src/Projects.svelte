@@ -22,8 +22,8 @@ let newproj_name;
 let newproj_ptype_id = local_ptype_id;
 let newproj_piname;
 let newproj_newpiname = '';
-let newproj_pi_id;
-let newproj_extref;
+let newproj_pi_id = '';
+let newproj_extref = '';
 let projects;
 $: newProjIsExternal = Boolean(newproj_ptype_id !== local_ptype_id);
 
@@ -31,6 +31,7 @@ $: newProjIsExternal = Boolean(newproj_ptype_id !== local_ptype_id);
 const tablefields = [
   {id: 'name', name: 'Name', type: 'str', multi: false},
   {id: 'datasets', name: '', help: 'Datasets', type: 'icon', icon: 'clipboard-list', multi: false, links: 'dset_ids', linkroute: '#/datasets'},
+  {id: 'analyses', name: '', help: 'Analyses', type: 'icon', icon: 'cogs', links: 'ana_ids', linkroute: '#/analyses'},
   {id: 'ptype', name: 'Type', type: 'str', multi: false},
   {id: 'start', name: 'Registered', type: 'str', multi: false},
   {id: 'lastactive', name: 'Last active', type: 'str', multi: false},
@@ -70,8 +71,8 @@ function setConfirm() {
 async function getProjDetails(projid) {
 	const resp = await getJSON(`/show/project/${projid}`);
   return `
-    <p><span class="has-text-weight-bold">Storage amount:</span> ${resp.stored_total_xbytes}</p>
-    <p><span class="has-text-weight-bold">Owners:</span> ${resp.owners.join(', ')}</p>
+    <p><span class="has-text-weight-bold">Storage amount: </span> ${resp.stored_total_xbytes}</p>
+    <p><span class="has-text-weight-bold">Owners: </span> ${resp.owners.join(', ')}</p>
     <hr>
     ${Object.entries(resp.nrstoredfiles).map(x => {return `<div>${x[1]} stored files of type ${x[0]}</div>`;}).join('')}
     <div>Instrument(s) used: <b>${resp.instruments.join(', ')}</b></div>
@@ -116,8 +117,8 @@ function cancelNewProject() {
   newproj_ptype_id = local_ptype_id;
   newproj_piname = '';
   newproj_newpiname = '';
-  newproj_pi_id = false;
-  newproj_extref = false;
+  newproj_pi_id = '';
+  newproj_extref = '';
 }
 
 async function saveProject() {
@@ -230,7 +231,7 @@ async function mergeProjects() {
   fetchUrl="/show/projects"
   findUrl="/show/projects"
   defaultQ="active:true "
-  show_deleted_or_q="type:cf, from:2025, to:20250801, from:202504, active:true/false/yes/no, user:username"
+  search_examples="type:cf, from:2025, to:20250801, from:202504, active:true/false/yes/no, user:username"
   getdetails={getProjDetails}
   fixedbuttons={fixedbuttons}
   fields={tablefields}

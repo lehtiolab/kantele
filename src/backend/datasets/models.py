@@ -6,6 +6,8 @@ from jobs.models import Job
 
 
 class PrincipalInvestigator(models.Model):
+    # Not for actual accounting (that would be external reference on the project table)
+    # more for staff to know who to contact for an active project
     name = models.TextField(max_length=100)
 
     def __str__(self):
@@ -117,6 +119,34 @@ class Dataset(models.Model):
     purged = models.BooleanField(default=False) # for UI only, indicate permanent deleted from cold storage too
     locked = models.BooleanField(default=False)
 
+    @staticmethod
+    def query_creator(searchterms):
+        query = Q(runname__name__icontains=searchterms[0])
+        query |= Q(runname__experiment__name__icontains=searchterms[0])
+        query |= Q(runname__experiment__project__name__icontains=searchterms[0])
+        query |= Q(datatype__name__icontains=searchterms[0])
+        try:
+            float(searchterms[0])
+        except ValueError:
+            pass
+        else:
+            query |= Q(prefractionationdataset__hiriefdataset__hirief__start=searchterms[0])
+            query |= Q(prefractionationdataset__hiriefdataset__hirief__end=searchterms[0])
+        for term in searchterms[1:]:
+            subquery = Q(runname__name__icontains=term)
+            subquery |= Q(runname__experiment__name__icontains=term)
+            subquery |= Q(runname__experiment__project__name__icontains=term)
+            subquery |= Q(datatype__name__icontains=term)
+            try:
+                float(term)
+            except ValueError:
+                pass
+            else:
+                subquery |= Q(prefractionationdataset__hiriefdataset__hirief__start=term)
+                subquery |= Q(prefractionationdataset__hiriefdataset__hirief__end=term)
+            query &= subquery
+        return query
+
 
 class DatasetServer(models.Model):
     '''
@@ -153,35 +183,6 @@ class DatasetServer(models.Model):
                 models.UniqueConstraint(fields=['storageshare', 'storage_loc_ui'], name='uni_dsloc_ui'),
                 models.UniqueConstraint(fields=['dataset', 'storageshare'], name='uni_dsshare'),
                 ]
-
-    @classmethod
-    def query_creator(cls, searchterms):
-        query = Q(runname__name__icontains=searchterms[0])
-        query |= Q(runname__experiment__name__icontains=searchterms[0])
-        query |= Q(runname__experiment__project__name__icontains=searchterms[0])
-        query |= Q(datatype__name__icontains=searchterms[0])
-        try:
-            float(searchterms[0])
-        except ValueError:
-            pass
-        else:
-            query |= Q(prefractionationdataset__hiriefdataset__hirief__start=searchterms[0])
-            query |= Q(prefractionationdataset__hiriefdataset__hirief__end=searchterms[0])
-        for term in searchterms[1:]:
-            subquery = Q(runname__name__icontains=term)
-            subquery |= Q(runname__experiment__name__icontains=term)
-            subquery |= Q(runname__experiment__project__name__icontains=term)
-            subquery |= Q(datatype__name__icontains=term)
-            try:
-                float(term)
-            except ValueError:
-                pass
-            else:
-                subquery |= Q(prefractionationdataset__hiriefdataset__hirief__start=term)
-                subquery |= Q(prefractionationdataset__hiriefdataset__hirief__end=term)
-            query &= subquery
-        return cls.objects.filter(query)
-
 
 
 class DatasetOwner(models.Model):

@@ -132,7 +132,9 @@ async function unDeleteAnalyses() {
  bind:notif={notif}
  bind:selected={selectedAnalyses}
  fetchUrl="/show/analyses"
- findUrl="/find/analyses"
+ findUrl="/show/analyses"
+ defaultq=""
+ search_examples="type:pisep/std/spec/... from:20250801 to:2025 deleted:yes/no success:yes/no user:yourname"
  on:detailview={showDetails}
  getdetails={getAnalysisDetails}
  fixedbuttons={fixedbuttons}

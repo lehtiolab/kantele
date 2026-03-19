@@ -469,7 +469,7 @@ def classified_rawfile_treatment(request):
         token, fnid, is_qc_acqtype, dsid = data['token'], data['fnid'], data['qc'], data['dset_id']
         mstime, error = data['mstime'], data['error']
     except KeyError as error:
-        return JsonResponse({'error': 'Bad request'}, status=400)
+        return JsonResponse({'error': f'Bad request: {error}'}, status=400)
     upload = UploadToken.validate_token(token, [])
     if not upload:
         return JsonResponse({'error': 'Token invalid or expired'}, status=403)
@@ -478,6 +478,10 @@ def classified_rawfile_treatment(request):
 
     mstime = mstime if mstime else 0
     success = not error
+    if success := not error:
+        # Errored classify-file task has possibly corrupt file, manual check required so no
+        # backup yet
+        create_job('create_pdc_archive', sfloc_id=sfloc.pk, isdir=sfloc.sfile.filetype.is_folder)
     msf, cr = MSFileData.objects.get_or_create(rawfile_id=sfloc.sfile.rawfile_id,
             defaults={'mstime': mstime, 'errmsg': error, 'success': success})
     if not cr:
@@ -551,10 +555,6 @@ def classified_rawfile_treatment(request):
             print(f'Classify task error for task {data["task_id"]} - dataset {dsid} already has '
                     'files, more files cannot be added automatically via rawfile classification')
 
-    if not error:
-        # Errored classify-file task has possibly corrupt file, manual check required so no
-        # backup yet
-        create_job('create_pdc_archive', sfloc_id=sfloc.pk, isdir=sfloc.sfile.filetype.is_folder)
     updated = jm.Task.objects.filter(asyncid=data['task_id']).update(state=taskstates.SUCCESS)
     return HttpResponse()
 
@@ -714,7 +714,7 @@ def archive_file(request):
 
 
 def process_file_confirmed_ready(rfn, sfn, sfloc, upload, desc):
-    """Processing of backup, QC, library/userfile after transfer has succeeded
+    """Processing of incoming files to QC, dset, library/userfile after transfer has succeeded
     (MD5 checked) for newly arrived MS other raw data files (not for analysis etc)
     Files that are for archiving only are also deleted from the archive share after
     backing up.

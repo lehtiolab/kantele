@@ -717,22 +717,24 @@ def save_new_project(request):
         data['pi_id'], data['ptype_id'], data['name'], data['extref']
     except KeyError:
         return JsonResponse({'error': 'Please fill in the fields'}, status=400)
-    if 'newpiname' in data:
-        pi_id = models.PrincipalInvestigator.objects.create(name=data['newpiname']).pk
+
+    if is_invalid_proj_exp_runnames(data['name']):
+        return JsonResponse({'error': f'Project name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
     elif data['ptype_id'] == settings.LOCAL_PTYPE_ID:
-        # FIXME set internal PI in conf/settings maybe, or do we even need one since this is
-        # a ONE-PI-SYSTEM!
+        # FIXME set internal PI in conf/settings maybe
         pi_id = INTERNAL_PI_PK
     else:
         try:
             pi_id = int(data['pi_id'])
         except ValueError:
             return JsonResponse({'error': 'Please select a PI'}, status=403)
-    try:
-        project = models.Project.objects.create(name=data['name'], pi_id=pi_id,
-                ptype_id=data['ptype_id'], externalref=data['extref'])
-    except IntegrityError:
+
+    if models.Project.objects.filter(name=data['name']):
         return JsonResponse({'error': 'Project name already exists'}, status=403)
+    if 'newpiname' in data:
+        pi_id = models.PrincipalInvestigator.objects.create(name=data['newpiname']).pk
+    project = models.Project.objects.create(name=data['name'], pi_id=pi_id,
+            ptype_id=data['ptype_id'], externalref=data['extref'])
     tableproject, _order = populate_proj(models.Project.objects.filter(pk=project.pk), request.user)
     models.ProjectLog.objects.create(project=project, level=models.ProjLogLevels.OPEN,
             message=f'Project opened by user {request.user.id}')
@@ -746,13 +748,16 @@ def populate_proj(dbprojs, user, showjobs=True, include_db_entry=False):
             ).annotate(greatdate=Greatest('dsmax', 'anamax')).order_by('-greatdate'
             ).values('pk', 'name', 'active', 'registered', 'ptype__name', 'greatdate'):
         order.append(proj['pk'])
+        dset_q = models.Dataset.objects.filter(runname__experiment__project_id=proj['pk'])
         projs[proj['pk']] = {
             'id': proj['pk'],
             'name': proj['name'],
             'inactive': proj['active'] == False,
             'start': datetime.strftime(proj['registered'], '%Y-%m-%d %H:%M'),
             'ptype': proj['ptype__name'],
-            'dset_ids': [x['pk'] for x in models.Dataset.objects.filter(runname__experiment__project_id=proj['pk']).values('pk')],
+            'dset_ids': [x['pk'] for x in dset_q.values('pk')],
+            'ana_ids': [x['pk'] for x in am.Analysis.objects.filter(
+                datasetanalysis__dataset__in=dset_q).values('pk').distinct('pk')],
             'details': False,
             'selected': False,
             'lastactive': datetime.strftime(proj['greatdate'], '%Y-%m-%d %H:%M') if proj['greatdate'] else '-',
@@ -1046,28 +1051,41 @@ def merge_projects(request):
 
 @login_required
 @require_POST
-def rename_project(request):
+def update_project(request):
     """
     Rename project in database, jobs queued to move all data to new name
     """
     data = json.loads(request.body.decode('utf-8'))
     try:
-        proj = models.Project.objects.get(pk=data['projid'])
-    except models.Project.DoesNotExist:
+        data['projid'], data['pi_id'], data['ptype_id'], data['newname']
+        data['extref'], data['newpiname']
+    except KeyError:
+        return JsonResponse({'error': 'Please fill in the fields'}, status=400)
+    if not (proj_q := models.Project.objects.filter(pk=data['projid'])):
         return JsonResponse({'error': f'Project with that ID does not exist in DB'}, status=404)
+    proj = models.Project.objects.get(pk=data['projid'])
+
     # check if new project not already exist, and user have permission for all dsets
-    if data['newname'] == proj.name or models.Project.objects.filter(name=data['newname']).exists():
-        return JsonResponse({'error': f'Cannot change name to existing name for project {proj.name}'}, status=403)
-    elif is_invalid_proj_exp_runnames(data['newname']):
+    if models.Project.objects.exclude(pk=data['projid']).filter(name=data['newname']).exists():
+        return JsonResponse({'error': f'Cannot change name to existing name {data["newname"]}'}, status=403)
+    elif not data['newname'] or is_invalid_proj_exp_runnames(data['newname']):
         return JsonResponse({'error': f'Project name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
-    dsets = models.Dataset.objects.filter(runname__experiment__project=proj)
-    for dset in  dsets.values('pk', 'deleted'):
+    elif not data['pi_id'] and not data['newpiname']:
+        return JsonResponse({'error': f'Need to select a PI'}, status=403)
+    elif not (pi_id := data['pi_id']) and data['newpiname']:
+        pi_id = models.PrincipalInvestigator.objects.create(name=data['newpiname']).pk
+
+    for dset in models.Dataset.objects.filter(runname__experiment__project_id=data['projid']
+            ).values('pk', 'deleted'):
         if not check_ownership(request.user, proj.ptype_id, dset['pk'], dset['deleted']):
             return JsonResponse({'error': f'You do not have the rights to change all datasets in this project'}, status=403)
     models.ProjectLog.objects.create(project=proj, level=models.ProjLogLevels.INFO,
-            message=f'User {request.user.id} renamed project from {proj.name} to {data["newname"]}')
-    proj.name = data['newname']
-    proj.save()
+            message=f'User {request.user.id} updated project from {proj.name} -> {data["newname"]}, '
+            f'project type: {proj.ptype_id} -> {data["ptype_id"]}, PI: {proj.pi_id} -> {data["pi_id"]}, '
+            f'reference: "{proj.externalref}" -> "{data["extref"]}"')
+
+    proj_q.update(name=data['newname'], pi_id=pi_id, ptype_id=data['ptype_id'], externalref=data['extref'])
+
     for dss in models.DatasetServer.objects.select_related('storageshare').filter(active=True,
             dataset__runname__experiment__project_id=data['projid']):
         newstorloc = dss.storageshare.rename_storage_loc_toplvl(data['newname'], dss.storage_loc_ui,

@@ -496,8 +496,8 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
             state=dm.DCStates.OK).exists())
 
 
-class RenameProjectTest(BaseIntegrationTest):
-    url = '/datasets/rename/project/'
+class UpdateProjectTest(BaseIntegrationTest):
+    url = '/datasets/update/project/'
 
     def test_no_ownership_fail(self):
         run = dm.RunName.objects.create(name='someoneelsesrun', experiment=self.exp1)
@@ -508,36 +508,39 @@ class RenameProjectTest(BaseIntegrationTest):
         otheruser = User.objects.create(username='test', password='test')
         dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'projid': self.p1.pk, 'newname': 'testnewp'})
+                data={'projid': self.p1.pk, 'newname': 'testnewp', 'pi_id': self.p1.pi_id,
+                    'ptype_id': self.p1.ptype_id, 'extref': self.p1.externalref, 'newpiname': ''})
         self.assertEqual(resp.status_code, 403)
 
     def test_id_name_fails(self):
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'projid': self.p1.pk, 'newname': self.p1.name})
-        self.assertEqual(resp.status_code, 403)
-        resp = self.cl.post(self.url, content_type='application/json',
-                data={'projid': self.p1.pk+1000, 'newname': 'testnewname'})
+                data={'projid': self.p1.pk+1000, 'newname': 'testnewp', 'pi_id': self.p1.pi_id,
+                    'ptype_id': self.p1.ptype_id, 'extref': self.p1.externalref, 'newpiname': ''})
         self.assertEqual(resp.status_code, 404)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'projid': self.p1.pk, 'newname': 'testnewname with spaces'})
+                data={'projid': self.p1.pk, 'newname': 'testnewp with spaces', 'pi_id': self.p1.pi_id,
+                    'ptype_id': self.p1.ptype_id, 'extref': self.p1.externalref, 'newpiname': ''})
         self.assertEqual(resp.status_code, 403)
         self.assertIn(f'cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}',
                 json.loads(resp.content)['error'])
         oldp = dm.Project.objects.create(name='project to rename', pi=self.pi, ptype=self.ptype)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'projid': oldp.pk, 'newname': self.p1.name})
+                data={'projid': self.oldp.pk, 'newname': self.p1.name, 'pi_id': self.p1.pi_id,
+                    'ptype_id': self.p1.ptype_id, 'extref': self.p1.externalref, 'newpiname': ''})
         self.assertEqual(resp.status_code, 403)
-        self.assertIn('Cannot change name to existing name for project', resp.json()['error'])
+        self.assertIn(f'Cannot change name to existing name {self.p1.name}', resp.json()['error'])
         self.assertFalse(dm.ProjectLog.objects.exists())
 
     def test_rename_ok(self):
         newname = 'testnewname'
         self.assertEqual(dm.Project.objects.filter(name=newname).count(), 0)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'projid': self.p1.pk, 'newname': newname})
+                data={'projid': self.p1.pk, 'newname': newname, 'pi_id': '',
+                    'ptype_id': self.p1.ptype_id, 'extref': 'updated ext ref',
+                    'newpiname': 'new pi name'})
         self.assertEqual(resp.status_code, 200)
-        self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.id} renamed project '
-            f'from {self.p1.name} to {newname}').exists())
+        self.assertTrue(dm.ProjectLog.objects.filter(message__startswith=f'User {self.user.id} updated project '
+            f'from {self.p1.name} -> {newname}').exists())
         old_loc = self.dss.storage_loc
         new_loc = os.path.join(newname, self.exp1.name, self.dtype.name, self.run1.name)
         renamejobs = jm.Job.objects.filter(funcname='rename_dset_storage_loc',
@@ -546,6 +549,8 @@ class RenameProjectTest(BaseIntegrationTest):
         self.assertEqual(renamejobs.count(), 1)
         self.p1.refresh_from_db()
         self.assertEqual(self.p1.name, newname)
+        self.assertEqual(self.p1.pi.name, 'new pi name')
+        self.assertEqual(self.p1.externalref, 'updated ext ref')
         self.assertTrue(os.path.exists(self.f3path))
         self.dss.refresh_from_db()
         self.assertEqual(self.dss.storage_loc_ui, new_loc)
@@ -561,16 +566,21 @@ class RenameProjectTest(BaseIntegrationTest):
         # first rename job http request, then add files, then jobs run:
         newname = 'testnewname'
         self.assertEqual(dm.Project.objects.filter(name=newname).count(), 0)
+        newpi = dm.PrincipalInvestigator.objects.create(name='new test pi updated')
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'projid': self.p1.pk, 'newname': newname})
+                data={'projid': self.p1.pk, 'newname': newname, 'pi_id': newpi.pk,
+                    'ptype_id': self.p1.ptype_id, 'extref': self.p1.externalref, 'newpiname': ''})
         self.assertEqual(resp.status_code, 200)
         new_loc = os.path.join(newname, self.exp1.name, self.dtype.name, self.run1.name)
         renamejobs = jm.Job.objects.filter(funcname='rename_dset_storage_loc',
                 kwargs={'dss_id': self.dss.pk, 'newpath': new_loc,
                     'sfloc_ids': [self.f3sss.pk, self.f3mzsss.pk]}) 
         self.assertEqual(renamejobs.count(), 1)
+        oldextref = self.p1.externalref
         self.p1.refresh_from_db()
         self.assertEqual(self.p1.name, newname)
+        self.assertEqual(self.p1.pi, newpi)
+        self.assertEqual(self.p1.externalref, oldextref)
         # add files results in a job and claimed files still on tmp
         mvresp = self.cl.post('/datasets/save/files/', content_type='application/json', data={
             'dataset_id': self.ds.pk, 'added_files': {self.tmpsf.pk: {'id': self.tmpsf.pk}},
@@ -614,6 +624,37 @@ class RenameProjectTest(BaseIntegrationTest):
         # tmp file should now exist in dset folder
         self.assertTrue(os.path.exists(newtmpsf_path))
         self.assertTrue(newsfl.exists())
+
+    def test_rename_empty_dset(self):
+        newname = 'testnewname'
+        self.assertEqual(dm.Project.objects.filter(name=newname).count(), 0)
+        # make sure dset empty
+        self.f3raw.delete()
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'projid': self.p1.pk, 'newname': newname, 'pi_id': self.p1.pi_id,
+                    'ptype_id': self.p1.ptype_id, 'extref': self.p1.externalref, 'newpiname': ''})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(dm.ProjectLog.objects.filter(message__startswith=f'User {self.user.id} updated project '
+            f'from {self.p1.name} -> {newname}').exists())
+        old_loc = self.dss.storage_loc
+        new_loc = os.path.join(newname, self.exp1.name, self.dtype.name, self.run1.name)
+        renamejobs = jm.Job.objects.filter(funcname='rename_dset_storage_loc',
+                kwargs={'dss_id': self.dss.pk, 'newpath': new_loc,
+                    'sfloc_ids': []})
+        self.assertEqual(renamejobs.count(), 1)
+        self.p1.refresh_from_db()
+        self.assertEqual(self.p1.name, newname)
+        self.assertTrue(os.path.exists(self.f3path))
+        self.dss.refresh_from_db()
+        self.assertEqual(self.dss.storage_loc_ui, new_loc)
+        self.run_job()
+        self.assertTrue(os.path.exists(self.f3path))
+        self.assertEqual(self.dss.storage_loc, old_loc)
+        self.dss.refresh_from_db()
+        self.assertEqual(self.dss.storage_loc, new_loc)
+        self.assertFalse(os.path.exists(os.path.join(self.newstorctrl.path,
+            self.dss.storage_loc, self.f3sf.filename)))
+
 
 # FIXME write tests
 #class SaveAcquisition(BaseTest):
@@ -1446,6 +1487,8 @@ class TestArchiveProject(BaseTest):
         self.assertTrue(self.ana.deleted)
         self.assertTrue(jm.Job.objects.filter(funcname='create_pdc_archive',
             kwargs={'sfloc_id': self.anasfile_sfl.pk, 'isdir': False}).exists())
+        self.assertTrue(jm.Job.objects.filter(funcname='purge_files').exists())
+        self.assertTrue(jm.Job.objects.filter(funcname='delete_empty_directory').exists())
 
     def test_delete_analysis_no_backup(self):
         # When a project closes, also delete its analyses
@@ -1453,12 +1496,31 @@ class TestArchiveProject(BaseTest):
         # is not the one being closed
         rm.PDCBackedupFile.objects.create(storedfile=self.anasfile, pdcpath=self.anasfile.md5,
                 success=True)
-        dsa = am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.ds)
-        olddsa = am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.oldds)
-        olddss2 = dm.DatasetServer.objects.create(dataset=self.oldds, storageshare=self.ssnewstore,
+        am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.ds)
+        am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.oldds)
+        dm.DatasetServer.objects.create(dataset=self.oldds, storageshare=self.ssnewstore,
                 storage_loc_ui=self.oldstorloc, storage_loc=self.oldstorloc, startdate=timezone.now())
-        oldssfl2 = rm.StoredFileLoc.objects.create(sfile=self.oldsf, servershare=self.ssnewstore,
+        rm.StoredFileLoc.objects.create(sfile=self.oldsf, servershare=self.ssnewstore,
                 path=self.oldstorloc, active=True, purged=False)
+
+        # Create another analysis of which files can be deleted, from
+        # only one project
+        ana2 = am.Analysis.objects.create(name='secondana', user=self.user, base_rundir='fakerundir',
+                securityclass=rm.DataSecurityClass.NOSECURITY, success_completed=True)
+        ana_raw2 = rm.RawFile.objects.create(name='ana2_file', producer=self.anaprod,
+                source_md5='testana21234', size=100, date=timezone.now(), claimed=True,
+                usetype=rm.UploadFileType.ANALYSIS)
+        anasfile2 = rm.StoredFile.objects.create(rawfile=ana_raw2, filetype=self.anaft,
+
+                filename=ana_raw2.name, md5=ana_raw2.source_md5)
+        am.AnalysisResultFile.objects.create(analysis=ana2, sfile=anasfile2)
+        
+        anasfile2_sfl = rm.StoredFileLoc.objects.create(sfile=anasfile2,
+                servershare=self.ssana, path=ana2.name, active=True, purged=False)
+        rm.PDCBackedupFile.objects.create(storedfile=anasfile2, pdcpath=anasfile2.md5,
+                success=True)
+        am.DatasetAnalysis.objects.create(analysis=ana2, dataset=self.ds)
+        self.assertFalse(jm.Job.objects.filter(funcname='remove_dset_files_servershare'))
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.p1.pk})
         self.assertEqual(resp.status_code, 200)
@@ -1467,6 +1529,18 @@ class TestArchiveProject(BaseTest):
         self.assertFalse(self.ana.deleted)
         self.ana.refresh_from_db()
         self.assertFalse(self.ana.deleted)
+        self.assertTrue(jm.Job.objects.filter(funcname='remove_dset_files_servershare'))
+        # Check analysis files being deleted
+        # Dataset files are deleted by remove_dset_files_servershare
+        # analysis files by purge_files
+        rmjob1 = jm.Job.objects.filter(funcname='purge_files', kwargs__sfloc_ids=[anasfile2_sfl.pk])
+        rmjob2 = jm.Job.objects.filter(funcname='purge_files').exclude(kwargs__sfloc_ids=[anasfile2_sfl.pk])
+        rmdirjob1 = jm.Job.objects.filter(funcname='delete_empty_directory', kwargs__path=anasfile2_sfl.path)
+        rmdirjob2 = jm.Job.objects.filter(funcname='delete_empty_directory', kwargs__path=self.anasfile_sfl.path)
+        self.assertTrue(rmjob1.exists())
+        self.assertFalse(rmjob2.exists())
+        self.assertFalse(rmdirjob2.exists())
+        self.assertTrue(rmdirjob1.exists())
 
         # Now also close the second project, which should delete the analysis
         resp = self.cl.post(self.url, content_type='application/json',
@@ -1479,6 +1553,8 @@ class TestArchiveProject(BaseTest):
         self.assertTrue(self.ana.deleted)
         self.assertFalse(jm.Job.objects.filter(funcname='create_pdc_archive',
             kwargs={'sfloc_id': self.anasfile_sfl.pk, 'isdir': False}).exists())
+        self.assertTrue(rmjob2.exists())
+        self.assertTrue(rmdirjob2.exists())
 
 
 

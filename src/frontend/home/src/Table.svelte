@@ -18,7 +18,7 @@ export let findUrl;
 export let notif;
 export let tab;
 export let defaultQ = '';
-export let show_deleted_or_q = 'deleted';
+export let search_examples = '';
 export let allowedActions = [];
 
 
@@ -34,7 +34,6 @@ let findQueryString = '';
 let showDetailBox = false;
 let detailsLoaded = false;
 let detailBoxContent = '';
-let searchdeleted = false;
 let loadingItems = false;
 let loadingNonce;
 
@@ -48,10 +47,8 @@ function fetchItems(ids) {
 }
 
 function findItems(q) {
-  // TODO deleted can be removed if we stop using it also inother tables
-  // It is already removed from projects
-  push(`#/${tab.toLowerCase()}?q=${q}&deleted=${searchdeleted}`);
-  const url = `${findUrl}?q=${q}&deleted=${searchdeleted}`;
+  push(`#/${tab.toLowerCase()}?q=${q}`);
+  const url = `${findUrl}?q=${q}`;
   loadItems(url);
 }
 
@@ -108,7 +105,6 @@ onMount(async() => {
   if ('ids' in qs) {
     fetchItems(qs.ids.split(','));
   } else if ('q' in qs) {
-    searchdeleted = ('deleted' in qs && ['true', 1, 'True'].indexOf(qs.deleted) > -1) ? true : false;
     findQueryString = qs.q.split(',').join(' ');
     findItems(qs.q);
   } else if (defaultQ) {
@@ -133,11 +129,7 @@ div.spinner {
 </style>
 
 <div class="content is-small">
-  {#if show_deleted_or_q === 'deleted'}
-  <input type="checkbox" bind:checked={searchdeleted}>Search deleted {tab.toLowerCase()}
-  {:else}
-  <span class="has-text-weight-bold">Usage examples:</span> {show_deleted_or_q}
-  {/if}
+  <span class="has-text-weight-bold">Usage examples:</span> {search_examples}
   <input class="input is-small" on:keyup={findQuery} bind:value={findQueryString} type="text" placeholder={`Type a query and press enter to search ${tab.toLowerCase()}`}>
 
 <table class="table">

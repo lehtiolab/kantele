@@ -60,14 +60,8 @@ def run_ready_jobs(job_fn_map, job_ds_map, active_jobs):
                 active_jobs.add(job.pk)
 
         # Just print info about ERROR-jobs, but also process tasks
-        # job.refresh_from_db() # speed up job runner after processing
         tasks = job.task_set.all()
-        if job.state == Jobstates.DONE:
-            del(job_ds_map[job.id])
-            del(job_fn_map[job.id])
-            active_jobs.remove(job.id)
-
-        elif job.state == Jobstates.ERROR:
+        if job.state == Jobstates.ERROR:
             print('ERROR MESSAGES:')
             if not tasks.count():
                 print(f'Job {job.id} has state error, without tasks')

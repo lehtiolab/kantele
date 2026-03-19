@@ -24,7 +24,7 @@ const tablefields = [
   {id: 'storestate', name: 'Stored', type: 'tag', multi: false, links: 'fn_ids', linkroute: '#/files/'},
   {id: 'jobstate', name: '__hourglass-half', type: 'state', multi: true, links: 'jobids', linkroute: '#/jobs'},
   {id: 'smallstatus', name: '', type: 'smallcoloured', multi: true},
-  {id: 'analyses', name: '', type: 'icon', icon: 'cogs', links: 'ana_ids', linkroute: '#/analyses'},
+  {id: 'analyses', name: '', help: 'Analyses', type: 'icon', icon: 'cogs', links: 'ana_ids', linkroute: '#/analyses'},
   {id: 'proj', name: 'Project', type: 'str', multi: false, links: 'proj_ids', linkroute: '#/projects'},
   {id: 'exp', name: 'Experiment', type: 'str', multi: false},
   {id: 'run', name: 'Run', type: 'str', multi: false},
@@ -130,7 +130,20 @@ function updateNotif() {
 {/if}
 
 
-<Table tab="Datasets" bind:items={dsets} bind:notif={notif} bind:selected={selectedDsets} fetchUrl="/show/datasets" findUrl="/find/datasets" getdetails={getDsetDetails} fixedbuttons={fixedbuttons} fields={tablefields} inactive={inactive} on:detailview={showDetails} />
+<Table tab="Datasets"
+  bind:items={dsets}
+  bind:notif={notif}
+  bind:selected={selectedDsets}
+  fetchUrl="/show/datasets"
+  findUrl="/show/datasets"
+  defaultQ="deleted:no "
+  search_examples="type:cf/local from:20250801 to:2025 deleted:yes/no user:yourname"
+  getdetails={getDsetDetails}
+  fixedbuttons={fixedbuttons}
+  fields={tablefields}
+  inactive={inactive}
+  on:detailview={showDetails}
+  />
 
 {#if importVisible}
 <ImportExternal toggleWindow={e => importVisible = importVisible === false} />

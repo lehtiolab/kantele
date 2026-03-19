@@ -170,16 +170,6 @@ def resume_job(request):
     job.state = Jobstates.PENDING
     job.save()
     return JsonResponse({}) 
-    
-
-
-
-def cancel_or_revoke_job(jobq):
-    '''Centralize revoking here, so correct check is done, and it is done in an update statement
-    so there is no race condition stuff'''
-    canceled = jobq.filter(state__in=JOBSTATES_JOB_NOT_SENT).update(state=Jobstates.CANCELED)
-    revoked = jobq.filter(state__in=JOBSTATES_JOB_SENT).update(state=Jobstates.REVOKING)
-    return canceled + revoked
 
 
 @login_required
@@ -193,8 +183,10 @@ def delete_job(request):
     ownership = get_job_ownership(job, request)
     if not ownership['owner_loggedin'] and not ownership['is_staff']:
         return JsonResponse({'error': 'Only job owners and admin can stop this job'}, status=403)
-    # If job needs revoking, do it here
-    cancel_or_revoke_job(jobq)
+    # If job needs revoking, do it here. Do not go to cancel directly, that
+    # would confuse the job runner, which does the setting from revoking -> canceled
+    # it needs that to know which job to delete from the job_fn_map etc
+    jobq.update(state=Jobstates.REVOKING)
     return JsonResponse({})
 
 

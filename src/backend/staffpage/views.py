@@ -94,7 +94,7 @@ def remove_qcfiles(request):
             sflocs.update(active=False)
         if jobq := jm.Job.objects.filter(
                 nextflowsearch__analysis__qcrun__rawfile__storedfile__id__in=data['sfids']):
-            jv.cancel_or_revoke_job(jobq)
+            jobq.update(state=jj.Jobstates.REVOKING)
         am.Analysis.objects.filter(qcrun__rawfile__storedfile__id__in=data['sfids']).delete()
         state = 'ok'
         msg = f'Removed {len(set(data["sfids"]))} file from QC'

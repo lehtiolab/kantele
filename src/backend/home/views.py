@@ -3,6 +3,7 @@ from datetime import timedelta, datetime
 import json
 from base64 import b64encode
 from celery import states as tstates
+from itertools import chain
 
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
@@ -81,43 +82,70 @@ def find_projects(userquery):
     return projects
 
 
-@login_required
-@require_GET
-def find_datasets(request):
-    """Loop through comma-separated q-param in GET, do a lot of OR queries on
-    datasets to find matches. String GET-derived q-params by AND."""
-    if searchterms := [x for x in request.GET['q'].split(',') if x != '']:
-        dbdsets = dm.Dataset.query_creator(searchterms)
-    else:
-        dbdsets = dsmodels.Dataset.objects.none()
-    if request.GET.get('deleted', 'false') == 'false':
-        dbdsets = dbdsets.filter(deleted=False)
-    dsids = [x['pk'] for x in dbdsets.values('pk')]
-    dsets = populate_dset(dsids, dbdsets, request.user)
-    return JsonResponse({'items': dsets, 'order': list(dsets.keys())})
+def find_datasets(userquery):
+    searchterms = []
+    parsed_query = Q()
+    for q in [x for x in userquery.split(',') if x != '']:
+        match q.split(':'):
+            case ['from', date]:
+                if dt := parse_userquery(date, 'date'):
+                    parsed_query &= Q(date__gte=dt)
+            case ['to', date]:
+                if dt := parse_userquery(date, 'date'):
+                    parsed_query &= Q(date__lte=dt)
+            case ['type', projtype]:
+                ptypename = {'cf': settings.CF_PTYPE_NAME}.get(projtype) or projtype
+                parsed_query &= Q(runname__experiment__project__ptype__name__iexact=ptypename)
+            case ['deleted', yesno]:
+                parsed_query &= Q(deleted={'yes': True, 'true': True, 'no': False, 'false': False}[yesno])
+            case ['user', username]:
+                parsed_query &= Q(datasetowner__user__username=username)
+            case _:
+                searchterms.append(q)
+    dbdsets = dm.Dataset.objects.filter(parsed_query)
+    if searchterms:
+        dbdsets = dbdsets.filter(dm.Dataset.query_creator(searchterms))
+    return dbdsets
 
 
-@login_required
-@require_GET
-def find_analysis(request):
+def find_analysis(userquery):
     """Loop through comma-separated q-param in GET, do a lot of OR queries on
     analysis to find matches. String GET-derived q-params by AND."""
-    searchterms = [x for x in request.GET['q'].split(',') if x != '']
-    query = Q()
-    wftypes = zip(anmodels.UserWorkflow.WFTypeChoices.choices, anmodels.UserWorkflow.WFTypeChoices.names)
-    for term in searchterms:
-        subquery = Q(name__icontains=term)
-        subquery |= Q(nextflowsearch__workflow__name__icontains=term)
-        subquery |= Q(user__username__icontains=term)
-        # WF types is integerchoice, search as such
-        match_wftypes = [x[0][0] for x in wftypes if term in x[0][1] or term in x[1]]
-        subquery |= Q(nextflowsearch__workflow__wftype__in=match_wftypes)
-        query &= subquery
-    dbanalyses = anmodels.Analysis.objects.filter(query)
-    if request.GET['deleted'] == 'false':
-        dbanalyses = dbanalyses.filter(deleted=False)
-    items, it_order = populate_analysis(dbanalyses.order_by('-date'), request.user)
-    return JsonResponse({'items': items, 'order': it_order})
+    searchterms = []
+    parsed_query = Q()
+    for q in [x for x in userquery.split(',') if x != '']:
+        match q.split(':'):
+            case ['from', date]:
+                if dt := parse_userquery(date, 'date'):
+                    parsed_query &= Q(date__gte=dt)
+            case ['to', date]:
+                if dt := parse_userquery(date, 'date'):
+                    parsed_query &= Q(date__lte=dt)
+            case ['deleted', yesno]:
+                parsed_query &= Q(deleted={'yes': True, 'true': True, 'no': False, 'false': False}[yesno])
+            case ['type', wftypename]:
+                try:
+                    wftype = anmodels.UserWorkflow.WFTypeChoices[wftypename.upper()]
+                except KeyError:
+                    pass
+                else:
+                    parsed_query &= Q(nextflowsearch__workflow__wftype=wftype)
+            case ['success', yesno]:
+                parsed_query &= Q(success_completed={'yes': True, 'true': True, 'no': False, 'false': False}[yesno])
+            case ['user', username]:
+                parsed_query &= Q(user__username=username)
+            case _:
+                searchterms.append(q)
+    dbanalyses = anmodels.Analysis.objects.filter(parsed_query)
+    if searchterms:
+        freetextq = Q()
+        for term in searchterms:
+            subquery = Q(name__icontains=term)
+            subquery |= Q(nextflowsearch__workflow__name__icontains=term)
+            subquery |= Q(user__username__icontains=term)
+            freetextq &= subquery
+        dbanalyses = dbanalyses.filter(freetextq)
+    return dbanalyses
 
 
 @login_required
@@ -126,6 +154,8 @@ def show_analyses(request):
     if 'ids' in request.GET:
         ids = request.GET['ids'].split(',')
         dbanalyses = anmodels.Analysis.objects.filter(pk__in=ids)
+    elif userq := request.GET.get('q'):
+        dbanalyses = find_analysis(userq)
     else:
         # last 6month analyses of a user plus current analyses PENDING/PROCESSING
         run_ana = anmodels.Analysis.objects.select_related('nextflowsearch__workflow').filter(
@@ -158,12 +188,13 @@ def show_datasets(request):
     if 'ids' in request.GET:
         dsids = request.GET['ids'].split(',')
         dbdsets = dsmodels.Dataset.objects.filter(pk__in=dsids)
+    elif userq := request.GET.get('q'):
+        dbdsets = find_datasets(userq)
     else:
         # last month datasets of a user
         dbdsets = dsmodels.Dataset.objects.filter(deleted=False, datasetowner__user_id=request.user.id,
                                                   date__gt=datetime.today() - timedelta(30))
-        dsids = [x['pk'] for x in dbdsets.values('pk')]
-    dsets = populate_dset(dsids, dbdsets, request.user)
+    dsets = populate_dset(dbdsets, request.user)
     return JsonResponse({'items': dsets, 'order': list(dsets.keys())})
 
 
@@ -323,13 +354,18 @@ def show_jobs(request):
         analysis = jv.get_job_analysis(job)
         items[job.id] = {'id': job.id, 'name': job.funcname,
                          'state': job.state,
-                         'canceled': job.state == jj.Jobstates.CANCELED,
+                         'canceled': job.state in [jj.Jobstates.CANCELED, jj.Jobstates.REVOKING],
                          'usr': ', '.join(ownership['usernames']),
                          'date': datetime.strftime(job.timestamp, '%Y-%m-%d'),
                          'analysis': analysis.id if analysis else False,
                          'actions': get_job_actions(job, ownership)}
-        items[job.id]['fn_ids'] = [x['pk'] for x in filemodels.StoredFile.objects.filter(
-            rawfile__in=job.filejob_set.all().values('rawfile')).values('pk')]
+        if sfloc := job.kwargs.get('sfloc_ids', False):
+            sfs = filemodels.StoredFile.objects.filter(storedfileloc__pk__in=sfloc)
+        elif slfoc := job.kwargs.get('sfloc_id', False):
+            sfs = filemodels.StoredFile.objects.filter(storedfileloc__pk=sfloc)
+        else:
+            sfs = filemodels.StoredFile.objects.none()
+        items[job.id]['fn_ids'] = [x['pk'] for x in sfs.values('pk')]
         if dss := job.kwargs.get('dss_id', False):
             dsets = dm.Dataset.objects.filter(datasetserver__pk=dss)
         elif dss := job.kwargs.get('dss_ids', False):
@@ -510,33 +546,37 @@ def populate_analysis(analyses, user):
 
 @login_required
 def get_proj_info(request, proj_id):
-    proj = dsmodels.Project.objects.filter(pk=proj_id).select_related('ptype', 'pi').get()
+    proj = dsmodels.Project.objects.filter(pk=proj_id).values('ptype_id', 'ptype__name', 'name',
+            'externalref', 'registered', 'pi_id').get()
     files = filemodels.StoredFile.objects.filter(mzmlfile__isnull=True,
-            rawfile__datasetrawfile__dataset__runname__experiment__project=proj)
+            rawfile__datasetrawfile__dataset__runname__experiment__project_id=proj_id)
     nr_files = files.values('filetype__name').annotate(ftcount=Count('filetype__name')).order_by()
-    dsets = dsmodels.Dataset.objects.filter(runname__experiment__project=proj)
-    info = {'owners': [x['datasetowner__user__username'] for x in dsets.values('datasetowner__user__username').distinct()],
+    dsets = dsmodels.Dataset.objects.filter(runname__experiment__project_id=proj_id)
+    info = {'id': proj_id,
+            'owners': [x['datasetowner__user__username'] for x in dsets.values('datasetowner__user__username').distinct()],
             'stored_total_xbytes': getxbytes(files.aggregate(Sum('rawfile__size'))['rawfile__size__sum']),
             'nrstoredfiles': {x['filetype__name']: x['ftcount'] for x in nr_files},
-            'name': proj.name,
-            'pi': proj.pi.name,
-            'regdate': datetime.strftime(proj.registered, '%Y-%m-%d %H:%M'),
-            'type': proj.ptype.name,
+            'name': proj['name'],
+            'ptype_id': proj['ptype_id'],
+            'pi_id': proj['pi_id'],
+            'extref': proj['externalref'],
+            'regdate': datetime.strftime(proj['registered'], '%Y-%m-%d %H:%M'),
+            'type': proj['ptype__name'],
             'instruments': [x['rawfile__producer__name'] for x in
                 files.values('rawfile__producer__name').distinct()],
             'nrdsets': dsets.count(),
-            'nrbackupfiles': filemodels.SwestoreBackedupFile.objects.filter(
-                storedfile__rawfile__datasetrawfile__dataset__runname__experiment__project_id=proj_id).count() + filemodels.PDCBackedupFile.objects.filter(
-                    storedfile__rawfile__datasetrawfile__dataset__runname__experiment__project_id=proj_id).count(),
+            'log': [{'date': x['date'], 'msg': x['message']} for x in
+                dsmodels.ProjectLog.objects.filter(project_id=proj_id).order_by('date').values(
+                    'date', 'message')],
         }
     return JsonResponse(info)
 
 
-def populate_dset(dsids, dbdsets, user):
+def populate_dset(dbdsets, user):
     dsets = OrderedDict()
     dsjobmap = defaultdict(list)
     for job in jm.Job.objects.filter(
-            filejob__rawfile__datasetrawfile__dataset_id__in=dsids
+            filejob__rawfile__datasetrawfile__dataset__in=dbdsets
             ).exclude(state__in=jj.JOBSTATES_DONE).distinct('pk').values('state', 'pk',
                     'filejob__rawfile__datasetrawfile__dataset_id'):
         dsid = job['filejob__rawfile__datasetrawfile__dataset_id']
@@ -644,7 +684,8 @@ def get_analysis_invocation(ana):
     for param, fninfos in fnmap.items():
         invoc['files'].append({'param': param, 'multif': fninfos})
     allp_options = {}
-    for x in anmodels.Param.objects.filter(ptype=anmodels.Param.PTypes.MULTI):
+    for x in anmodels.Param.objects.filter(ptype__in=[anmodels.Param.PTypes.MULTI,
+                anmodels.Param.PTypes.SELECT]):
         for opt in x.paramoption_set.all():
             try:
                 allp_options[x.nfparam][opt.id] = opt.value
@@ -655,6 +696,8 @@ def get_analysis_invocation(ana):
         if ap.param.ptype == anmodels.Param.PTypes.MULTI:
             vals = [allp_options[ap.param.nfparam][x] for x in ap.value]
             params.extend([ap.param.nfparam, *vals])
+        elif ap.param.ptype == anmodels.Param.PTypes.SELECT:
+            params.extend([ap.param.nfparam, allp_options[ap.param.nfparam][ap.value]])
         elif ap.param.ptype == anmodels.Param.PTypes.FLAG and ap.value:
             params.append(ap.param.nfparam)
         else:
@@ -769,7 +812,7 @@ def refresh_project(request, proj_id):
 @login_required
 def refresh_dataset(request, dset_id):
     dbdset = dsmodels.Dataset.objects.filter(pk=dset_id)
-    dsetdict = populate_dset([dset_id], dbdset, request.user)
+    dsetdict = populate_dset(dbdset, request.user)
     return JsonResponse(dsetdict[dset_id])
 
 
@@ -1008,18 +1051,15 @@ def fetch_dset_details(dset):
     else:
         nrstoredfiles = {nonms_dtypes[dset.datatype_id]: rawfiles.count()}
     info['nrstoredfiles'] = nrstoredfiles
-    info['nrbackupfiles'] = filemodels.PDCBackedupFile.objects.filter(
-        storedfile__rawfile__datasetrawfile__dataset_id=dset.id).count()
-    info['compstates'] = {
-dsmodels.DatasetUIComponent(x.dtcomp.component).name: x.state for x in
-                          dsmodels.DatasetComponentState.objects.filter(
-                              dataset_id=dset.id).select_related('dtcomp')}
+    info['compstates'] = {dsmodels.DatasetUIComponent(x.dtcomp.component).name: x.state for x in
+            dsmodels.DatasetComponentState.objects.filter(dataset_id=dset.id).select_related('dtcomp')}
     return info
 
 
 @login_required
 @require_POST
 def create_mzmls(request):
+    # FIXME this is really slow somehow
     '''It is assumed that a dataset's files all come from the same instrument,
     and therefore need the same parameters when creating mzML files'''
     data = json.loads(request.body.decode('utf-8'))
@@ -1309,7 +1349,7 @@ def show_messages(request):
         ).values('msg_id', 'msg__txt', 'msg__shown', 'msg__date', 'dset_id')
     anamsgs = hm.AnalysisMessage.objects.filter(msg__user=request.user, msg__deleted=False
         ).values('msg_id', 'msg__txt', 'msg__shown', 'msg__date', 'analysis_id')
-    allmsgs = anamsgs.union(dsetmsgs)
+    allmsgs = chain(anamsgs, dsetmsgs)
 
     out['messages'] = {x['msg_id']: {'txt': x['msg__txt'], 'shown': x['msg__shown'], 'date': x['msg__date'], 'link_id': x.get('dset_id', x.get('analysis_id')), 'linkpath': 'datasets' if x.get('dset_id') else 'analyses'} for x in allmsgs}
 
