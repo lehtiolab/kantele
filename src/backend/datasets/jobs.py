@@ -291,10 +291,12 @@ def get_or_create_mzmlentry(sfile, pwiz, refined, servershare_id, path, mzmlfile
     '''Called when creating mzML files, will return (sfile, sfloc) tuple. The sfl will
     be on an analysis output servershare with an analysis runpath.
     '''
-    new_md5 = f'mzml_{sfile.rawfile.source_md5[5:]}'
+    fake_md5 = f'mzml_pw{pwiz.pk}_refined:{refined}_raw{sfile.rawfile_id}'
     mzsf, cr = StoredFile.objects.get_or_create(mzmlfile__pwiz=pwiz, mzmlfile__refined=refined,
-            rawfile_id=sfile.rawfile_id, filetype_id=sfile.filetype_id, defaults={'md5': new_md5,
+            rawfile_id=sfile.rawfile_id, filetype_id=sfile.filetype_id, defaults={'md5': fake_md5,
                 'filename': mzmlfilename})
+
+
     # Update sfl path if old (inactive) exists, since new job -> new runpath
     # Do not set active here, first check if that is already the case below, to detect
     # existing files to skip
@@ -314,6 +316,6 @@ def get_or_create_mzmlentry(sfile, pwiz, refined, servershare_id, path, mzmlfile
         sfl.save()
         mzsf.checked = False
         mzsf.deleted = False
-        mzsf.md5 = new_md5
+        mzsf.md5 = fake_md5
         mzsf.save()
     return sfl
