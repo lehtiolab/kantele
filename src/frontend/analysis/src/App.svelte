@@ -126,9 +126,10 @@ function validate() {
     if (!('LABELCHECK_ISO' in wf.components) && ds.allfilessamesample && !ds.setname) {
 			notif.errors[`Dataset ${ds.proj} - ${ds.exp} - ${ds.run} needs to have a set name`] = 1;
     } else if (!ds.allfilessamesample) {
-      if (ds.ft_files[ds.picked_ftype].some(fn => !fn.fields.__sample)) {
-			  notif.errors[`File ${fn.name} needs to have a sample name`] = 1;
-			}
+      let first_error_fn = ds.ft_files[ds.picked_ftype].filter(fn => !fn.fields.__sample)[0];
+      if (first_error_fn) { 
+        notif.errors[`All files must have a sample name, first erroring is "${first_error_fn.name}"`] = 1;
+      }
     } else if (ds.setname && !charRe.test(ds.setname)) {
 			notif.errors[`Dataset ${ds.proj} - ${ds.exp} - ${ds.run} needs to have another set name: only a-z 0-9 _ are allowed`] = 1;
 		}

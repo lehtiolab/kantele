@@ -400,16 +400,16 @@ def get_msdataset_files_by_type(alldsfiles, nrrawfiles=False):
     dsfiles = {}
     last_filetype = False
     dsmzfiles = alldsfiles.filter(mzmlfile__isnull=False, mzmlfile__refined=False).select_related('mzmlfile__pwiz')
-    for pwiz_mzs in dsmzfiles.values('mzmlfile__pwiz_id', 'mzmlfile__pwiz__version_description').annotate(pwcount=Count('pk')):
+    for pwiz_mzs in dsmzfiles.values('mzmlfile__pwiz_id', 'mzmlfile__pwiz__version_description').annotate(pwcount=Count('pk', distinct=True)):
         ftname = f'mzML (pwiz {pwiz_mzs["mzmlfile__pwiz__version_description"]})'
-        dsfiles[ftname] = dsmzfiles.filter(mzmlfile__pwiz_id=pwiz_mzs['mzmlfile__pwiz_id'])
+        dsfiles[ftname] = dsmzfiles.filter(mzmlfile__pwiz_id=pwiz_mzs['mzmlfile__pwiz_id']).distinct('pk')
         if nrrawfiles and pwiz_mzs['pwcount'] == nrrawfiles:
             last_filetype = ftname
     # Deliver also refined mzML
     dsrefinedfiles = alldsfiles.filter(mzmlfile__isnull=False, mzmlfile__refined=True).select_related('mzmlfile__pwiz')
-    for pwiz_mzs in dsrefinedfiles.values('mzmlfile__pwiz_id', 'mzmlfile__pwiz__version_description').annotate(pwcount=Count('pk')):
+    for pwiz_mzs in dsrefinedfiles.values('mzmlfile__pwiz_id', 'mzmlfile__pwiz__version_description').annotate(pwcount=Count('pk', distinct=True)):
         ftname = f'refined mzML (pwiz {pwiz_mzs["mzmlfile__pwiz__version_description"]})' 
-        dsfiles[ftname] = dsrefinedfiles.filter(mzmlfile__pwiz_id=pwiz_mzs['mzmlfile__pwiz_id'])
+        dsfiles[ftname] = dsrefinedfiles.filter(mzmlfile__pwiz_id=pwiz_mzs['mzmlfile__pwiz_id']).distinct('pk')
         if nrrawfiles and pwiz_mzs['pwcount'] == nrrawfiles:
             last_filetype = ftname
     return dsfiles, last_filetype 
@@ -604,6 +604,8 @@ def get_datasets(request, wfversion_id):
         # Files with samples (non-MS, IP, non-isobaric, etc)
         if anid and is_msdata:
             allfilessamesample  = all((x['fields']['__sample'] == '' for x in resp_files.values()))
+            [x['fields'].update({'__sample': x['dsetsample']}) for x in resp_files.values()
+                    if not x['fields']['__sample']]
 
         elif not is_msdata:
             # sequencing data etcetera, always have sample-per-file since we dont
@@ -843,9 +845,15 @@ def store_analysis(request):
         if not hasattr(dset, 'quantdataset'):
             response_errors.append(f'File(s) or channels in dataset {dsname} do not have '
                     'sample annotations, please edit the dataset first')
+
+        # Dssfiles need not be checked, new mzMLs being produced can also be selected, but
+        # they need to have a storedfileloc__active=True. NB:
+        # storedfileloc join causes duplicates, so make sure distinct is used later (cannot
+        # put distinct('pk') here since it clashes with annotate in get_msdataset_files_by_type
+        # and gives NotImplentedError
         dssfiles = rm.StoredFile.objects.filter(rawfile__datasetrawfile__dataset_id=dsid,
-                deleted=False, checked=True)
-        dsrawfiles = dssfiles.filter(mzmlfile__isnull=True)
+                deleted=False, storedfileloc__active=True)
+        dsrawfiles = dssfiles.filter(mzmlfile__isnull=True).distinct('pk')
         nrrawfiles = dsrawfiles.count()
         if nrrawfiles < rm.RawFile.objects.filter(datasetrawfile__dataset_id=dsid).count():
             response_errors.append(f'Dataset {dsname} contains registered files that dont '
