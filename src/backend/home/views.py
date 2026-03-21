@@ -512,7 +512,7 @@ def populate_analysis(analyses, user):
                     }
         else:
             nfs = {'jobid': False, 'fn_ids': False, 'dset_ids': False, 'wflink': False}
-            infn_ds, infns= [], []
+            infn_ds, infns, outfns = [], [], []
         tulosq = mm.Experiment.objects.filter(analysis_id=ana['pk'])
         if tulosq.exists():
             tulos_empty = {f'{x}': [] for x in tulos_keys}
