@@ -723,15 +723,18 @@ def save_new_project(request):
     elif data['ptype_id'] == settings.LOCAL_PTYPE_ID:
         # FIXME set internal PI in conf/settings maybe
         pi_id = INTERNAL_PI_PK
-    else:
+    elif not (newpiname := data.get('newpiname', False)):
         try:
             pi_id = int(data['pi_id'])
         except ValueError:
             return JsonResponse({'error': 'Please select a PI'}, status=403)
+    else:
+        # This runs if newpiname, for linter, it will complain if not having this
+        pi_id = False
 
     if models.Project.objects.filter(name=data['name']):
         return JsonResponse({'error': 'Project name already exists'}, status=403)
-    if 'newpiname' in data:
+    if newpiname:
         pi_id = models.PrincipalInvestigator.objects.create(name=data['newpiname']).pk
     project = models.Project.objects.create(name=data['name'], pi_id=pi_id,
             ptype_id=data['ptype_id'], externalref=data['extref'])
