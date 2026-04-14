@@ -418,15 +418,17 @@ class RunNextflowWorkflow(MultiDatasetJob):
                 # Dynamic fields
                 infile.update(kwargs['filefields'].get(str(fn['sfile_id']), {}))
                 infiles.append(infile)
-        shortname = models.UserWorkflow.WFTypeChoices(analysis.nextflowsearch.workflow.wftype).name
+            if type(inputdef_fields) == dict:
+                inputdef_fields_nofn = [k for k,v in inputdef_fields.items() if v != '__path']
+                pathfield = [k for k,v in inputdef_fields.items() if v == '__path'][0]
+            else:
+                inputdef_fields_nofn = inputdef_fields[1:]
+                pathfield = inputdef_fields[0]
+            run['components']['INPUTDEF'] = [pathfield, *inputdef_fields_nofn]
 
         # COMPLEMENT/RERUN component:
         # Add base analysis stuff if it is complement and fractionated (if not it has only been used
         # for fetching parameter values and can be ignored in the job)
-        if type(inputdef_fields) == dict:
-            inputdef_fields_nofn = [k for k,v in inputdef_fields.items() if v != '__path']
-        else:
-            inputdef_fields_nofn = inputdef_fields[1:]
         ana_baserec = models.AnalysisBaseanalysis.objects.select_related('base_analysis').filter(analysis_id=analysis.id)
         try:
             ana_baserec = ana_baserec.get(Q(is_complement=True) | Q(rerun_from_psms=True))
