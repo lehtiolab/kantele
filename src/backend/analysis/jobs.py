@@ -392,16 +392,16 @@ class RunNextflowWorkflow(MultiDatasetJob):
         # Gather input files
         infiles = []
         # INPUTDEF is either False or [fn, set, fraction, etc]
-        if inputdef_fields := run['components']['INPUTDEF']:
-            specialfields = set(settings.INPUTDEF_FIELDS).intersection(inputdef_fields)
-            # Examples of querying specialfields:
+        if inputdef_fields := run['components'].get('INPUTDEF', []):
+            lookupfields = set(models.INPUTDEF_LOOKUPS).intersection(inputdef_fields)
+            # Examples of querying lookupfields:
             # infile['setname'] = kwargs['filesamples'].get(str(fn['sfile_id']), '')
             # infile['channel'] = fn['sfile__rawfile__datasetrawfile__quantfilechannel__channel__channel__name']
             for fn in sflocs_passed:
                 infile = {'path': os.path.join(sharemap[fn['servershare_id']], fn['path']),
                         'fn': fn['sfile__filename']}
-                for specf in specialfields:
-                    keys = settings.INPUTDEF_FIELDS[specf]
+                for specf in lookupfields:
+                    keys = models.INPUTDEF_LOOKUPS[specf]
                     if keys[0]:
                         val = kwargs[keys[0]]
                         if keys[2] is not False:
@@ -423,6 +423,10 @@ class RunNextflowWorkflow(MultiDatasetJob):
         # COMPLEMENT/RERUN component:
         # Add base analysis stuff if it is complement and fractionated (if not it has only been used
         # for fetching parameter values and can be ignored in the job)
+        if type(inputdef_fields) == dict:
+            inputdef_fields_nofn = [k for k,v in inputdef_fields.items() if v != '__path']
+        else:
+            inputdef_fields_nofn = inputdef_fields[1:]
         ana_baserec = models.AnalysisBaseanalysis.objects.select_related('base_analysis').filter(analysis_id=analysis.id)
         try:
             ana_baserec = ana_baserec.get(Q(is_complement=True) | Q(rerun_from_psms=True))
@@ -434,7 +438,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
             if ana_baserec.base_analysis.analysisdatasetsetvalue_set.filter(field='__regex').count():
                 # rerun/complement runs with fractionated base analysis need --oldmzmldef parameter
                 old_infiles, old_dsets = recurse_nrdsets_baseanalysis(ana_baserec)
-                run['old_infiles'] = ['{}\t{}'.format(x['fn'], '\t'.join([x[key] for key in run['components']['INPUTDEF'][1:]]))
+                run['old_infiles'] = [f'{x["fn"]}\t{"\t".join([x[key] for key in inputdef_fields_nofn])}'
                         for setmzmls in old_infiles.values() for x in setmzmls]
             if not ana_baserec.rerun_from_psms:
                 # Only mzmldef input if not doing a rerun

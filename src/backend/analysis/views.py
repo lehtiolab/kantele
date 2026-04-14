@@ -471,7 +471,17 @@ def get_datasets(request, wfversion_id):
     wfcomponents = {allcomponents[x.component].name: x.value
             for x in am.PsetComponent.objects.filter(pset__nextflowwfversionparamset=wfversion_id)}
     inputcomps = wfcomponents.get('INPUTDEF', [])
-    fields = {x: '' for x in inputcomps[1:] if not x in settings.INPUTDEF_FIELDS}
+    if type(inputcomps) == dict:
+        # Double underscore __ denotes special field (like __path, used in jobs
+        # and not displayed, though also not in 
+        fieldtypes = {k: v for k,v in inputcomps.items()}
+        fields = {k: v for k,v in inputcomps.items() if str(v)[:2] != '__'}
+    else:
+        fieldtypes = False
+        fields = {x: '' for x in inputcomps[1:]}
+    # Not have special fields from lookup, e.g. fraction cannot be speced for a dataset
+    # and they are not store in analysisfilevalue
+    fields = {k: v for k,v in fields.items() if not k in am.INPUTDEF_LOOKUPS}
     field_order = [x for x in fields.keys()]
 
     # Get analysis filesamples for later use
@@ -510,10 +520,11 @@ def get_datasets(request, wfversion_id):
             if adsvs := am.AnalysisDatasetSetValue.objects.filter(analysis_id=anid,
                     dataset=dset, field='__regex'):
                 frregex = adsvs.get().value
-            # Get other existing fields if any
+            # Fill any fields from DB where records existing
             fields.update({x.field: x.value for x in
                 am.AnalysisDatasetSetValue.objects.filter(analysis_id=anid,
                     dataset=dset).exclude(field__startswith='__')})
+
 
         # Get dataset files, dsrawfiles can include duplicates as it joins on storedfileloc
         # table!

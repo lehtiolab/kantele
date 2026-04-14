@@ -220,6 +220,33 @@ class PipelineVersionOutput(models.Model):
     output = models.ForeignKey(WfOutput, on_delete=models.CASCADE)
 
 
+# TODO not sure if this is correct place (jobs maybe), but it is certainly not settings/config
+# Inputdef special field lookup, used in analysis.jobs, these fields will not show in UI
+# Also first in list of [inputdef_fields] is assumed the path to the file, and if the spec is
+# as a dict, any field with a value '__...' will be excluded from the UI too. Those need
+# to be handled, e.g. __file_path.
+# This is here to exclude from analysis UI (and not in jobs) to handle list-type inputdef 
+# in psetcomponent. Dict-type could be handled by just removing values with 2xunderscore,e.g
+# setname: __setname, instrument: __instrument, or something like that
+# Lookup works like this, for each field key, a tuple:
+# (kwargskey, fnkey or sfile-for-kwargs-values-key, fallback, third get (fractions)
+INPUTDEF_LOOKUPS = {
+        # dda, pgt id, etc
+        'setname': ('filesamples', 'sfile_id', '', False),
+        'instrument': (False, 'sfile__rawfile__producer__msinstrument__instrumenttype__name', False, False),
+        'plate': ('platenames', 'sfile__rawfile__datasetrawfile__dataset_id', '', False),
+        'fraction': ('infiles', 'sfile_id', {}, 'fr'),
+        # pgt dbgen
+        'sampleID': ('filesamples', 'sfile_id', False, False),
+        # spectronaut
+        'condition': ('filesamples', 'sfile_id', False, False),
+        # labelcheck non-pooled
+        'channel': (False, 'sfile__rawfile__datasetrawfile__quantfilechannel__channel__channel__name', False, False),
+        }
+
+# TODO think about if inputdef should be own model. Currently only it and prefrac have
+# a value (regex for prefrac)
+
 class PsetComponent(models.Model):
     '''Special components for a parameter set. Components are such elements for a workflow
     that require special, non generalized code written for it. They can be in multiple workflows
@@ -239,8 +266,8 @@ class PsetComponent(models.Model):
 
     pset = models.ForeignKey(ParameterSet, on_delete=models.CASCADE)
     component = models.IntegerField(choices=ComponentChoices.choices)
-    value = models.JSONField(default=dict) 
-    # JSON in value: if needed eg mzmldef: [path, instrument, set, plate, fr]
+    value = models.JSONField(default=dict, help_text='''JSON, e.g. [path, instrument, set, plate] (path must be first),
+            {rawfile: __path, field_w_default: 1, file_type: "**function"}, empty_field: False}''')
     # else {}
     # FIXME future also setnames, sampletables, fractions, etc which is not a param
     # to be included in parameterset
