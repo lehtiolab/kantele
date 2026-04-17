@@ -153,6 +153,12 @@ function validate() {
         notif.errors[`Must select a value for ${selp.name}`] = 1;
         }
     });
+    wf.textparams.filter(p => !config.inputparams[p.id]).forEach(p => {
+      delete(config.inputparams[p.id]);
+    });
+    wf.numparams.filter(p => !config.inputparams[p.id]).forEach(p => {
+      delete(config.inputparams[p.id]);
+    });
   }
   return Object.keys(notif.errors).length === 0;
 }
