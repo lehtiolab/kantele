@@ -44,12 +44,15 @@ def show_staffpage(request):
     servers = {x.pk: {f: getattr(x, f) for f in ['pk', 'name', 'uri', 'fqdn', 'active',
         'can_backup', 'can_rsync_remote', 'rsyncusername', 'rsynckeyfile']}
         for x in rm.FileServer.objects.all()}
-    [servers[x].update({'show_analysis_profile': False, 'mounted': []}) for x in servers.keys()]
+    [servers[x].update({'mounted': [], 'analysisprofiles': []}) for x in servers.keys()]
     for asp in rm.AnalysisServerProfile.objects.all():
-        servers[asp.server_id].update({'queue_name': asp.queue_name, 'scratchdir': asp.scratchdir,
-            'show_analysis_profile': True})
-    for fss in rm.FileserverShare.objects.all():
-        servers[fss.server_id]['mounted'].append({'share': fss.share.pk, 'path': fss.path})
+        servers[asp.server_id]['analysisprofiles'].append({'pk': asp.pk, 'name': asp.name,
+            'nfparams': json.dumps(asp.nfparams), 'queue_name': asp.queue_name, 'scratchdir': asp.scratchdir,
+            'analysisoutshare_id': asp.analysisoutshare_id})
+    for fss in rm.FileserverShare.objects.all().values('pk', 'share__name', 'share_id', 'path',
+            'server_id'):
+        servers[fss['server_id']]['mounted'].append({'fssid': fss['pk'],
+            'sharename': fss['share__name'], 'share': fss['share_id'], 'path': fss['path']})
 
     # Populate shares
     shares = [{f: getattr(x, f) for f in ['pk', 'name', 'max_security', 'description', 'active',
@@ -287,17 +290,20 @@ def delete_tracked_peptide_set(request):
 def save_server(request):
     data = json.loads(request.body.decode('utf-8'))
     try:
-        data['show_analysis_profile']
         data['pk']
     except KeyError:
         return JsonResponse({'state': 'error', 'msg': 'Invalid params passed'}, status=400)
-    if data['show_analysis_profile']:
-        try:
-            data['queue_name']
-        except KeyError:
-            return JsonResponse({'state': 'error', 'msg': 'Need to enter analysis server information'},
-                    status=400)
     
+    for asp in data['analysisprofiles']:
+        try:
+            asp['nfparams'] = json.loads(asp['nfparams'])
+        except json.JSONDecodeError:
+            return JsonResponse({'state': 'error', 'msg': 'Invalid NF params passed, must be JSON '
+                'list of strings format'}, status=400)
+        else:
+            if type(asp['nfparams']) != list or any(type(x) != str for x in asp['nfparams']):
+                return JsonResponse({'state': 'error', 'msg': 'Invalid NF params passed, '
+                    'must be JSON list of strings format'}, status=400)
     if data['pk']:
         # Deactivation does not save other attributes
         if not (fs := rm.FileServer.objects.filter(pk=data['pk'])):
@@ -321,11 +327,14 @@ def save_server(request):
     rm.FileserverShare.objects.filter(server=fs).exclude(
             share_id__in=[x['share'] for x in data['mounted']]).delete()
 
-    if data['show_analysis_profile']:
-        rm.AnalysisServerProfile.objects.update_or_create(server=fs, defaults={
-            f: data[f] for f in ['scratchdir', 'queue_name']})
-    else:
-        rm.AnalysisServerProfile.objects.filter(server=fs).delete()
+    passed_asp_pk = [x['pk'] for x in data['analysisprofiles']]
+    for asp in data['analysisprofiles']:
+        asp_db, cr = rm.AnalysisServerProfile.objects.update_or_create(name=asp['name'], server=fs,
+                defaults={f: asp[f] for f in ['nfparams', 'analysisoutshare_id', 'scratchdir',
+                    'queue_name']})
+        if cr:
+            passed_asp_pk.append(asp_db.pk)
+    rm.AnalysisServerProfile.objects.filter(server=fs).exclude(pk__in=passed_asp_pk).delete()
     return JsonResponse({'state': 'ok', 'msg': f'Saved server {fs.name} with ID {fs.pk}'})
 
 
