@@ -291,19 +291,10 @@ def save_server(request):
     data = json.loads(request.body.decode('utf-8'))
     try:
         data['pk']
+        data['analysisprofiles']
     except KeyError:
         return JsonResponse({'state': 'error', 'msg': 'Invalid params passed'}, status=400)
     
-    for asp in data['analysisprofiles']:
-        try:
-            asp['nfparams'] = json.loads(asp['nfparams'])
-        except json.JSONDecodeError:
-            return JsonResponse({'state': 'error', 'msg': 'Invalid NF params passed, must be JSON '
-                'list of strings format'}, status=400)
-        else:
-            if type(asp['nfparams']) != list or any(type(x) != str for x in asp['nfparams']):
-                return JsonResponse({'state': 'error', 'msg': 'Invalid NF params passed, '
-                    'must be JSON list of strings format'}, status=400)
     if data['pk']:
         # Deactivation does not save other attributes
         if not (fs := rm.FileServer.objects.filter(pk=data['pk'])):
@@ -313,10 +304,32 @@ def save_server(request):
         if not data['active'] and fs.filter(active=True):
             fs.update(active=data['active'])
             return JsonResponse({'state': 'ok', 'msg': f'Deactivated server with ID {data["pk"]}'})
+
+    for asp in data['analysisprofiles']:
+        asp['nfparams'] = asp['nfparams'] or '[]'
+        try:
+            asp['nfparams'] = json.loads(asp['nfparams'])
+        except json.JSONDecodeError:
+            return JsonResponse({'state': 'error', 'msg': 'Invalid NF params passed, must be JSON '
+                'list of strings format'}, status=400)
         else:
-            fs.update(**{f: data[f] for f in ['name', 'uri', 'fqdn', 'active', 'can_backup',
-                'can_rsync_remote', 'rsyncusername', 'rsynckeyfile']})
-            fs = fs.get()
+            if type(asp['nfparams']) != list or any(type(x) != str for x in asp['nfparams']):
+                return JsonResponse({'state': 'error', 'msg': 'Invalid NF params passed, '
+                    'must be JSON list of strings format'}, status=400)
+        existing_asp_q = rm.AnalysisServerProfile.objects.filter(name=asp['name'])
+        if asp['pk']:
+            existing_asp_q = existing_asp_q.exclude(pk=asp['pk'])
+        if existing_asp_q.exists():
+            return JsonResponse({'state': 'error', 'msg': 'Cannot use name for analysisprofile '
+                    'already existing for another profile/server'}, status=400)
+        if asp['analysisoutshare_id'] not in [x['fssid'] for x in data['mounted']]:
+            return JsonResponse({'state': 'error', 'msg': 'Analysis outputshare must be mounted '
+                    'on server'}, status=400)
+            
+    if data['pk']:
+        fs.update(**{f: data[f] for f in ['name', 'uri', 'fqdn', 'active', 'can_backup',
+            'can_rsync_remote', 'rsyncusername', 'rsynckeyfile']})
+        fs = fs.get()
     else:
         fs = rm.FileServer.objects.create(**{f: data[f] for f in ['name', 'uri', 'fqdn', 'active',
             'can_backup', 'can_rsync_remote', 'rsyncusername', 'rsynckeyfile']})
@@ -327,11 +340,18 @@ def save_server(request):
     rm.FileserverShare.objects.filter(server=fs).exclude(
             share_id__in=[x['share'] for x in data['mounted']]).delete()
 
-    passed_asp_pk = [x['pk'] for x in data['analysisprofiles']]
+    passed_asp_pk = [x['pk'] for x in data['analysisprofiles'] if x.get('pk')]
     for asp in data['analysisprofiles']:
-        asp_db, cr = rm.AnalysisServerProfile.objects.update_or_create(name=asp['name'], server=fs,
-                defaults={f: asp[f] for f in ['nfparams', 'analysisoutshare_id', 'scratchdir',
-                    'queue_name']})
+        # Must lookup with either pk, or name (uni) and server, as to not accidentally
+        # update an existing profile with that name to a new server
+        if asp['pk']:
+            asp_db, cr = rm.AnalysisServerProfile.objects.update_or_create(pk=asp['pk'],
+                    server=fs, defaults={f: asp[f] for f in ['nfparams', 'analysisoutshare_id',
+                        'name', 'scratchdir', 'queue_name']})
+        else:
+            asp_db, cr = rm.AnalysisServerProfile.objects.update_or_create(name=asp['name'],
+                    server=fs, defaults={f: asp[f] for f in ['nfparams', 'analysisoutshare_id',
+                        'scratchdir', 'queue_name']})
         if cr:
             passed_asp_pk.append(asp_db.pk)
     rm.AnalysisServerProfile.objects.filter(server=fs).exclude(pk__in=passed_asp_pk).delete()

@@ -189,15 +189,10 @@ class AnalysisServerProfile(models.Model):
     server = models.ForeignKey(FileServer, on_delete=models.CASCADE)
     scratchdir = models.TextField(blank=True,
             help_text='For nextflow TMPDIR and stage if needed. Can be blank if not needed')
-    # FIXME must queue be unique?? Should at least be only one per server, but can multiple 
-    # analysisserverprofiles share a queue?
     queue_name = models.TextField(help_text='Also identifier for which project on HPC')
     nfparams = models.JSONField(default=list, blank=True, help_text='List of parameters to pass '
             'for this server/project, e.g. ["--project", "proj12345"]')
     analysisoutshare = models.ForeignKey(FileserverShare, on_delete=models.CASCADE)
-
-    class Meta:
-        constraints = [models.UniqueConstraint(fields=['server', 'analysisoutshare'], name='uni_anaprofileoutshare')]
 
     def __str__(self):
         return self.server.name

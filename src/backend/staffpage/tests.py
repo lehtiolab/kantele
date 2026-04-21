@@ -315,22 +315,28 @@ class TestSaveServers(BaseQCFileTest):
         noid_resp = self.cl.post(self.url, content_type='application/json', data={})
         self.assertEqual(noid_resp.status_code, 400)
         noexist = self.cl.post(self.url, content_type='application/json',
-                data={'show_analysis_profile': False, 'pk': 100001})
+                data={'analysisprofiles': [], 'pk': 100001})
         self.assertEqual(noexist.status_code, 404)
-        queuefail = self.cl.post(self.url, content_type='application/json', data={'pk': False,
-            'show_analysis_profile': True})
-        self.assertEqual(queuefail.status_code, 400)
-        self.assertEqual(queuefail.json()['msg'], 'Need to enter analysis server information')
+        anaproffail = self.cl.post(self.url, content_type='application/json', data={'pk': False,
+            'analysisprofiles': [{'nfparams': 'dsada', 'name': 'test', 'pk': False}]})
+        self.assertEqual(anaproffail.status_code, 400)
+        self.assertEqual(anaproffail.json()['msg'],
+                'Invalid NF params passed, must be JSON list of strings format')
+        anaproffail = self.cl.post(self.url, content_type='application/json', data={'pk': False,
+            'mounted': [], 'analysisprofiles': [{'nfparams': '', 'analysisoutshare_id': -1,
+                'name': 'test', 'pk': False}]})
+        self.assertEqual(anaproffail.status_code, 400)
+        self.assertEqual(anaproffail.json()['msg'], 'Analysis outputshare must be mounted on server')
 
     def test_new_server(self):
-        anaq = rm.AnalysisServerProfile.objects.filter(server__active=True)
         mountq = rm.FileserverShare.objects
         new = self.cl.post(self.url, content_type='application/json', data={'pk': False,
             'name': 'test', 'uri': 'uri123', 'fqdn': 'a.b.c.d', 'active': True, 'can_backup': True,
-            'show_analysis_profile': False, 'can_rsync_remote': False, 'rsyncusername': 'testname',
+            'analysisprofiles': [], 'can_rsync_remote': False, 'rsyncusername': 'testname',
             'rsynckeyfile': 'testfile', 'mounted': []})
         self.assertIn('Saved server test with ID ', new.json()['msg'])
         fs = rm.FileServer.objects.get(name='test', uri='uri123', fqdn='a.b.c.d')
+        anaq = rm.AnalysisServerProfile.objects.filter(server=fs)
         self.assertFalse(anaq.filter(server=fs).exists())
         self.assertFalse(mountq.filter(server=fs).exists())
         self.assertEqual(new.status_code, 200)
@@ -338,39 +344,31 @@ class TestSaveServers(BaseQCFileTest):
         # New server with mount
         new_mount = self.cl.post(self.url, content_type='application/json', data={'pk': False,
             'name': 'testmount', 'uri': 'urimount', 'fqdn': 'a.b.c.d', 'active': True, 'can_backup': True,
-            'show_analysis_profile': False, 'can_rsync_remote': True, 'rsyncusername': '',
-            'rsynckeyfile': '', 'mounted': [{'share': self.ssana.pk, 'path': 'fake'}]})
+            'analysisprofiles': [], 'can_rsync_remote': True, 'rsyncusername': '',
+            'rsynckeyfile': '', 'mounted': [{'fssid': -1, 'share': self.ssana.pk, 'path': 'fake'}]})
         self.assertIn('Saved server testmount with ID ', new_mount.json()['msg'])
         fs = rm.FileServer.objects.get(name='testmount', can_rsync_remote=True, uri='urimount')
-        self.assertFalse(anaq.filter(server=fs).exists())
+        anaq = rm.AnalysisServerProfile.objects.filter(server=fs)
+        self.assertFalse(anaq.exists())
         self.assertTrue(mountq.filter(server=fs, share=self.ssana, path='fake').exists())
         self.assertEqual(new_mount.status_code, 200)
-
-        # New server with analysis
-        new_ana = self.cl.post(self.url, content_type='application/json', data={'pk': False,
-            'name': 'testana', 'uri': 'uriana', 'fqdn': 'a.b.c.d', 'active': True, 'can_backup': True,
-            'can_rsync_remote': False, 'rsyncusername': 'testname', 'rsynckeyfile': 'testfile',
-            'mounted': [], 'show_analysis_profile': True,
-            'queue_name': 'q1', 'scratchdir': '/path/to/scratch'})
-        self.assertIn('Saved server testana with ID ', new_ana.json()['msg'])
-        fs = rm.FileServer.objects.get(name='testana', can_rsync_remote=False, uri='uriana')
-        x = anaq.get(server=fs)
-        self.assertTrue(anaq.filter(server=fs, scratchdir='/path/to/scratch', queue_name='q1',
-).exists())
-        self.assertFalse(mountq.filter(server=fs).exists())
-        self.assertEqual(new_ana.status_code, 200)
-
 
         # New server with mount and analysis
         new_mounts_ana = self.cl.post(self.url, content_type='application/json', data={'pk': False,
             'name': 'test_mount_ana', 'uri': 'uritma', 'fqdn': 'a.b.c.d', 'active': True, 'can_backup': True,
             'can_rsync_remote': False, 'rsyncusername': 'testname', 'rsynckeyfile': 'testfile',
-            'mounted': [{'share': self.ssana.pk, 'path': 'fake2'}], 'show_analysis_profile': True,
-            'queue_name': 'q2', 'scratchdir': '/path/to/otherscratch'})
+            'mounted': [{'fssid': -1, 'share': self.ssana.pk, 'path': 'fake2'},
+                {'fssid': self.nfrunshare.pk, 'path': 'fake3', 'share': self.ssanaruns.pk}],
+            'analysisprofiles': [
+                {'pk': False, 'name': 'testp2', 'queue_name': 'q2',
+                    'analysisoutshare_id': self.nfrunshare.pk,
+                    'scratchdir': '/path/to/otherscratch', 'nfparams': '[]'}]})
+
         self.assertIn('Saved server test_mount_ana', new_mounts_ana.json()['msg'])
         fs = rm.FileServer.objects.get(name='test_mount_ana', can_backup=True, rsyncusername='testname')
+        anaq = rm.AnalysisServerProfile.objects.filter(server=fs)
         self.assertTrue(mountq.filter(server=fs, share=self.ssana, path='fake2').exists())
-        self.assertTrue(anaq.filter(server=fs, scratchdir='/path/to/otherscratch', queue_name='q2',
+        self.assertTrue(anaq.filter(scratchdir='/path/to/otherscratch', queue_name='q2',
             ).exists())
         self.assertEqual(new_mounts_ana.status_code, 200)
 
@@ -378,27 +376,32 @@ class TestSaveServers(BaseQCFileTest):
         new_mounts_ana = self.cl.post(self.url, content_type='application/json', data={'pk': False,
             'name': 'test_mount_ana', 'uri': 'uritma', 'fqdn': 'a.b.c.d', 'active': True, 'can_backup': True,
             'can_rsync_remote': False, 'rsyncusername': 'testname', 'rsynckeyfile': 'testfile',
-            'mounted': [{'share': self.ssana.pk, 'path': 'fake2'}], 'show_analysis_profile': True,
-            'queue_name': 'q2', 'scratchdir': '/path/to/otherscratch'})
+            'mounted': [{'fssid': -1, 'share': self.ssana.pk, 'path': 'fake2'},
+                {'fssid': self.nfrunshare2.pk, 'path': 'fake3', 'share': self.ssanaruns2.pk}],
+            'analysisprofiles': [{'pk': False, 'name': 'testanap2', 'queue_name': 'q2',
+                'nfparams': '["a", "1"]', 'analysisoutshare_id': self.nfrunshare2.pk,
+                'scratchdir': '/path/to/otherscratch'}]})
         pk = re.match('Saved server test_mount_ana with ID ([0-9]+)', new_mounts_ana.json()['msg']).group(1)
         fs = rm.FileServer.objects.get(pk=pk)
         self.assertEqual(fs.name, 'test_mount_ana')
         self.assertTrue(fs.can_backup)
         self.assertEqual(fs.rsyncusername, 'testname')
         fss = rm.FileserverShare.objects.filter(server=fs)
-        self.assertEqual(fss.count(), 1)
+        self.assertEqual(fss.count(), 2)
         self.assertTrue(fss.filter(share=self.ssana, path='fake2').exists())
         asp = rm.AnalysisServerProfile.objects.filter(server=fs)
+        asppk = asp.get().pk
         self.assertTrue(asp.filter(queue_name='q2', scratchdir='/path/to/otherscratch',
             ).exists())
 
-        # Add new mount, change some names
+        # Add new mount, change some names (notably, analysis profile name)
         upd_resp = self.cl.post(self.url, content_type='application/json', data={'pk': pk, 
             'name': 'test_mount_ana_upd', 'uri': 'uritma', 'fqdn': 'a.b.c.d', 'active': True, 'can_backup': False,
             'can_rsync_remote': False, 'rsyncusername': '', 'rsynckeyfile': 'testfile',
-            'mounted': [{'share': self.ssana.pk, 'path': 'fake2'}, {'share': self.ssanaruns.pk, 'path': 'fake3'}],
-            'show_analysis_profile': True,
-            'queue_name': 'q2', 'scratchdir': '/path/to/otherscratch'})
+            'mounted': [{'fssid': -1, 'share': self.ssana.pk, 'path': 'fake2'},
+                {'fssid': self.nfrunshare2.pk, 'share': self.ssanaruns2.pk, 'path': 'fake3'}],
+            'analysisprofiles': [{'pk': asppk, 'nfparams': '["a", "1"]', 'queue_name': 'q2', 'name': 'testq2',
+                'analysisoutshare_id': self.nfrunshare2.pk, 'scratchdir': ''}]})
         self.assertEqual(f'Saved server test_mount_ana_upd with ID {pk}', upd_resp.json()['msg'])
         fs.refresh_from_db()
         self.assertEqual(fs.name, 'test_mount_ana_upd')
@@ -406,66 +409,71 @@ class TestSaveServers(BaseQCFileTest):
         self.assertFalse(fs.can_backup)
         self.assertEqual(fss.count(), 2)
         self.assertTrue(fss.filter(share=self.ssana, path='fake2').exists())
-        self.assertTrue(fss.filter(share=self.ssanaruns, path='fake3').exists())
+        self.assertTrue(fss.filter(share=self.ssanaruns2, path='fake3').exists())
 
-
-        # Remove 1 mount and analysis profile
+        # Remove 1 mount
         upd_resp = self.cl.post(self.url, content_type='application/json', data={'pk': pk, 
             'name': 'test_mount_ana_upd', 'uri': 'uritma', 'fqdn': 'a.b.c.d', 'active': True,
             'can_backup': False,
             'can_rsync_remote': False, 'rsyncusername': '', 'rsynckeyfile': 'testfile',
-            'mounted': [{'share': self.ssanaruns.pk, 'path': 'fake3'}], 'show_analysis_profile': False})
+            'mounted': [{'fssid': self.nfrunshare2.pk, 'share': self.ssanaruns2.pk,
+                'path': 'fake3'}], 'analysisprofiles': [{'pk': asppk,
+                    'nfparams': '["a", "1"]', 'queue_name': 'q2', 'name': 'testq2',
+                    'scratchdir': '', 'analysisoutshare_id': self.nfrunshare2.pk}]})
         self.assertEqual(f'Saved server test_mount_ana_upd with ID {pk}', upd_resp.json()['msg'])
         fs.refresh_from_db()
         self.assertEqual(fs.name, 'test_mount_ana_upd')
-
+        self.assertTrue(asp.exists())
         self.assertEqual(fss.count(), 1)
-        self.assertTrue(fss.filter(share=self.ssanaruns, path='fake3').exists())
-        self.assertFalse(asp.exists())
+        self.assertTrue(fss.filter(share=self.ssanaruns2, path='fake3').exists())
+        self.assertTrue(asp.exists())
 
-        # Deactivate, name change, remove analysis and added mount -- but that should not save
+        # Deactivate, name change, remove analysis and added mount
+        # Deactivation should not save mounts/analysisprofiles
         upd_resp = self.cl.post(self.url, content_type='application/json', data={'pk': pk, 
             'name': 'test_mount_ana_upd_deac', 'uri': 'uritma', 'fqdn': 'a.b.c.d', 'active': False,
             'can_backup': False,
             'can_rsync_remote': False, 'rsyncusername': '', 'rsynckeyfile': 'testfile',
-            'mounted': [{'share': self.ssana.pk, 'path': 'fake2'}, {'share': self.ssanaruns.pk, 'path': 'fake3'}],
-            'show_analysis_profile': True,
-            'queue_name': 'q2', 'scratchdir': '/path/to/otherscratch'})
+            'mounted': [{'fssid': -1, 'share': self.ssana.pk, 'path': 'fake2'}],
+            'analysisprofiles': []})
         self.assertEqual(f'Deactivated server with ID {pk}', upd_resp.json()['msg'])
         fs.refresh_from_db()
         self.assertEqual(fs.name, 'test_mount_ana_upd')
         self.assertEqual(fss.count(), 1)
-        self.assertFalse(asp.exists())
+        self.assertTrue(asp.exists())
 
         # Fail to update a deactivated server
         upd_resp = self.cl.post(self.url, content_type='application/json', data={'pk': pk, 
             'name': 'test_mount_ana_upd_deac', 'uri': 'uritma', 'fqdn': 'a.b.c.d', 'active': False,
             'can_backup': False,
             'can_rsync_remote': False, 'rsyncusername': '', 'rsynckeyfile': 'testfile',
-            'mounted': [{'share': self.ssana.pk, 'path': 'fake2'}, {'share': self.ssanaruns.pk, 'share': 'fake3'}],
-            'show_analysis_profile': True,
-            'queue_name': 'q2', 'scratchdir': '/path/to/otherscratch'})
+            'mounted': [{'fssid': -1, 'share': self.ssana.pk, 'path': 'fake2'},
+                {'fssid': self.nfrunshare.pk, 'share': self.ssanaruns.pk, 'share': 'fake3'}], 
+            'analysisprofiles': [{'pk': asppk, 'nfparams': '["a", "1"]', 'queue_name': 'q2',
+                'name': 'testq2', 'scratchdir': '', 'analysisoutshare_id': self.nfrunshare2.pk}]})
         self.assertEqual(f'Cannot update deactivated server', upd_resp.json()['msg'])
         self.assertEqual(upd_resp.status_code, 403)
         fs.refresh_from_db()
         self.assertEqual(fs.name, 'test_mount_ana_upd')
         self.assertEqual(fss.count(), 1)
-        self.assertFalse(asp.exists())
+        self.assertTrue(asp.exists())
 
         # Reactivate and update
         upd_resp = self.cl.post(self.url, content_type='application/json', data={'pk': pk, 
             'name': 'test_mount_ana_upd_act', 'uri': 'uritma', 'fqdn': 'a.b.c.d', 'active': True,
             'can_backup': False,
             'can_rsync_remote': False, 'rsyncusername': '', 'rsynckeyfile': 'testfile',
-            'mounted': [{'share': self.ssana.pk, 'path': 'fake2'}, {'share': self.ssanaruns.pk, 'path': 'fake3'}],
-            'show_analysis_profile': True,
-            'queue_name': 'q2', 'scratchdir': '/path/to/otherscratch'})
+            'mounted': [{'fssid': -1, 'share': self.ssana.pk, 'path': 'fake2'},
+                {'fssid': self.nfrunshare2.pk, 'share': self.ssanaruns2.pk, 'path': 'fake3'}],
+            'analysisprofiles': [{'queue_name': 'q2', 'scratchdir': '/path/to/otherscratch',
+                'nfparams': '["b", "2"]', 'name': 'testq2', 'pk': asppk,
+                'analysisoutshare_id': self.nfrunshare2.pk}]})
         self.assertEqual(f'Saved server test_mount_ana_upd_act with ID {pk}', upd_resp.json()['msg'])
         fs.refresh_from_db()
         self.assertEqual(fs.name, 'test_mount_ana_upd_act')
         self.assertEqual(fss.count(), 2)
         self.assertTrue(fss.filter(share=self.ssana, path='fake2').exists())
-        self.assertTrue(fss.filter(share=self.ssanaruns, path='fake3').exists())
+        self.assertTrue(fss.filter(share=self.ssanaruns2, path='fake3').exists())
         self.assertTrue(asp.filter(queue_name='q2', scratchdir='/path/to/otherscratch',
             ).exists())
 

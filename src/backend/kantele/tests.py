@@ -54,7 +54,6 @@ class BaseTest(TestCase):
                 rsynckeyfile='/kantelessh/rsync_key', can_backup=True)
         self.anaserver = rm.FileServer.objects.create(name='analysis1', uri='ana.test',
                 fqdn='analysis_ssh_1', rsyncusername='kantele', rsynckeyfile='/kantelessh/rsync_key')
-        self.anaprofile = rm.AnalysisServerProfile.objects.create(server=self.anaserver, queue_name='analysis1')
 
         self.ssinbox = rm.ServerShare.objects.create(name='inbox', max_security=2,
                 function=rm.ShareFunction.INBOX, maxdays_data=1)
@@ -87,17 +86,20 @@ class BaseTest(TestCase):
                 function=rm.ShareFunction.ANALYSISRESULTS, maxdays_data=1)
         self.nfrunshare = rm.FileserverShare.objects.create(server=self.anaserver,
                 share=self.ssanaruns, path=os.path.join(self.rootdir, 'nf_run_output'))
+        self.anaprofile = rm.AnalysisServerProfile.objects.create(server=self.anaserver,
+                name='testanaprofile1', queue_name='analysis1', analysisoutshare=self.nfrunshare)
 
         self.remoteanaserver = rm.FileServer.objects.create(name='analysis2', uri='s0.test',
                 fqdn='analysis_ssh_2', can_rsync_remote=False, rsyncusername='kantele',
                 rsynckeyfile='/kantelessh/rsync_key')
-        self.anaprofile2 = rm.AnalysisServerProfile.objects.create(server=self.remoteanaserver, queue_name='analysis2')
         self.analocalstor = rm.ServerShare.objects.create(name='analocalstor', active=True,
                 max_security=max(rm.DataSecurityClass), function=rm.ShareFunction.RAWDATA, maxdays_data=1)
         self.ssanaruns2 = rm.ServerShare.objects.create(name='analysisruns2', max_security=1,
                 function=rm.ShareFunction.ANALYSISRESULTS, maxdays_data=1)
         self.nfrunshare2 = rm.FileserverShare.objects.create(server=self.remoteanaserver,
                 share=self.ssanaruns2, path=os.path.join(self.rootdir, 'nf_run_output2'))
+        self.anaprofile2 = rm.AnalysisServerProfile.objects.create(server=self.remoteanaserver,
+                name='testanaprofile2', queue_name='analysis2', analysisoutshare=self.nfrunshare2)
         self.oldstorctrl = rm.FileserverShare.objects.create(server=self.remoteanaserver,
                 share=self.analocalstor, path=os.path.join(self.rootdir, 'oldstorage'))
 
