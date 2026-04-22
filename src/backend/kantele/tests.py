@@ -87,7 +87,8 @@ class BaseTest(TestCase):
         self.nfrunshare = rm.FileserverShare.objects.create(server=self.anaserver,
                 share=self.ssanaruns, path=os.path.join(self.rootdir, 'nf_run_output'))
         self.anaprofile = rm.AnalysisServerProfile.objects.create(server=self.anaserver,
-                name='testanaprofile1', queue_name='analysis1', analysisoutshare=self.nfrunshare)
+                name='testanaprofile1', queue_name='analysis1', analysisoutshare=self.nfrunshare,
+                nfparams=['--project', 'nr1'])
 
         self.remoteanaserver = rm.FileServer.objects.create(name='analysis2', uri='s0.test',
                 fqdn='analysis_ssh_2', can_rsync_remote=False, rsyncusername='kantele',
@@ -99,7 +100,8 @@ class BaseTest(TestCase):
         self.nfrunshare2 = rm.FileserverShare.objects.create(server=self.remoteanaserver,
                 share=self.ssanaruns2, path=os.path.join(self.rootdir, 'nf_run_output2'))
         self.anaprofile2 = rm.AnalysisServerProfile.objects.create(server=self.remoteanaserver,
-                name='testanaprofile2', queue_name='analysis2', analysisoutshare=self.nfrunshare2)
+                name='testanaprofile2', queue_name='analysis2', analysisoutshare=self.nfrunshare2,
+                nfparams=['--project', 'nr2'])
         self.oldstorctrl = rm.FileserverShare.objects.create(server=self.remoteanaserver,
                 share=self.analocalstor, path=os.path.join(self.rootdir, 'oldstorage'))
 

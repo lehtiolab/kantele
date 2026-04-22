@@ -9,6 +9,7 @@ p.add_argument('--dia', action='store_const', const=True, default=False)
 p.add_argument('--raw')
 
 p.add_argument('--outdir')
+p.add_argument('-output-dir')
 p.add_argument('-c', required=True)
 p.add_argument('-name')
 p.add_argument('-with-weblog')

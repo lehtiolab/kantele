@@ -481,6 +481,8 @@ class TestUploadScript(BaseIntegrationTest):
         self.run_job() # run backup
         jm.Task.objects.filter(job__funcname='create_pdc_archive').update(state=states.SUCCESS)
         self.run_job() # run rsync to analysis of both raw and nfconfig files
+        self.anaprofile.nfparams = [] # reset params so we dont pass project to argparse in qc.py
+        self.anaprofile.save()
         self.run_job() # run qc
         qcrun = dashm.QCRun.objects.last()
         self.assertTrue(dashm.LineplotData.objects.filter(qcrun=qcrun,

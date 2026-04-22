@@ -268,6 +268,7 @@ class ConvertDatasetMzml(DatasetJob):
             raise RuntimeError(f'No NF config file available for server, please fix server config')
         params = ['--md5out', '-c', os.path.join(sharemap[nfcl['servershare_id']], nfcl['path'], nfcl['sfile__filename'])]
         params.extend([x for y in [(f'--{k}', v) for k,v in pwiz.params.items()] for x in y])
+        params.extend(anaserver.nfparams)
         for pname in ['options', 'filters']:
             p2parse = kwargs.get(pname, [])
             if len(p2parse):

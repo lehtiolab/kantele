@@ -128,6 +128,7 @@ class RefineMzmls(DatasetJob):
         params = ['--instrument', kwargs['instrument']]
         if kwargs['qtype'] != 'labelfree':
             params.extend(['--isobaric', kwargs['qtype']])
+        params.extend(anaserver.nfparams)
         run = {'analysis_id': analysis.id,
                'token': analysis.nextflowsearch.token,
                'wf_commit': nfwf.commit,
@@ -198,6 +199,7 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
             params.extend(['--trackedpeptides', ';'.join([f'{pep}_{ch}'
                 for _, pep, ch in kwargs['trackpeptides']])])
 
+        params.extend(anaserver.nfparams)
         self.run_tasks.append((run, params, stagefiles, nfwf.nfversion, anaserver.scratchdir))
         analysis.log.append('[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S')))
         analysis.save()
@@ -445,6 +447,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
 
         params = [str(x) for x in kwargs['inputs']['params']]
         # Runname defined when run executed (FIXME can be removed, no reason to not do that here)
+        params.extend(anaserver.nfparams)
         # RunID is probably only used in a couple of pipelines but it's nice to use "our" analysis ID here
         # and needs to be coupled here, cannot have user make it
         params.extend(['--name', 'RUNNAME__PLACEHOLDER', '--runid', f'run_{analysis.pk}'])
