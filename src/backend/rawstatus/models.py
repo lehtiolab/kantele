@@ -195,7 +195,7 @@ class AnalysisServerProfile(models.Model):
     analysisoutshare = models.ForeignKey(FileserverShare, on_delete=models.CASCADE)
 
     def __str__(self):
-        return self.server.name
+        return self.name
 
 
 class UploadFileType(models.IntegerChoices):

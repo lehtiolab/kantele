@@ -1193,8 +1193,8 @@ def refine_mzmls(request):
         return JsonResponse({'error': 'Dataset contains data from multiple instrument types: '
             f'{insts} cannot convert all in the same way, separate them'}, status=403)
     else:
-        instrument = ds_instype_q.values(name=Value('rawfile__producer__msinstrument__instrumenttype__name')
-                ).get()['name']
+        instrument = ds_instype_q.values('rawfile__producer__msinstrument__instrumenttype__name'
+                ).get()['rawfile__producer__msinstrument__instrumenttype__name']
 
     # Check if existing normal/refined mzMLs (normal mzMLs can be deleted for this 
     # due to age, its just the number we need, but refined mzMLs should not be)
