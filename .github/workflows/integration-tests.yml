@@ -67,7 +67,7 @@ jobs:
                   up --detach db mq
                 sleep 5 # DB needs to be up or app crashes trying to connect
                 docker compose --env-file  src/docker/.compose.testing.env -f src/docker/docker-compose-testing.yml \
-                  run --use-aliases web python manage.py test --tag home --tag slow
+                  run --use-aliases web python manage.py test --tag slow --exclude-tag mstulos --exclude-tag analysis --exclude-tag datasets --exclude-tag storage
 
     integration-tests-rest:
         runs-on: ubuntu-latest

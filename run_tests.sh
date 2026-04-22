@@ -7,9 +7,6 @@ echo Cleaning up
 git clean -xf data/teststorage
 git checkout -- data/teststorage
 
-# Clean old containers
-$DOCKERCMD down
-
 export GROUP_ID=$(id -g)
 export USER_ID=$(id -u)
 
@@ -49,7 +46,7 @@ TESTCMD="python manage.py test"
 if [[ -z "$1" ]]
 then
     $DOCKERCMD run --use-aliases web $TESTCMD --tag slow --exclude-tag mstulos --exclude-tag home
-    $DOCKERCMD run --use-aliases web $TESTCMD --tag home
+    $DOCKERCMD run --use-aliases web $TESTCMD --tag slow --exclude-tag mstulos --exclude-tag analysis --exclude-tag datasets --exclude-tag storage
     $DOCKERCMD run --use-aliases web $TESTCMD --exclude-tag slow --exclude-tag mstulos
 else
     $DOCKERCMD run --use-aliases web $TESTCMD $1

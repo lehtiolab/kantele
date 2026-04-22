@@ -9,6 +9,7 @@ from django.core.management import call_command
 from django.utils import timezone
 from django.db.models import Max
 from django.contrib.auth.models import User
+from django.test import tag
 
 from kantele.tests import BaseTest, BaseIntegrationTest
 from kantele import settings
@@ -20,6 +21,7 @@ from jobs import jobs as jj
 from datasets import models as dm
 
 
+@tag('analysis')
 class TestDownloadFasta(BaseIntegrationTest):
 
     def test_ensembl(self):
@@ -41,6 +43,7 @@ class TestDownloadFasta(BaseIntegrationTest):
         self.assertTrue(os.path.exists(os.path.join(self.libctrl.path, fafns[0])))
 
 
+@tag('analysis')
 class AnalysisPageTest(BaseIntegrationTest):
     def setUp(self):
         super().setUp()
