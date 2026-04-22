@@ -295,23 +295,23 @@ class RunNextflowWorkflow(MultiDatasetJob):
         nfwf = models.NextflowWfVersionParamset.objects.select_related('nfworkflow').get(
             pk=kwargs['wfv_id'])
         try:
-            anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['fserver_id'],
+            anaserver = rm.AnalysisServerProfile.objects.get(pk=kwargs['anaserverprofile_id'],
                     server__active=True)
         except rm.AnalysisServerProfile.DoesNotExist:
             raise RuntimeError('Processing server requested does not exist or is not active or is '
                     'not capable of analysis')
         self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_NXF)
         sharemap = {fss['share_id']: fss['path'] for fss in rm.FileserverShare.objects.filter(
-            share__active=True, server_id=kwargs['fserver_id']).values('share_id', 'path')}
-        if not (outshare := rm.FileserverShare.objects.filter(server_id=kwargs['fserver_id'],
+            share__active=True, server_id=anaserver.server_id).values('share_id', 'path')}
+        if not (outshare := rm.FileserverShare.objects.filter(pk=anaserver.analysisoutshare_id,
                 share__active=True, share__function=rm.ShareFunction.ANALYSISRESULTS
                 ).values('share_id').first()):
-            raise RuntimeError('Analysis server has no defined results share connected or known')
+            raise RuntimeError('Config error: analysis server has no defined results share connected or known')
         stagefiles = {}
         for flag, sfid in kwargs['inputs']['singlefiles'].items():
             sfl_q = rm.StoredFileLoc.objects.filter(sfile_id=sfid, servershare__active=True,
-                    servershare__fileservershare__server_id=kwargs['fserver_id'], active=True).values(
-                            'servershare_id', 'path', 'sfile__filename')
+                    servershare__fileservershare__server_id=anaserver.server_id, active=True
+                    ).values('servershare_id', 'path', 'sfile__filename')
             if sfl_q.exists():
                 sfl = sfl_q.first()
                 stagefiles[flag] = [(os.path.join(sharemap[sfl['servershare_id']], sfl['path']),
@@ -322,7 +322,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
             stagefiles[flag] = []
             for sfid in sfids:
                 if sfl_q := rm.StoredFileLoc.objects.filter(sfile_id=sfid, servershare__active=True,
-                        servershare__fileservershare__server_id=kwargs['fserver_id'],
+                        servershare__fileservershare__server_id=anaserver.server_id,
                         active=True).values('servershare_id', 'path', 'sfile__filename'):
                     sfl = sfl_q.first()
                     stagefiles[flag].append((os.path.join(sharemap[sfl['servershare_id']], sfl['path']),

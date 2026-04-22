@@ -110,7 +110,7 @@ class AnalysisPageTest(BaseIntegrationTest):
         self.ana = am.Analysis.objects.create(user=self.user, name='testana_iso',
                 base_rundir='testdir_iso', securityclass=rm.DataSecurityClass.NOSECURITY)
         self.dsa = am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.ds)
-        self.anajob = jm.Job.objects.create(funcname='testjob', kwargs={'fserver_id': self.anaserver.pk}, state=jj.Jobstates.WAITING,
+        self.anajob = jm.Job.objects.create(funcname='testjob', kwargs={'anaserverprofile_id': self.anaprofile.pk}, state=jj.Jobstates.WAITING,
                 timestamp=timezone.now())
         self.nfs = am.NextflowSearch.objects.create(analysis=self.ana, nfwfversionparamset=self.nfwf,
                 workflow=self.wf, token='tok123', job=self.anajob)
@@ -362,7 +362,7 @@ class TestGetAnalysis(AnalysisPageTest):
         self.assertInHTML(html_dsids, resphtml)
         self.isoqvals = {'denoms': {self.qch.pk: True}, 'sweep': False, 'report_intensity': False, 'remove': {}}
         html_ana = f'''<script id="analysis_data" type="application/json">
-        {{"analysis_id": {self.ana.pk}, "analysisname": "{self.ana.name}", "flags": [{self.param1.pk}], "multicheck": ["{self.param2.pk}___{self.anamcparam.value[0]}"], "inputparams": {{"{self.param3.pk}": {self.ananormparam.value}, "{self.param4.pk}": "{self.anaselectparam.value}"}}, "multifileparams": {{"{self.pfn1.pk}": {{"0": {self.tmpsf.pk}}}}}, "fileparams": {{"{self.pfn2.pk}": {self.txtsf.pk}}}, "isoquants": {{"{self.anaset.setname}": {{"chemistry": "{self.ds.quantdataset.quanttype.shortname}", "channels": {{"{self.qch.name}": ["{self.projsam1.sample}", {self.qch.pk}]}}, "samplegroups": {{"{self.samples.samples[0][0]}": "{self.samples.samples[0][3]}"}}, "denoms": {{"{self.qch.pk}": true}}, "remove": {{}}, "report_intensity": false, "sweep": false}}}}, "added_results": {{}}, "editable": true, "jobstate": "{self.anajob.state}", "external_desc": "", "wfversion_id": {self.nfwf.pk}, "wfid": {self.wf.pk}, "analysisserver_id": {self.anaserver.pk}, "external_results": false, "base_analysis": {{}}}}
+        {{"analysis_id": {self.ana.pk}, "analysisname": "{self.ana.name}", "flags": [{self.param1.pk}], "multicheck": ["{self.param2.pk}___{self.anamcparam.value[0]}"], "inputparams": {{"{self.param3.pk}": {self.ananormparam.value}, "{self.param4.pk}": "{self.anaselectparam.value}"}}, "multifileparams": {{"{self.pfn1.pk}": {{"0": {self.tmpsf.pk}}}}}, "fileparams": {{"{self.pfn2.pk}": {self.txtsf.pk}}}, "isoquants": {{"{self.anaset.setname}": {{"chemistry": "{self.ds.quantdataset.quanttype.shortname}", "channels": {{"{self.qch.name}": ["{self.projsam1.sample}", {self.qch.pk}]}}, "samplegroups": {{"{self.samples.samples[0][0]}": "{self.samples.samples[0][3]}"}}, "denoms": {{"{self.qch.pk}": true}}, "remove": {{}}, "report_intensity": false, "sweep": false}}}}, "added_results": {{}}, "editable": true, "jobstate": "{self.anajob.state}", "external_desc": "", "wfversion_id": {self.nfwf.pk}, "wfid": {self.wf.pk}, "analysisprofile_id": {self.anaprofile.pk}, "external_results": false, "base_analysis": {{}}}}
         </script>
         '''
         self.assertInHTML(html_ana, resphtml)
@@ -464,8 +464,8 @@ class TestGetDatasetsIso(AnalysisPageTest):
                 'field_order': self.inputdef.value[-1:],
                 'error': False,
                 'errmsg': [],
-                'servers': [{'id': self.anaserver.pk, 'name': self.anaserver.name},
-                    {'id': self.remoteanaserver.pk, 'name': self.remoteanaserver.name}
+                'servers': [{'id': self.anaprofile.pk, 'name': self.anaprofile.name},
+                    {'id': self.anaprofile2.pk, 'name': self.anaprofile2.name}
                     ]
                 }
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
@@ -505,8 +505,8 @@ class TestGetDatasetsIso(AnalysisPageTest):
                 'field_order': self.inputdef.value[-1:],
                 'error': False,
                 'errmsg': [],
-                'servers': [{'id': self.anaserver.pk, 'name': self.anaserver.name},
-                    {'id': self.remoteanaserver.pk, 'name': self.remoteanaserver.name}
+                'servers': [{'id': self.anaprofile.pk, 'name': self.anaprofile.name},
+                    {'id': self.anaprofile2.pk, 'name': self.anaprofile2.name}
                     ],
                 }
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
@@ -552,8 +552,8 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
                 'errmsg': [],
                 # TODO update this when personal data hits (remove anaserver)
                 'servers': [
-                    {'id': self.anaserver.pk, 'name': self.anaserver.name},
-                    {'id': self.remoteanaserver.pk, 'name': self.remoteanaserver.name}]
+                    {'id': self.anaprofile.pk, 'name': self.anaprofile.name},
+                    {'id': self.anaprofile2.pk, 'name': self.anaprofile2.name}]
                 }
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
 
@@ -597,8 +597,8 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
                 # will only return ONE server, uncomment the below line
                 #'servers': [{'id': self.remoteanaserver.pk, 'name': self.remoteanaserver.name}],
                 'servers': [
-                    {'id': self.anaserver.pk, 'name': self.anaserver.name},
-                    {'id': self.remoteanaserver.pk, 'name': self.remoteanaserver.name}]
+                    {'id': self.anaprofile.pk, 'name': self.anaprofile.name},
+                    {'id': self.anaprofile2.pk, 'name': self.anaprofile2.name}]
                 }
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
 
@@ -670,7 +670,7 @@ class TestGetWorkflowVersionDetails(AnalysisPageTest):
             'prev_resultfiles': [{'ana': f'{self.wftype.name}_{self.ana.name}',
                 'date': datetime.strftime(self.ana.date, '%Y-%m-%d'), 'id': self.resultfn.sfile_id,
                 'fn': self.resultfn.sfile.filename}],
-            'servers': [{'id': x.pk, 'name': x.name} for x in [self.anaserver, self.remoteanaserver]],
+            'servers': [{'id': x.pk, 'name': x.name} for x in [self.anaprofile, self.anaprofile2]],
             }}
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
 
@@ -699,7 +699,7 @@ class TestStoreAnalysis(AnalysisPageTest):
                 'params': params, 'singlefiles': {}, 'multifiles': {}, 'base_analysis': {
                     'isComplement': False, 'dsets_identical': False, 'selected': False,
                     'typedname': '', 'fetched': {}, 'resultfiles': []},
-                'wfid': False, 'analysisserver_id': False,
+                'wfid': False, 'analysisprofile_id': False,
             }
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 200)
@@ -767,10 +767,9 @@ class TestStoreAnalysis(AnalysisPageTest):
                 'resultfiles': [],
                 },
             'wfid': self.wf.pk,
-            'analysisserver_id': self.anaserver.pk,
+            'analysisprofile_id': self.anaprofile.pk,
             }
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
-
         self.assertEqual(resp.status_code, 200)
         ana = am.Analysis.objects.last()
         self.assertEqual(ana.analysissampletable.samples, {'hello': 'yes'})
@@ -918,7 +917,7 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
                 'resultfiles': [],
                 },
             'wfid': self.wf.pk,
-            'analysisserver_id': self.remoteanaserver.pk,
+            'analysisprofile_id': self.anaprofile2.pk,
             }
         prenow = datetime.now()
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
@@ -959,7 +958,7 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
           'filefields': {},
           'filesamples': {self.f3sfmz.pk: 'setA'},
           'infiles': {self.f3sfmz.pk: 1},
-          'fserver_id': self.remoteanaserver.pk,
+          'anaserverprofile_id': self.anaprofile2.pk,
           'dss_ids': [remotedss.pk],
           'sfloc_ids': [remotemzml.pk],
           'inputs': {'components': {c_ch.INPUTDEF.name: self.inputdef.value,
@@ -1028,7 +1027,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
                 'resultfiles': [],
                 },
             'wfid': self.wf.pk,
-            'analysisserver_id': self.anaserver.pk,
+            'analysisprofile_id': self.anaprofile.pk,
             }
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         timestamp = datetime.strftime(datetime.now(), '%Y%m%d_')
@@ -1076,7 +1075,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
                 'resultfiles': [],
                 },
             'wfid': self.wf.pk,
-            'analysisserver_id': self.anaserver.pk,
+            'analysisprofile_id': self.anaprofile.pk,
             }
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         timestamp = datetime.strftime(datetime.now(), '%Y%m%d_')
@@ -1158,7 +1157,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
                 'resultfiles': [],
                 },
             'wfid': self.wf.pk,
-            'analysisserver_id': self.anaserver.pk,
+            'analysisprofile_id': self.anaprofile.pk,
             }
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 400)
