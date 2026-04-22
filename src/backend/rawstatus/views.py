@@ -25,7 +25,7 @@ from celery import states as taskstates
 from kantele import settings
 from rawstatus.models import (RawFile, Producer, StoredFile, FileServer, ServerShare, StoredFileLoc,
         ShareFunction, FileserverShare, StoredFileType, UserFile, MSFileData, PDCBackedupFile, 
-        UploadToken, UploadFileType, DataSecurityClass, FileJob)
+        UploadToken, UploadFileType, DataSecurityClass, FileJob, AnalysisServerProfile)
 from rawstatus import jobs as rsjobs
 from rawstatus.tasks import search_raws_downloaded
 from analysis.models import (Analysis, LibraryFile, AnalysisResultFile, UniProtFasta, EnsemblFasta,
@@ -928,20 +928,21 @@ def transfer_file(request):
 
 def rsync_qc_to_analysis(sfl_q, nfwfvid):
     '''Select sfl to run QC on, if not on analysis server, queue it to one.
-    Returns either (sfl, server_id, False)
-    OR (False, False 'error message')
+    Returns either (sfl, server_id, anaprofile_id, False)
+    OR (False, False, False,'error message')
     '''
+
     fss_q = FileserverShare.objects.filter(share__function=ShareFunction.RAWDATA,
             server__analysisserverprofile__nfconfigfile__nfpipe_id=nfwfvid, server__active=True,
             share__active=True)
     if ana_sfl := sfl_q.filter(servershare__fileservershare__in=fss_q):
         # File is on analysis server with QC pipe 
         sfloc = ana_sfl.first()
-        fss = fss_q.filter(share_id=sfloc.servershare_id).values('server_id').first()
+        fss = fss_q.filter(share_id=sfloc.servershare_id).values('server_id', 'pk').first()
 
     elif ana_rs_fssq := fss_q.filter(server__can_rsync_remote=True):
         # We can pull file to analysis server with QC pipe
-        fss = ana_rs_fssq.values('share_id', 'server_id').first()
+        fss = ana_rs_fssq.values('share_id', 'pk', 'server_id').first()
         srcsfl = sfl_q.first()
         dstpath = os.path.join(settings.QC_STORAGE_DIR, srcsfl.sfile.rawfile.producer.name)
         # FIXME path!
@@ -951,7 +952,7 @@ def rsync_qc_to_analysis(sfl_q, nfwfvid):
 
     elif srcsfloc := sfl_q.filter(servershare__fileservershare__server__can_rsync_remote=True):
         # We can push file to analysis server with QC
-        fss = fss_q.values('share_id', 'server_id').first()
+        fss = fss_q.values('share_id', 'pk', 'server_id').first()
         srcsfl = srcsfloc.first()
         dstpath = os.path.join(settings.QC_STORAGE_DIR, srcsfl.sfile.rawfile.producer.name)
         qc_mvjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=srcsfl.pk,
@@ -961,15 +962,19 @@ def rsync_qc_to_analysis(sfl_q, nfwfvid):
         msg = (f'Queued file {sfl_q.values("storedfile__filename").get()["storedfile__filename"]} '
                 'for QC run could not be found on any share with either analysis or rsync transfer '
                 'capabilities')
+        fss = False
         return False, False, msg
-    return sfloc, fss['server_id'], False
+    # Run on first available profile for the server
+    anaprofile = AnalysisServerProfile.objects.filter(nfconfigfile__nfpipe_id=nfwfvid,
+            server__fileservershare__id=fss['pk'], server__active=True).values('pk').first()
+    return sfloc, fss['server_id'], anaprofile['pk'], False
 
 
 def run_singlefile_qc(sfloc_q, user_op, acqtype):
     """This method is only run for detecting new incoming QC files"""
     wf = UserWorkflow.objects.filter(wftype=UserWorkflow.WFTypeChoices.QC).last()
     nfwfvid = wf.nfwfversionparamsets.values('pk').last()['pk']
-    sfloc, server_id, rsync_errmsg = rsync_qc_to_analysis(sfloc_q, nfwfvid)
+    sfloc, server_id, anaprofile_id, rsync_errmsg = rsync_qc_to_analysis(sfloc_q, nfwfvid)
     if rsync_errmsg and not sfloc:
         return rsync_errmsg
 
@@ -989,8 +994,8 @@ def run_singlefile_qc(sfloc_q, user_op, acqtype):
     nfconfig = LibraryFile.objects.filter(nfconfigfile__serverprofile__server_id=server_id,
             nfconfigfile__nfpipe_id=nfwfvid).values('sfile_id').get()['sfile_id']
     create_job('run_longit_qc_workflow', sfloc_id=sfloc.id, analysis_id=analysis.id, wf_id=wf.pk,
-            nfwfvid=nfwfvid, fserver_id=server_id, nfconfig_id=nfconfig, qcrun_id=qcrun.pk,
-            params=params, trackpeptides=trackpeps)
+            nfwfvid=nfwfvid, fserver_id=server_id, anaserverprofile_id=anaprofile_id,
+            nfconfig_id=nfconfig, qcrun_id=qcrun.pk, params=params, trackpeptides=trackpeps)
     return False
 
 

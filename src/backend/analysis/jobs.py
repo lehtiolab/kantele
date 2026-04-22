@@ -48,7 +48,7 @@ class RefineMzmls(DatasetJob):
         dst_sfls = []
         dss = dm.DatasetServer.objects.values('storageshare_id', 'storage_loc').get(
                 pk=kwargs['dss_id'])
-        anasrcshareonserver = rm.FileserverShare.objects.filter(server_id=kwargs['anaserver_id'],
+        anasrcshareonserver = rm.FileserverShare.objects.filter(server_id=kwargs['server_id'],
                 share_id=dss['storageshare_id']).values('path', 'share_id').first()
 
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
@@ -65,8 +65,7 @@ class RefineMzmls(DatasetJob):
                 # This goes to system log, not user
                 raise RuntimeError('Trying to create mzML that already seems to exist, '
                         f'{mzmlfilename}')
-        return {'dstsfloc_ids': dst_sfls, 'server_id': kwargs['anaserver_id'],
-                'srcsharepath': anasrcshareonserver['path']}
+        return {'dstsfloc_ids': dst_sfls, 'srcsharepath': anasrcshareonserver['path']}
 
     def _get_extrafiles_to_rsync(self, **kwargs):
         return [kwargs['dbfn_id'], kwargs['nfconfig_id']]
@@ -83,18 +82,18 @@ class RefineMzmls(DatasetJob):
         except dm.DatasetServer.DoesNotExist:
             raise RuntimeError('Dataset to refine is not on an existing active servershare')
         try:
-            anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['server_id'],
+            anaserver = rm.AnalysisServerProfile.objects.get(pk=kwargs['anaserverprofile_id'],
                     server__active=True)
         except rm.AnalysisServerProfile.DoesNotExist:
             raise RuntimeError('Server chosen to run refine workflow is not existing/active')
         self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_NXF)
         sharemap = {fss['share_id']: fss['path'] for fss in rm.FileserverShare.objects.filter(
-            server__active=True, share__active=True,
-            server_id=kwargs['server_id']).values('share_id', 'path')}
+            server__active=True, share__active=True, server=anaserver.server
+            ).values('share_id', 'path')}
 
         if nfcloc_q := rm.StoredFileLoc.objects.filter(sfile_id=kwargs['nfconfig_id'], active=True,
-                servershare__fileservershare__server_id=kwargs['server_id'],
-                servershare__active=True).values('servershare_id', 'path', 'sfile__filename'):
+                servershare__fileservershare__server_id=kwargs['server_id'], servershare__active=True
+                ).values('servershare_id', 'path', 'sfile__filename'):
             nfcl = nfcloc_q.first()
         else:
             raise RuntimeError(f'No NF config file available for server, please fix server config')
@@ -105,9 +104,8 @@ class RefineMzmls(DatasetJob):
         nfwf = models.NextflowWfVersionParamset.objects.get(pk=kwargs['wfv_id'])
 
         dbfn = rm.StoredFileLoc.objects.filter(sfile_id=kwargs['dbfn_id'],
-                servershare__active=True,
-                servershare__fileservershare__server_id=kwargs['server_id']).values(
-                        'servershare_id', 'path', 'sfile__filename').first()
+                servershare__active=True, servershare__fileservershare__server_id=kwargs['server_id']
+                ).values('servershare_id', 'path', 'sfile__filename').first()
         
         stagefiles = {
                 '--tdb': [(os.path.join(sharemap[dbfn['servershare_id']], dbfn['path']),
@@ -137,7 +135,6 @@ class RefineMzmls(DatasetJob):
                'repo': nfwf.nfworkflow.repo,
                'runname':  analysis.get_run_base_dir(),
                'outsharepath': outsharepath,
-               'server_id': anaserver.server_id,
                'dsspath': dss['storage_loc'],
                }
         self.run_tasks.append((run, params, mzmls, stagefiles, nfwf.nfversion, anaserver.scratchdir))
@@ -161,7 +158,7 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
         sfl = rm.StoredFileLoc.objects.values('servershare_id', 'path', 'sfile__filename',
                 'sfile__rawfile_id', 'sfile__rawfile__producer__name').get(pk=kwargs['sfloc_id'])
         try:
-            anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['fserver_id'],
+            anaserver = rm.AnalysisServerProfile.objects.get(pk=kwargs['anaserverprofile_id'],
                     server__active=True)
         except rm.AnalysisServerProfile.DoesNotExist:
             raise RuntimeError('Processing server requested does not exist or is not active or is '
