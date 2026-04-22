@@ -48,11 +48,11 @@ echo Running tests
 TESTCMD="python manage.py test"
 if [[ -z "$1" ]]
 then
-    $DOCKERCMD run --use-aliases web $TESTCMD --exclude-tag mstulos || ($DOCKERCMD logs web storage_mvfiles storage_downloads tulos_ingester storage_web_rsync && exit 1)
-    $DOCKERCMD run --use-aliases web $TESTCMD mstulos || ($DOCKERCMD logs web storage_mvfiles storage_downloads tulos_ingester && exit 1)
+    $DOCKERCMD run --use-aliases web $TESTCMD --tag slow --exclude-tag mstulos --exclude-tag home
+    $DOCKERCMD run --use-aliases web $TESTCMD --tag home
+    $DOCKERCMD run --use-aliases web $TESTCMD --exclude-tag slow --exclude-tag mstulos
 else
-    $DOCKERCMD run --use-aliases web $TESTCMD $1|| ($DOCKERCMD logs web storage_mvfiles storage_web_rsync storage_downloads tulos_ingester && exit 1)
+    $DOCKERCMD run --use-aliases web $TESTCMD $1
 fi
-$DOCKERCMD down
 
 rm -rf data/test/nfrepo/.git

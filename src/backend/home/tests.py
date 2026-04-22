@@ -3,6 +3,7 @@ from datetime import datetime
 from shutil import copytree, copy
 from django.utils import timezone
 from django.contrib.auth.models import User
+from django.test import tag
 
 from kantele import settings
 from kantele.tests import BaseTest, BaseIntegrationTest
@@ -13,6 +14,7 @@ from jobs import models as jm
 from jobs.jobs import Jobstates
 
 
+@tag('home')
 class MzmlTests(BaseIntegrationTest):
     def setUp(self):
         super().setUp()
