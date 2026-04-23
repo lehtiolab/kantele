@@ -89,7 +89,7 @@ function updateResultfiles() {
 let config = {
   wfid: false,
   wfversion: false,
-  analysisserver_id: false,
+  analysisprofile_id: false,
   analysisname: '',
   editable: true,
   external_results: false,
@@ -212,7 +212,7 @@ async function storeAnalysis() {
     wfid: config.wfid,
     nfwfvid: config.wfversion.id || false,
     analysisname: config.analysisname,
-    analysisserver_id: config.analysisserver_id,
+    analysisprofile_id: config.analysisprofile_id,
     // Most params are {param.id: value, param2.id: value}, but multicheck
     // is checkboxes and is thus {param.id: [value1.id, value2.id]}
     params: {
@@ -652,7 +652,7 @@ async function populate_analysis_and_fetch_wf() {
   // Only runs in onMount
   if (existing_analysis.wfid) {
     config.wfid = existing_analysis.wfid;
-    config.analysisserver_id = existing_analysis.analysisserver_id;
+    config.analysisprofile_id = existing_analysis.analysisprofile_id;
     if (existing_analysis.wfid in allwfs) {
       config.wfversion = allwfs[existing_analysis.wfid].versions.filter(
         x => x.id === existing_analysis.wfversion_id)[0];
@@ -881,13 +881,13 @@ onMount(async() => {
         </div>
       </div>
       <div class="field-label is-normal">
-        <label class="label">Analysis server:</label>
+        <label class="label">Analysis server/project:</label>
       </div>
       <div class="field-body">
         <div class="field">
           <div class="select">
-            <select bind:value={config.analysisserver_id}>
-              <option disabled value={false}>Select analysis server</option>
+            <select bind:value={config.analysisprofile_id}>
+              <option disabled value={false}>Select analysis profile</option>
               {#each avail_servers as {id, name}}
               <option value={id}>{name}</option>
               {/each}

@@ -212,7 +212,6 @@ class ConvertDatasetMzml(DatasetJob):
                 share_id=dss['storageshare_id']).values('share_id', 'path').first()
 
         runpath = f'{dss["dataset_id"]}_convert_mzml_{kwargs["timestamp"]}'
-        dstpath = os.path.join(anasrcshareonserver['path'], dss['storage_loc'])
 
         pwiz = Proteowizard.objects.get(pk=kwargs['pwiz_id'])
         for sfl in self.oncreate_getfiles_query(**kwargs):
@@ -231,7 +230,7 @@ class ConvertDatasetMzml(DatasetJob):
     def process(self, **kwargs):
         dss = DatasetServer.objects.values('storage_loc').get(pk=kwargs['dss_id'])
         try:
-            anaserver = rm.AnalysisServerProfile.objects.get(server_id=kwargs['server_id'],
+            anaserver = rm.AnalysisServerProfile.objects.get(pk=kwargs['anaserverprofile_id'],
                 server__active=True)
         except rm.AnalysisServerProfile.DoesNotExist:
             raise RuntimeError('Processing server requested does not exist or is not active or is '
@@ -258,7 +257,6 @@ class ConvertDatasetMzml(DatasetJob):
                'nxf_wf_fn': nfwf.filename,
                'repo': nfwf.nfworkflow.repo,
                'runname': kwargs['runpath'],
-               'server_id': anaserver.server_id,
                'outsharepath': sharemap[mzsfl['servershare_id']],
                'dsspath': kwargs['dsspath'],
                }
@@ -270,6 +268,7 @@ class ConvertDatasetMzml(DatasetJob):
             raise RuntimeError(f'No NF config file available for server, please fix server config')
         params = ['--md5out', '-c', os.path.join(sharemap[nfcl['servershare_id']], nfcl['path'], nfcl['sfile__filename'])]
         params.extend([x for y in [(f'--{k}', v) for k,v in pwiz.params.items()] for x in y])
+        params.extend(anaserver.nfparams)
         for pname in ['options', 'filters']:
             p2parse = kwargs.get(pname, [])
             if len(p2parse):

@@ -177,8 +177,7 @@ function newPepsetBlank() {
 
 function addServer() {
   const server = {pk: false, name: '', uri: '', fqdn: '', active: true, can_backup: false,
-    can_rsync_remote: false, rsyncusername: '', rsynckeyfile: '', show_analysis_profile: false,
-    mounted: [],
+    can_rsync_remote: false, rsyncusername: '', rsynckeyfile: '', mounted: [], analysisprofiles: [],
   }
   servers = [server, ...servers];
 }
@@ -192,6 +191,16 @@ function addStorageShare() {
 
 function addStorageShareToServer(server) {
   server.mounted = [...server.mounted, {share: false, path: ''}];
+  servers = servers;
+}
+
+function addAnaProfileToServer(server) {
+  server.analysisprofiles = [...server.analysisprofiles, {name: '', nfparams: '', queue_name: '', scratchdir: '', analysisoutshare_id: false, pk: false}];
+  servers = servers;
+}
+
+function removeAnaProfileFromServer(server, profilepk) {
+  server.analysisprofiles = server.analysisprofiles.filter(x => x.pk !== profilepk);
   servers = servers;
 }
 
@@ -402,11 +411,6 @@ async function saveShare(share) {
               <input bind:checked={server.can_backup} type="checkbox"> Backup controller
             </label>
           </span>
-          <span class="field ml-3 mr-3 mt-2">
-            <label class="checkbox">
-              <input bind:checked={server.show_analysis_profile} type="checkbox"> Analysis
-            </label>
-          </span>
         </div>
     
         <div class="field is-horizontal">
@@ -458,9 +462,27 @@ async function saveShare(share) {
         </div>
 
 
-        {#if server.show_analysis_profile}
+        <h5 class="title is-5">
+          Analysis profiles/projects
+          <button class="button is-small is-info has-text-weight-bold" on:click={e => addAnaProfileToServer(server)}>Add analysis profile</button>
+        </h5>
+
+        {#each server.analysisprofiles as profile}
+
         <div class="box has-background-info-light">
-          <h6 class="title is-6">Analysis server</h6>
+          <button class="button is-danger delete" on:click={e => removeAnaProfileFromServer(server, profile.pk)}></button>
+          <div class="field is-horizontal">
+            <div class="field-label is-normal">
+              <label class="label">Profile name</label>
+            </div>
+            <div class="field-body">
+              <div class="field">
+                <p class="control">
+                  <input class="input" bind:value="{profile.name}" />
+                </p>
+              </div>
+            </div>
+          </div>
           <div class="field is-horizontal">
             <div class="field-label is-normal">
               <label class="label">Analysis queue</label>
@@ -468,12 +490,37 @@ async function saveShare(share) {
             <div class="field-body">
               <div class="field">
                 <p class="control">
-                  <input class="input" bind:value="{server.queue_name}" />
+                  <input class="input" bind:value="{profile.queue_name}" />
                 </p>
               </div>
             </div>
           </div>
-
+          <div class="field is-horizontal">
+            <div class="field-label is-normal">
+              <label class="label">Output share</label>
+            </div>
+            <div class="field-body">
+              <div class="select">
+                <select bind:value={profile.analysisoutshare_id}>
+                {#each server.mounted as mountshare}
+                  <option value={mountshare.fssid}>{mountshare.sharename}</option>
+                {/each}
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="field is-horizontal">
+            <div class="field-label is-normal">
+              <label class="label">NF params</label>
+            </div>
+            <div class="field-body">
+              <div class="field">
+                <p class="control">
+                  <input class="input" placeholder='JSON, E.g. ["--project", "proj12345"]' bind:value="{profile.nfparams}" />
+                </p>
+              </div>
+            </div>
+          </div>
           <div class="field is-horizontal">
             <div class="field-label is-normal">
               <label class="label">Scratchdir</label>
@@ -481,13 +528,14 @@ async function saveShare(share) {
             <div class="field-body">
               <div class="field">
                 <p class="control">
-                  <input class="input" placeholder="Can be empty" bind:value="{server.scratchdir}" />
+                  <input class="input" placeholder="Can be empty" bind:value="{profile.scratchdir}" />
                 </p>
               </div>
             </div>
           </div>
         </div>
-        {/if}
+        {/each}
+
         {#each server.mounted as fss}
           <div class="box">
             <div class="field is-horizontal">

@@ -172,7 +172,6 @@ def run_nextflow_workflow(self, run, params, stagefiles, nf_version, scratchbase
             for fn in run['old_infiles']:
                 fp.write(f'\n{fn}')
         params.extend(['--oldmzmldef', os.path.join(stagedir, 'oldinputdef.txt')])
-    params = [x if x != 'RUNNAME__PLACEHOLDER' else run['runname'] for x in params]
     outfiles = execute_normal_nf(run, params, os.path.basename(rundir), gitwfdir, self.request.id,
             nf_version, scratchdir)
 

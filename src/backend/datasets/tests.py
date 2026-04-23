@@ -4,6 +4,7 @@ from datetime import datetime
 from django.utils import timezone
 from django.test import TestCase, Client
 from django.contrib.auth.models import User
+from django.test import tag
 
 from kantele import settings
 from kantele.tests import BaseTest, BaseIntegrationTest, ProcessJobTest
@@ -15,6 +16,7 @@ from jobs.jobs import Jobstates
 from rawstatus import models as rm
 
 
+@tag('datasets')
 class SaveUpdateDatasetTest(BaseIntegrationTest):
     url = '/datasets/save/dataset/'
 
@@ -269,6 +271,7 @@ class FindFilesTest(BaseTest):
         self.assertJSONEqual(resp.content.decode('utf-8'), {'newfn_order': [], 'newFiles': {}})
 
 
+@tag('datasets')
 class UpdateFilesTest(BaseIntegrationTest):
     url = '/datasets/save/files/'
 
@@ -400,6 +403,7 @@ class UpdateFilesTest(BaseIntegrationTest):
         self.assertEqual(dtc.state, dm.DCStates.NEW)
 
 
+@tag('datasets')
 class AcceptRejectPreassocFiles(BaseIntegrationTest):
     url = '/datasets/save/files/pending/'
 
@@ -496,6 +500,7 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
             state=dm.DCStates.OK).exists())
 
 
+@tag('datasets')
 class UpdateProjectTest(BaseIntegrationTest):
     url = '/datasets/update/project/'
 

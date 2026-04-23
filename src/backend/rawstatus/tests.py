@@ -17,6 +17,7 @@ from celery import states
 from django.utils import timezone
 from django.contrib.auth.models import User
 from django.core.management import call_command
+from django.test import tag
 
 from kantele import settings
 from kantele.tests import BaseTest, ProcessJobTest, BaseIntegrationTest
@@ -49,6 +50,8 @@ class BaseFilesTest(BaseTest):
                 source_md5='b7d55c322fa09ecd8bea141082c5419d', size=100, date=timezone.now(),
                 claimed=False, usetype=rm.UploadFileType.RAWFILE)
 
+
+@tag('storage')
 class TestBrowserUpload(BaseIntegrationTest):
 
     def test_libfile(self):
@@ -92,6 +95,7 @@ class TestBrowserUpload(BaseIntegrationTest):
         self.assertTrue(os.path.exists(os.path.join(self.libctrl.path, fn.filename)))
 
 
+@tag('storage')
 class TestUploadScript(BaseIntegrationTest):
     def setUp(self):
         super().setUp()
@@ -481,6 +485,8 @@ class TestUploadScript(BaseIntegrationTest):
         self.run_job() # run backup
         jm.Task.objects.filter(job__funcname='create_pdc_archive').update(state=states.SUCCESS)
         self.run_job() # run rsync to analysis of both raw and nfconfig files
+        self.anaprofile.nfparams = [] # reset params so we dont pass project to argparse in qc.py
+        self.anaprofile.save()
         self.run_job() # run qc
         qcrun = dashm.QCRun.objects.last()
         self.assertTrue(dashm.LineplotData.objects.filter(qcrun=qcrun,
@@ -1651,6 +1657,7 @@ class TestDownloadUploadScripts(BaseFilesTest):
 # Job tests should test failure modes of jobs, the success happy path is tested inside the
 # integration tests
 
+@tag('storage')
 class TestRenameFile(BaseIntegrationTest):
     url = '/files/rename/'
 
@@ -1712,6 +1719,7 @@ class TestRenameFile(BaseIntegrationTest):
         self.assertIn('already exists. Please choose', rj['error'])
 
 
+@tag('storage')
 class TestUpdateFileDescription(BaseIntegrationTest):
     url = '/files/description/'
 
@@ -1759,6 +1767,7 @@ class TestUpdateFileDescription(BaseIntegrationTest):
         self.assertEqual('File is not a shared file', rj['error'])
 
 
+@tag('storage')
 class TestDeleteJobFile(BaseIntegrationTest):
     jobname = 'purge_files'
 
@@ -1866,6 +1875,7 @@ class TestDeleteJobFile(BaseIntegrationTest):
         self.assertFalse(self.f3sss.purged)
 
 
+@tag('storage')
 class TestAutoDelete(BaseIntegrationTest):
     def setUp(self):
         super().setUp()
@@ -2316,6 +2326,7 @@ class TestArchiveFile(BaseFilesTest):
         self.assertEqual(resp.json()['error'], 'File does not exist')
 
 
+@tag('storage')
 class TestArchiveFileWithJob(BaseIntegrationTest):
     url = '/files/archive/'
 

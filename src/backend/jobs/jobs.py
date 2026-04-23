@@ -170,14 +170,15 @@ class BaseJob:
             extra_sfl_q = StoredFileLoc.objects.filter(sfile_id__in=all_exfiles_sfpk, active=True)
             if extra_sfl_q.distinct('sfile').count() < len(all_exfiles_sfpk):
                 raise RuntimeError('Not all parameter files could be found on disk, make sure they exist')
-            elif 'fserver_id' in kwargs:
-                # Job independent on sfloc_ids has fserver_id so we can pick raw file share here
-                # and rsync extra files to there if needed
+            elif 'anaserverprofile_id' in kwargs:
+                # Job independent on sfloc_ids has analysis profile, so we can pick raw file share 
+                # here and rsync extra files to there if needed
                 ready_sfls = extra_sfl_q.filter(
-                        servershare__fileservershare__server_id=kwargs['fserver_id']
+                        servershare__fileservershare__server__analysisserverprofile=kwargs['anaserverprofile_id']
                         ).distinct('sfile_id')
                 if ready_sfls.distinct('sfile').count() < len(all_exfiles_sfpk):
-                    if dstfss_q := FileserverShare.objects.filter(server_id=kwargs['fserver_id'],
+                    if dstfss_q := FileserverShare.objects.filter(
+                            server__analysisserverprofile__id=kwargs['anaserverprofile_id'],
                             share__function=ShareFunction.RAWDATA).values('share_id', 'share__function'):
                         # Enforce raw data share or error
                         dstfss = dstfss_q.first()

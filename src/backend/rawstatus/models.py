@@ -64,7 +64,9 @@ class DataSecurityClass(models.IntegerChoices):
 
 
 class FileServer(models.Model):
-    '''Controller of possibly multiple shares, can be an analysis controller'''
+    '''Controller of possibly multiple shares, can be an analysis controller. Analysis servers
+    are specified as one server for each project if it is multi-project HPC, each with
+    its own shares (since those are per-project)'''
     # FIXME this is prob where queue locations will be from, but 
     # how to decide where to rsync when we have a share on 2 controllers? E.g. analysis controller
     # and storage controller on open share?
@@ -80,16 +82,6 @@ class FileServer(models.Model):
 
     def __str__(self):
         return self.name
-
-
-class AnalysisServerProfile(models.Model):
-    server = models.OneToOneField(FileServer, on_delete=models.CASCADE)
-    scratchdir = models.TextField(blank=True,
-            help_text='For nextflow TMPDIR and stage if needed. Can be blank if not needed')
-    queue_name = models.TextField(unique=True)
-
-    def __str__(self):
-        return self.server.name
 
 
 class ShareFunction(models.IntegerChoices):
@@ -190,6 +182,20 @@ class FileserverShare(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=['server', 'share'], name='uni_fsshare')]
         constraints = [models.UniqueConstraint(fields=['server', 'path'], name='uni_fspath')]
+
+
+class AnalysisServerProfile(models.Model):
+    name = models.TextField(unique=True, help_text='E.g. server/project name')
+    server = models.ForeignKey(FileServer, on_delete=models.CASCADE)
+    scratchdir = models.TextField(blank=True,
+            help_text='For nextflow TMPDIR and stage if needed. Can be blank if not needed')
+    queue_name = models.TextField(help_text='Also identifier for which project on HPC')
+    nfparams = models.JSONField(default=list, blank=True, help_text='List of parameters to pass '
+            'for this server/project, e.g. ["--project", "proj12345"]')
+    analysisoutshare = models.ForeignKey(FileserverShare, on_delete=models.CASCADE)
+
+    def __str__(self):
+        return self.name
 
 
 class UploadFileType(models.IntegerChoices):

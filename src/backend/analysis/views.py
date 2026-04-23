@@ -269,7 +269,7 @@ def get_analysis(request, anid):
             'external_desc': '',
             'wfversion_id': False,
             'wfid': False,
-            'analysisserver_id': False,
+            'analysisprofile_id': False,
             'external_results': False,
             'base_analysis': {},
             }
@@ -288,7 +288,7 @@ def get_analysis(request, anid):
         analysis.update({
                 'wfversion_id': ana.nextflowsearch.nfwfversionparamset_id,
                 'wfid': ana.nextflowsearch.workflow_id,
-                'analysisserver_id': ana.nextflowsearch.job.kwargs.get('fserver_id', False),
+                'analysisprofile_id': ana.nextflowsearch.job.kwargs.get('anaserverprofile_id', False),
                 'jobstate': ana.nextflowsearch.job.state,
                 })
         PTypes = am.Param.PTypes
@@ -671,10 +671,10 @@ def get_datasets(request, wfversion_id):
         # All servers are already loaded by get_wf, before call to here, so now we
         # refresh servers according to max security
         response.update({'dsets': dsetinfo, 'field_order': field_order, 
-            'servers': [{'id': x['server_id'], 'name': x['server__name']} for x in
-                rm.FileserverShare.objects.filter(server__analysisserverprofile__isnull=False,
-                server__active=True, share__active=True, share__max_security__gte=max_sec
-                ).values('server_id', 'server__name').distinct('server_id')],
+            'servers': [{'id': x['pk'], 'name': x['name']} for x in
+                rm.AnalysisServerProfile.objects.filter(server__active=True,
+                    analysisoutshare__share__max_security__gte=max_sec,
+                    analysisoutshare__share__active=True).values('pk', 'name')],
             })
         return JsonResponse(response)
 
@@ -729,8 +729,8 @@ def get_workflow_versioned(request):
                 for x in selectable_files if x.sfile.filetype_id == ft] for ft in ftypes},
             # All servers shown before any call (if dsets) to datasets, which will
             # refresh servers according to max security
-            'servers': [{'id': x['pk'], 'name': x['name']} for x in rm.FileServer.objects.filter(
-                analysisserverprofile__isnull=False, active=True).values('pk', 'name')],
+            'servers': [{'id': x['pk'], 'name': x['name']} for x in
+                rm.AnalysisServerProfile.objects.filter(server__active=True).values('pk', 'name')],
     }
     # FIXME we should call get workflow versioned when new datasets are added, to get the new
     # prev_resultfiles -> or at least update it
@@ -818,7 +818,7 @@ def store_analysis(request):
         req['base_analysis']
         req['wfid']
         req['upload_external']
-        req['analysisserver_id']
+        req['analysisprofile_id']
     except (json.decoder.JSONDecodeError, ValueError):
         return JsonResponse({'multierror': [], 'errmsg': 'Something went wrong, contact admin concerning a bad request'}, status=400)
     except KeyError:
@@ -974,9 +974,9 @@ def store_analysis(request):
         response_errors.append('No workflow passed, also not uploading external data, '
                 'need at least one of those.')
 
+    # Analysis server
     dss = dm.DatasetServer.objects.filter(dataset_id__in=dsids,
-            storageshare__fileservershare__server_id=req['analysisserver_id'],
-            storageshare__fileservershare__server__analysisserverprofile__isnull=False
+            storageshare__fileservershare__server__analysisserverprofile__id=req['analysisprofile_id'],
             ).distinct('dataset')
     server_dss_args = {}
     if req['wfid']:
@@ -985,17 +985,18 @@ def store_analysis(request):
                 set(x['dataset_id'] for x in dss.values('dataset_id'))):
             response_errors.append(f'Dataset {missing_dsid} does not have its files available '
                     'to the selected analysis server')
-        if fserver := rm.FileServer.objects.filter(pk=req['analysisserver_id'], active=True,
-                analysisserverprofile__nfconfigfile__nfpipe=nfwf_ver):
-            server_dss_args.update({'fserver_id': fserver.values('pk').get()['pk'],
+        if anaserver := rm.AnalysisServerProfile.objects.filter(pk=req['analysisprofile_id'],
+                server__active=True, analysisoutshare__share__active=True, nfconfigfile__nfpipe=nfwf_ver):
+            server_dss_args.update({
+                'anaserverprofile_id': req['analysisprofile_id'],
                 'dss_ids': [x['pk'] for x in dss.values('pk')],
                 })
         else:
             response_errors.append('You must select an active server with analysis capacity, '
                     'maybe the infrastructure has changed, please reload the analysis, or ask '
                     'an admin to update the analysis server configurations')
-        if fserver and not rm.FileserverShare.objects.filter(server__active=True, share__active=True,
-                server_id=req['analysisserver_id'], share__function=rm.ShareFunction.ANALYSISRESULTS
+        if anaserver and not rm.FileserverShare.objects.filter(server__active=True, share__active=True,
+                analysisserverprofile__id=req['analysisprofile_id'], share__function=rm.ShareFunction.ANALYSISRESULTS
                 ).values('pk').first():
             response_errors.append('Analysis server has no results share connected or known')
 
@@ -1064,7 +1065,7 @@ def store_analysis(request):
     if not req['upload_external']:
         sflocs = rm.StoredFileLoc.objects.filter(sfile_id__in=[int(x) for x in req['infiles'].keys()],
                 servershare__function=rm.ShareFunction.RAWDATA, servershare__active=True,
-                servershare__fileservershare__server_id=server_dss_args['fserver_id'])
+                servershare__fileservershare__server__analysisserverprofile__id=server_dss_args['anaserverprofile_id'])
         data_args.update({'infiles': req['infiles'],
             'sfloc_ids': [x['pk'] for x in sflocs.values('pk')]})
 
@@ -1151,7 +1152,7 @@ def store_analysis(request):
     if req['nfwfvid']:
         # Not doing this for external analysis saves
         jobinputs['singlefiles']['-c'] = am.LibraryFile.objects.filter(
-                nfconfigfile__serverprofile__server_id=req['analysisserver_id'],
+                nfconfigfile__serverprofile_id=req['analysisprofile_id'],
                 nfconfigfile__nfpipe=nfwf_ver).values('sfile_id').get()['sfile_id']
     # Re-create multifiles, they cannot be updated since all files map to analysis/param_id
     # resulting in only a single row in DB
