@@ -1,0 +1,41 @@
+Header {
+	height: 3;
+	padding: 1;
+}
+
+FileList {
+	border: solid blue;
+}
+
+
+.panetitle {
+	margin-top: 1;
+	layout: grid;
+	grid-size: 2;
+}
+
+RightPane {
+	border: solid red;
+}
+DescriptionInput {
+        margin-top: 3;
+}
+Log {
+	height: 20;
+}
+.boxtitle {
+	text-style: bold;
+	height: 3;
+	margin-left: 3;
+	content-align: center middle;
+}
+
+Button {
+	margin-left: 1;
+	content-align: center middle;
+}
+
+ClearButton {
+	color: green;
+}
+
