@@ -1,0 +1,40 @@
+name: lint-and-test
+run-name: Run linting and tests
+on:
+  workflow_dispatch:
+
+jobs:
+    windows:
+        runs-on: windows-latest
+        steps:
+            - uses: actions/checkout@v6
+            - uses: actions/setup-python@v6
+              with:
+                python-version: '3.13' 
+
+            - name: Try this
+              run: |
+                cd src/backend/rawstatus/file_inputs/tui/
+                python -m venv buildvenv
+                buildvenv/Scripts/Activate.ps1
+                python -m pip install -r requirements.txt
+                dir
+                dir Lib
+                dir Lib\Python
+                pyinstaller --path buildvenv/Lib/Python3.13/site-packages --add-data kantele_uploads.css --onefile kantele_client.py
+
+    macos:
+        runs-on: macos-26
+        steps:
+            - uses: actions/checkout@v6
+            - uses: actions/setup-python@v6
+              with:
+                python-version: '3.13' 
+
+            - name: Try this
+              run: |
+                cd src/backend/rawstatus/file_inputs/tui/
+                python -m venv buildvenv
+                source buildvenv/bin/activate
+                python -m pip install -r requirements.txt
+                pyinstaller --path buildvenv/lib/python3.13/site-packages --add-data kantele_uploads.css --onefile kantele_client.py
