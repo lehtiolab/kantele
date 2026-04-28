@@ -28,7 +28,7 @@ jobs:
               uses: actions/upload-artifact@v4
               with:
                 name: kantele_client_win.exe
-                path: dist/*
+                path: src/backend/rawstatus/file_inputs/tui/dist/kantele_client_win.exe
 
 
     macos:
@@ -52,4 +52,4 @@ jobs:
               uses: actions/upload-artifact@v4
               with:
                 name: kantele_client_macos
-                path: dist/*
+                path: src/backend/rawstatus/file_inputs/tui/dist/kantele_client_macos
