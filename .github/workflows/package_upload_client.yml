@@ -1,5 +1,5 @@
-name: lint-and-test
-run-name: Run linting and tests
+name: build-upload-client
+run-name: Build upload client TUI executables
 on:
   workflow_dispatch:
   pull_request:
@@ -22,9 +22,9 @@ jobs:
                 buildvenv/Scripts/Activate.ps1
                 python -m pip install -r requirements.txt
                 dir
-                dir Lib
-                dir Lib\Python
-                pyinstaller --path buildvenv/Lib/Python3.13/site-packages --add-data kantele_uploads.css --onefile kantele_client.py
+                dir buildvenv/Lib
+                dir buildvenv/Lib/Python3.13
+                pyinstaller --path buildvenv/Lib/Python3.13/site-packages --add-data kantele_uploads.css:. --onefile kantele_client.py
 
     macos:
         runs-on: macos-26
@@ -40,4 +40,4 @@ jobs:
                 python -m venv buildvenv
                 source buildvenv/bin/activate
                 python -m pip install -r requirements.txt
-                pyinstaller --path buildvenv/lib/python3.13/site-packages --add-data kantele_uploads.css --onefile kantele_client.py
+                pyinstaller --path buildvenv/lib/python3.13/site-packages --add-data kantele_uploads.css:. --onefile kantele_client.py
