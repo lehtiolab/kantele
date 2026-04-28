@@ -21,10 +21,15 @@ jobs:
                 python -m venv buildvenv
                 buildvenv/Scripts/Activate.ps1
                 python -m pip install -r requirements.txt
-                dir
-                dir buildvenv/Lib
-                dir buildvenv/Lib/Python3.13
-                pyinstaller --path buildvenv/Lib/Python3.13/site-packages --add-data kantele_uploads.css:. --onefile kantele_client.py
+                pyinstaller --path buildvenv/Lib/site-packages --add-data kantele_uploads.css:. --onefile kantele_client.py
+                mv dist/kantele_client.exe dist/kantele_client_win.exe
+
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                name: kantele_client_win.exe
+                path: dist/*
+
 
     macos:
         runs-on: macos-26
@@ -41,3 +46,10 @@ jobs:
                 source buildvenv/bin/activate
                 python -m pip install -r requirements.txt
                 pyinstaller --path buildvenv/lib/python3.13/site-packages --add-data kantele_uploads.css:. --onefile kantele_client.py
+                mv dist/kantele_client dist/kantele_client_macos
+
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                name: kantele_client_macos
+                path: dist/*
