@@ -22,7 +22,6 @@
             uv
             # Matches Kantele README reqs
             nodejs_22
-            npm
             
             # Infrastructure
             docker
