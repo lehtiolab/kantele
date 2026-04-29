@@ -15,7 +15,7 @@ jobs:
               with:
                 python-version: '3.13' 
 
-            - name: Try this
+            - name: Build win TUI client
               run: |
                 cd src/backend/rawstatus/file_inputs/tui/
                 python -m venv buildvenv
@@ -29,6 +29,7 @@ jobs:
               with:
                 name: kantele_client_win.exe
                 path: src/backend/rawstatus/file_inputs/tui/dist/kantele_client_win.exe
+                overwrite: true
 
 
     macos:
@@ -39,7 +40,7 @@ jobs:
               with:
                 python-version: '3.13' 
 
-            - name: Try this
+            - name: Build mac TUI client
               run: |
                 cd src/backend/rawstatus/file_inputs/tui/
                 python -m venv buildvenv
@@ -53,3 +54,4 @@ jobs:
               with:
                 name: kantele_client_macos
                 path: src/backend/rawstatus/file_inputs/tui/dist/kantele_client_macos
+                overwrite: true
