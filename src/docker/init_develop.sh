@@ -17,8 +17,14 @@ fi
 
 # Set user and group id for the file ownership to the same ids the user has.
 # I am not sure how to do this on windows or if it is necessary
-export USER_ID=$(id -u)
-export GROUP_ID=$(id -g)
+
+if [ "$(uname)" = "Darwin" ]; then
+  export USER_ID=1000
+  export GROUP_ID=1000
+else
+  export USER_ID=$(id -u)
+  export GROUP_ID=$(id -g)
+fi
 
 # Now build the containers
 docker compose build
