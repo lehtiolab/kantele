@@ -1,0 +1,22 @@
+---
+name: test-uploadclient
+run-name: Build upload client TUI executables, dump short lived artifacts
+on:
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  delete-old-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: geekyeggo/delete-artifact@176a747ab7e287e3ff4787bf8a148716375ca118 # v6.0.0
+        with:
+          name: kantele_client_*
+
+  package-client:
+    needs: delete-old-artifacts
+    uses: ./.github/workflows/package_upload_client.yml
+    with:
+      RETAIN_DAYS: 1

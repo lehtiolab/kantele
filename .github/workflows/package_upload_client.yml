@@ -1,0 +1,63 @@
+---
+name: build-upload-uploadclient
+run-name: Build and upload client TUI executables
+on:
+  workflow_call:
+    inputs:
+      RETAIN_DAYS:
+        description: 'How long to keep the artifact'
+        type: number
+        default: 0
+        required: true
+      
+jobs:
+    windows:
+        runs-on: windows-latest
+        steps:
+            - uses: actions/checkout@v6
+            - uses: actions/setup-python@v6
+              with:
+                python-version: '3.13' 
+
+            - name: Build win TUI client
+              run: |
+                cd src/backend/rawstatus/file_inputs/tui/
+                python -m venv buildvenv
+                buildvenv/Scripts/Activate.ps1
+                python -m pip install -r requirements.txt
+                pyinstaller --path buildvenv/Lib/site-packages --add-data kantele_uploads.css:. --onefile kantele_client.py
+                mv dist/kantele_client.exe dist/kantele_client_win.exe
+
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                name: kantele_client_win.exe
+                path: src/backend/rawstatus/file_inputs/tui/dist/kantele_client_win.exe
+                archive: false
+                retention-days: ${{ inputs.RETAIN_DAYS }}
+
+
+    macos:
+        runs-on: macos-26
+        steps:
+            - uses: actions/checkout@v6
+            - uses: actions/setup-python@v6
+              with:
+                python-version: '3.13' 
+
+            - name: Build mac TUI client
+              run: |
+                cd src/backend/rawstatus/file_inputs/tui/
+                python -m venv buildvenv
+                source buildvenv/bin/activate
+                python -m pip install -r requirements.txt
+                pyinstaller --path buildvenv/lib/python3.13/site-packages --add-data kantele_uploads.css:. --onefile kantele_client.py
+                mv dist/kantele_client dist/kantele_client_macos
+
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                name: kantele_client_macos
+                path: src/backend/rawstatus/file_inputs/tui/dist/kantele_client_macos
+                archive: false
+                retention-days: ${{ inputs.RETAIN_DAYS }}
