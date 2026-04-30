@@ -55,7 +55,7 @@ services:
             HOST_UPLOADDIR: /storage/uploads
     
     db: 
-        image: postgres:17.5
+        image: postgres:14.3
         #user: "${DBUID:-0}:${DBGID:-0}"
         environment:
             POSTGRES_PASSWORD: "${PG_SUPERUSER_PASSWORD}"
