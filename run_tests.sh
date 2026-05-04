@@ -7,12 +7,17 @@ echo Cleaning up
 git clean -xf data/teststorage
 git checkout -- data/teststorage
 
-export GROUP_ID=$(id -g)
-export USER_ID=$(id -u)
+if [ "$(uname)" = "Darwin" ]; then
+  export USER_ID=1000
+  export GROUP_ID=1000
+else
+  export USER_ID=$(id -u)
+  export GROUP_ID=$(id -g)
+fi
 
 # Lint seems to operate on the local dir
 echo Running linting
-$DOCKERCMD run web pylint -E --disable E1101,E0307 --ignore-paths '.*\/migrations\/[0-9]+.*.py' \
+$DOCKERCMD run -T web pylint -E --disable E1101,E0307 --ignore-paths '.*\/migrations\/[0-9]+.*.py' \
    analysis \
    datasets \
    dashboard \
