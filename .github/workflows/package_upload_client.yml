@@ -2,17 +2,24 @@
 name: build-upload-uploadclient
 run-name: Build and upload client TUI executables
 on:
+  pull_request:
+    branches:
+      - master
+
   workflow_call:
-    inputs:
-      RETAIN_DAYS:
-        description: 'How long to keep the artifact'
-        type: number
-        default: 0
-        required: true
+    outputs:
+      macos_client:
+        description: "Artifact ID for macOS client"
+        value: ${{ jobs.macos.outputs.client-artifact-id }}
+      win_client:
+        description: "Artifact ID for windows client"
+        value: ${{ jobs.windows.outputs.client-artifact-id }}
       
 jobs:
     windows:
         runs-on: windows-latest
+        outputs:
+          client-artifact-id: ${{ steps.upload-windows.outputs.artifact-id }}
         steps:
             - uses: actions/checkout@v6
             - uses: actions/setup-python@v6
@@ -29,16 +36,19 @@ jobs:
                 mv dist/kantele_client.exe dist/kantele_client_win.exe
 
             - name: Upload artifact
+              id: upload-windows
               uses: actions/upload-artifact@v4
               with:
                 name: kantele_client_win.exe
                 path: src/backend/rawstatus/file_inputs/tui/dist/kantele_client_win.exe
                 archive: false
-                retention-days: ${{ inputs.RETAIN_DAYS }}
+                retention-days: 1
 
 
     macos:
         runs-on: macos-26
+        outputs:
+          client-artifact-id: ${{ steps.upload-macos.outputs.artifact-id }}
         steps:
             - uses: actions/checkout@v6
             - uses: actions/setup-python@v6
@@ -55,9 +65,10 @@ jobs:
                 mv dist/kantele_client dist/kantele_client_macos
 
             - name: Upload artifact
+              id: upload-macos
               uses: actions/upload-artifact@v4
               with:
                 name: kantele_client_macos
                 path: src/backend/rawstatus/file_inputs/tui/dist/kantele_client_macos
                 archive: false
-                retention-days: ${{ inputs.RETAIN_DAYS }}
+                retention-days: 1
