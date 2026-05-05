@@ -64,7 +64,13 @@ def find_projects(userquery):
             case ['name', name]:
                 parsed_query &= Q(name=name)
             case ['active', yesno]:
-                parsed_query &= Q(active={'yes': True, 'true': True, 'no': False, 'false': False}[yesno])
+                parsed_query &= Q(active={'yes': True, 'true': True, 'no': False,
+                    'false': False}[yesno])
+            case ['expiring', yesno]:
+                if {'yes': True, 'true': True, 'no': False, 'false': False}[yesno]:
+                    parsed_query &= Q(projectexpiry__active=True)
+                else:
+                    parsed_query &= Q(projectexpiry__isnull=True)
             case ['user', username]:
                 parsed_query &= Q(experiment__runname__dataset__datasetowner__user__username=username)
             case _:

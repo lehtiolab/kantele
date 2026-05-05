@@ -14,7 +14,12 @@ from home import models as hm
 
 
 class Command(BaseCommand):
-    '''Go through files and purge those from disks which are expired'''
+    '''Go through files and purge those from disks which are expired. Expiration can be:
+       - storage share has expiration, e.g. analysis server, sensitive data storage
+       - project is "phased out", i.e. is closed but has expiration date to delete files
+       - files have been claimed from INBOX (which can also have an expiration date as a share)
+       - mzML files have config storage time
+    '''
 
     def add_arguments(self, parser):
         # --dry-run only shows how many files will be deleted
@@ -49,17 +54,24 @@ class Command(BaseCommand):
                 sfile__rawfile__storedfile__pdcbackedupfile__success=True,
                 sfile__rawfile__storedfile__pdcbackedupfile__deleted=False)
 
+        # List all projects which are actively expiring
+        expired_projects = [x['pk'] for x in dm.Project.objects.filter(active=False,
+            projectexpiry__active=True, projectexpiry__date__lt=timezone.now()).values('pk')]
+
         if run_all or options['datasets']:
-            # Files in dset (dont delete half a dataset)
-            # Loop over shares (not many) to be able to connect dss and sfloc via their share
+            # Files in dset deletion (dont delete half a dataset)
             remove_dsets = set()
+
+            # Loop over shares (not many) to be able to connect dss and sfloc via their share
             for share in rm.ServerShare.objects.filter(active=True, function=rm.ShareFunction.RAWDATA,
                     maxdays_data__gt=0):
                 total_rm_ds_fns = 0
-
-                dss_exps = dm.DatasetServer.objects.filter(storageshare=share, active=True,
+                exp_proj_dss = dm.DatasetServer.objects.filter(storageshare=share, active=True,
+                        dataset__runname__experiment__project_id__in=expired_projects)
+                dss_exp_share = dm.DatasetServer.objects.filter(storageshare=share, active=True,
                         last_date_used__lt=timezone.now() - timedelta(days=share.maxdays_data))
-                for dss_exp in dss_exps.values('dataset_id', 'pk', 'dataset__datasetowner__user'):
+                for dss_exp in dss_exp_share.union(exp_proj_dss).values('dataset_id', 'pk',
+                        'dataset__datasetowner__user'):
                     dss_sfl = activefns_raw.filter(servershare=share,
                             sfile__rawfile__datasetrawfile__dataset_id=dss_exp['dataset_id'])
                     dssrmsfl = activefns_raw_bup.filter(servershare=share,
@@ -128,13 +140,18 @@ class Command(BaseCommand):
             # of the analysis files either!
             all_ana_fns = activefns_raw_bup.filter(sfile__analysisresultfile__isnull=False)
             all_rm_anas = set()
+            # List analyses with input dsets from projects that have expired:
+            exp_proj_ana = [x['pk'] for x in am.Analysis.objects.values('pk').filter(
+                    datasetanalysis__dataset__runname__experiment__project__id__in=expired_projects)]
             for share in rm.ServerShare.objects.filter(active=True, maxdays_data__gt=0,
                     function__in=[rm.ShareFunction.ANALYSIS_DELIVERY, rm.ShareFunction.ANALYSISRESULTS]):
                 share_ana_fns = all_ana_fns.filter(servershare=share)
+                exp_p_a_sharefn = share_ana_fns.filter(sfile__analysisresultfile__analysis_id__in=exp_proj_ana)
                 # get analysis_id, max_date of last_used in analysis share files
-                exp_ana = share_ana_fns.values('sfile__analysisresultfile__analysis_id').filter(
+                exp_share_ana = share_ana_fns.filter(
                         last_date_used__lt=timezone.now() - timedelta(days=share.maxdays_data))
-                rm_ana_ids = {x['sfile__analysisresultfile__analysis_id'] for x in exp_ana}
+                rm_ana_ids = {x['sfile__analysisresultfile__analysis_id'] for x in
+                        exp_share_ana.union(exp_p_a_sharefn).values('sfile__analysisresultfile__analysis_id')}
                 all_rm_anas.update(rm_ana_ids)
                 # if file is shared between two analyses, of which only one has expired, 
                 # make sure the file doesnt get deleted!

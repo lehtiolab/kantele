@@ -1473,17 +1473,39 @@ class TestArchiveProject(BaseTest):
         self.assertEqual(resp.json()['error'], 'User has no permission to retire this project, does not own all datasets in project')
 
     def test_ok(self):
+        # p1, no expiration
+        dsrmjob = jm.Job.objects.filter(funcname='remove_dset_files_servershare',
+                state=Jobstates.PENDING)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'item_id': self.p1.pk})
+                data={'item_id': self.p1.pk, 'expires_in_days': False})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.ProjectLog.objects.last().message,
                 f'User {self.user.pk} closed project')
+        self.assertTrue(dsrmjob.filter(kwargs__sfloc_ids__contains=self.f3sss.pk).exists())
+        self.assertTrue(dsrmjob.filter(kwargs__sfloc_ids__contains=self.f3mzsss.pk).exists())
+        self.ds.refresh_from_db()
+        self.assertTrue(self.ds.deleted)
+        self.assertFalse(dm.ProjectExpiry.objects.filter(project=self.p1).exists())
+
+        # oldp, with expiration 3 days
+        resp = self.cl.post(self.url, content_type='application/json',
+                data={'item_id': self.oldp.pk, 'expires_in_days': 3})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(dm.ProjectLog.objects.last().message,
+                f'User {self.user.pk} closed project')
+        self.assertTrue(dm.ProjectExpiry.objects.filter(project=self.oldp, active=True).exists())
+        # Expiry doesnt delete anything
+        self.assertFalse(dsrmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
+        self.assertFalse(self.oldds.locked)
+        self.oldds.refresh_from_db()
+        self.assertTrue(self.oldds.locked)
+
 
     def test_delete_analysis_first_backup(self):
         # When a project closes, also delete its analyses
         dsa = am.DatasetAnalysis.objects.create(analysis=self.ana, dataset=self.ds)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'item_id': self.p1.pk})
+                data={'item_id': self.p1.pk, 'expires_in_days': False})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.ProjectLog.objects.last().message,
                 f'User {self.user.pk} closed project')
@@ -1527,7 +1549,7 @@ class TestArchiveProject(BaseTest):
         am.DatasetAnalysis.objects.create(analysis=ana2, dataset=self.ds)
         self.assertFalse(jm.Job.objects.filter(funcname='remove_dset_files_servershare'))
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'item_id': self.p1.pk})
+                data={'item_id': self.p1.pk, 'expires_in_days': False})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.ProjectLog.objects.last().message,
                 f'User {self.user.pk} closed project')
@@ -1549,7 +1571,7 @@ class TestArchiveProject(BaseTest):
 
         # Now also close the second project, which should delete the analysis
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'item_id': self.oldp.pk})
+                data={'item_id': self.oldp.pk, 'expires_in_days': False})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.ProjectLog.objects.last().message,
                 f'User {self.user.pk} closed project')

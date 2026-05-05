@@ -6,7 +6,7 @@ import Tabs from './Tabs.svelte'
 import Details from './ProjectDetails.svelte'
 import DynamicSelect from '../../datasets/src/DynamicSelect.svelte'
 import { flashtime } from '../../util.js'
-import { closeProject, treatItems } from './util.js'
+import { closeProject, setExpiryProject, treatItems } from './util.js'
 
 const inactive = ['inactive'];
 let table;
@@ -35,7 +35,7 @@ const tablefields = [
   {id: 'ptype', name: 'Type', type: 'str', multi: false},
   {id: 'start', name: 'Registered', type: 'str', multi: false},
   {id: 'lastactive', name: 'Last active', type: 'str', multi: false},
-  {id: 'actions', name: '', type: 'button', multi: true, confirm: ['close']},
+  {id: 'actions', name: '', type: 'button', multi: true, confirm: ['close', 'phase out'], inputvalues: {'phase out': 'Expire in days (e.g. 60)'}},
 ];
 
 const fixedbuttons = [
@@ -50,9 +50,14 @@ export function newDataset(projid, _projs, _notif) {
 const actionmap = {
   'new dataset': newDataset,
   'close': closeProject,
+  'phase out': setExpiryProject,
 }
-async function doAction(action, projid) {
-  await actionmap[action](projid, projects, notif);
+async function doAction(action, projid, invalue_placeholder_list) {
+  let pass_value = false;
+  if (invalue_placeholder_list) {
+    pass_value = invalue_placeholder_list[0];
+  }
+  await actionmap[action](projid, projects, pass_value, notif);
   // Update notifs
   projects = projects;
   updateNotif();
@@ -231,14 +236,14 @@ async function mergeProjects() {
   fetchUrl="/show/projects"
   findUrl="/show/projects"
   defaultQ="active:true "
-  search_examples="type:cf, from:2025, to:20250801, from:202504, active:true/false/yes/no, user:username"
+  search_examples="type:cf, from:2025, to:20250801, from:202504, active:true/false/yes/no, expiring:true/..., user:username"
   getdetails={getProjDetails}
   fixedbuttons={fixedbuttons}
   fields={tablefields}
   inactive={inactive}
   on:detailview={showDetails}
   allowedActions={Object.keys(actionmap)}
-  on:rowAction={e => doAction(e.detail.action, e.detail.id)}
+  on:rowAction={e => doAction(e.detail.action, e.detail.id, e.detail.values)}
   />
 
 {#if detailsVisible}
