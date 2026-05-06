@@ -136,7 +136,7 @@ function updateNotif() {
   bind:selected={selectedDsets}
   fetchUrl="/show/datasets"
   findUrl="/show/datasets"
-  defaultQ="deleted:no "
+  defaultQ="deleted:no from:365d user:{username} "
   search_examples="type:cf/local from:20250801 to:2025 deleted:yes/no user:yourname"
   getdetails={getDsetDetails}
   fixedbuttons={fixedbuttons}
