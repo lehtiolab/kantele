@@ -38,7 +38,7 @@ echo Init fixture repo
 if [ ! -e data/test/nfrepo/.git ]
 then
 	cd data/test/nfrepo
-	git init
+	git -c init.defaultBranch=master init # Make sure that you use the same git branch naming conventions
 	git add *.py
 	git commit -m 'test fixtures'
 	cd ../../../
@@ -56,5 +56,5 @@ then
 else
     $DOCKERCMD run --use-aliases web $TESTCMD $1
 fi
-
+echo Remove Git nfrepo
 rm -rf data/test/nfrepo/.git
