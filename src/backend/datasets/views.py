@@ -744,12 +744,13 @@ def save_new_project(request):
     return JsonResponse({'project': tableproject[project.pk]})
 
 
-def populate_proj(dbprojs, user, showjobs=True, include_db_entry=False):
+def populate_proj(dbprojs, user):
     projs, order = {}, []
     for proj in dbprojs.annotate(dsmax=Max('experiment__runname__dataset__date'),
             anamax=Max('experiment__runname__dataset__datasetanalysis__analysis__date')
             ).annotate(greatdate=Greatest('dsmax', 'anamax')).order_by('-greatdate'
-            ).values('pk', 'name', 'active', 'registered', 'ptype__name', 'greatdate'):
+            ).values('pk', 'name', 'active', 'registered', 'ptype__name', 'greatdate',
+                    'projectexpiry__active'):
         order.append(proj['pk'])
         dset_q = models.Dataset.objects.filter(runname__experiment__project_id=proj['pk'])
         projs[proj['pk']] = {
@@ -764,8 +765,12 @@ def populate_proj(dbprojs, user, showjobs=True, include_db_entry=False):
             'details': False,
             'selected': False,
             'lastactive': datetime.strftime(proj['greatdate'], '%Y-%m-%d %H:%M') if proj['greatdate'] else '-',
-            'actions': ['new dataset', 'close', 'phase out'],
+            'actions': [],
         }
+        if proj['active']:
+            projs[proj['pk']]['actions'].extend(['new dataset', 'close', 'phase out'])
+        elif proj['projectexpiry__active']:
+            projs[proj['pk']]['actions'].append('phase out')
     return projs, order
 
 
@@ -907,12 +912,6 @@ def save_new_dataset(data, project, experiment, runname, user_id):
 
 @login_required
 @require_POST
-def update_project_expiry(request):
-    pass
-
-
-@login_required
-@require_POST
 def close_project(request):
     '''Closes project:
         - Set to not active in DB
@@ -922,7 +921,8 @@ def close_project(request):
     if 'item_id' not in data or not data['item_id']:
         return JsonResponse({'state': 'error', 'error': 'No project specified for closing'}, status=400)
     projquery = models.Project.objects.filter(pk=data['item_id'], active=True)
-    if not projquery:
+    expiry_q = models.ProjectExpiry.objects.filter(project_id=data['item_id'], active=True)
+    if not projquery and (not expiry_q or not data['expires_in_days']):
         return JsonResponse({'state': 'error', 'error': 'Project is already closed, purged or never existed'}, status=400)
     # Retiring a project is only allowed if user owns ALL datasets in project or is staff
     dsetowners = models.DatasetOwner.objects.filter(dataset__runname__experiment__project_id=data['item_id'], dataset__purged=False).select_related('dataset')
@@ -937,10 +937,11 @@ def close_project(request):
         # Do not delete datasets when expiring later, but lock them in case that has not
         # been done, so they cant be changed
         models.ProjectExpiry.objects.update_or_create(project_id=data['item_id'],
-                date=datetime.now() + timedelta(expirydays))
+                defaults={'date': datetime.now() + timedelta(expirydays), 'active': True})
         models.Dataset.objects.filter(runname__experiment__project_id=data['item_id']).update(
                 locked=True)
-    else:
+    elif projquery:
+        # Only do this for open projects, not when it is under expiry
         # Cold store all datasets, delete them from active
         result = {'errormsgs': []}
         for dso in dsetowners.distinct('dataset'):

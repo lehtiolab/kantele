@@ -74,14 +74,22 @@ function setConfirm() {
 }
 
 async function getProjDetails(projid) {
-	const resp = await getJSON(`/show/project/${projid}`);
-  return `
+  const resp = await getJSON(`/show/project/${projid}`);
+  let txt =  `
     <p><span class="has-text-weight-bold">Storage amount: </span> ${resp.stored_total_xbytes}</p>
     <p><span class="has-text-weight-bold">Owners: </span> ${resp.owners.join(', ')}</p>
+    `;
+  if (resp.expirydate) {
+    txt = `${txt}
+    <p><span class="has-text-weight-bold">Expires in </span>${resp.expirydays} days (${resp.expirydate})</p>
+    `;
+  }
+    txt = `${txt}
     <hr>
     ${Object.entries(resp.nrstoredfiles).map(x => {return `<div>${x[1]} stored files of type ${x[0]}</div>`;}).join('')}
     <div>Instrument(s) used: <b>${resp.instruments.join(', ')}</b></div>
     `;
+    return txt;
 }
 
 

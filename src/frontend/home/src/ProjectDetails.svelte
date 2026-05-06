@@ -71,6 +71,9 @@ onMount(async() => {
   <p><span class="has-text-weight-bold">Stored amount: </span>{proj.stored_total_xbytes}</p>
   <p><span class="has-text-weight-bold"># files: </span>{Object.entries(proj.nrstoredfiles).map(x => `${x[1]} files of type ${x[0]}`).join('; ')}</p>
   <p><span class="has-text-weight-bold">Instruments used: </span>{proj.instruments.join(', ')}</p>
+  {#if proj.expirydate}
+  <p><span class="has-text-weight-bold">Expires in </span>{proj.expirydays} days ({proj.expirydate})</p>
+  {/if}
 
   <hr>
   
