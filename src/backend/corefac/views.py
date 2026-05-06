@@ -220,8 +220,8 @@ def get_project_plotdata(request):
         'end': datetime.strftime(x['end'], datefmt)}) for x in perprojects]
 
     return JsonResponse({'per_proj': perprojects, 'closedates': closeprojdates, 'today': today,
-        'firstdate': datetime.strftime(firstdate, datefmt)})
-
+        'firstdate': datetime.strftime(firstdate, datefmt), 'stage_order': [
+            Stages.OPENED, Stages.SAMPLES, Stages.PREP, Stages.QUEUE, Stages.MS, Stages.SEARCH]})
 
 @login_required
 def find_sampleprep_method(request):

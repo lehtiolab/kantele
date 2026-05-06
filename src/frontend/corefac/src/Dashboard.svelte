@@ -20,6 +20,7 @@ let addItem;
 
 let plots;
 let msplots;
+let dsplots;
 let plot_sort_asc = true;
 let plot_sort_by = 'owner';
 
@@ -112,17 +113,18 @@ async function replot(sortkey) {
   const bar_to_sort = ['owner', 'end', 'stage'].indexOf(sortkey) > -1 ? 'last' : 'first';
   let individual_proj_plot;
   let aggregate_plot;
+  let aggregate_plot_proj;
   let ms_proj_plot;
   let ms_agg_plot;
 
   try {
+    const colorscale = Plot.scale({color: {scheme: 'Observable10', domain: resp.stage_order}});
+    const color = {...colorscale, legend: true, opacity: 0.3};
     individual_proj_plot = Plot.plot({
+          title: 'Datasets',
           marginRight: 130,
           axis: null,
-          color: {
-                 legend: true,
-                  opacity: 0.3,
-              },
+          color: color,
           x: {
                 axis: "top",
                 grid: true,
@@ -173,9 +175,8 @@ async function replot(sortkey) {
               ]
       })
 
-    // Aggregate plot:
-    const colorscale = individual_proj_plot.scale('color');
   
+    // Aggregate plot:
     const xlabels = {duration: 'Days',
       start: 'Month',
       end: 'Month',
@@ -189,8 +190,29 @@ async function replot(sortkey) {
       owner: 'Datasets (stacked)',
       stage: 'Datasets',
     }
+    const ylabels_proj = {
+      duration: 'Projects (stacked)',
+      start: 'Projects',
+      end: 'Projects',
+      owner: 'Projects (stacked)',
+      stage: 'Projects',
+    }
+    // Datasets aggregates, project aggregates
     const bar_to_aggregate = sortkey === 'duration' ? 'first' : 'last';
     const agg_plotdata = perProject.filter(d => d[bar_to_aggregate]);
+    const stagenums = Object.fromEntries(resp.stage_order.map((x, ix) => [x, ix]));
+    function keepEarliest(accu, entry) {
+      if (!(entry.proj in accu) || stagenums[entry.stage] < stagenums[accu[entry.proj].stage]) {
+        let newentry = {};
+        newentry[entry.proj] = {...entry};
+        return Object.assign(accu, newentry);
+      } else {
+        return accu;
+       }
+     }
+    const agg_plotdata_proj = Object.values(perProject.reduce(keepEarliest, {}))
+      .filter(d => d[bar_to_aggregate]);
+    console.log(agg_plotdata_proj)
     let sortkey_mod = ['stage', 'owner'].indexOf(sortkey) > -1 ? sortkey : `month${sortkey}`;
     sortkey_mod = sortkey_mod === 'monthstart' ? 'monthstartdset' : sortkey_mod;
     const rotation = ['stage', 'owner'].indexOf(sortkey) > -1 ? 0 : 90;
@@ -202,14 +224,15 @@ async function replot(sortkey) {
     let agg_x;
     let agg_fx;
     let agg_y;
-    let agg_col;
+    let agg_y_proj;
     let agg_marks;
+    let agg_marks_proj;
     let ms_agg_marks;
     let open_closed_in;
 
     if (sortkey !== 'duration') {
       agg_y = { label: ylabels[sortkey], grid: true };
-      agg_col = {...colorscale, legend: true, opacity: 0.3};
+      agg_y_proj = { label: ylabels_proj[sortkey], grid: true };
       agg_transform_in = {fx: sortkey_mod, x: 'state', fill: 'stage', opacity: 0.3};
       agg_x = {axis: null};
       agg_fx = {axis: 'bottom', tickRotate: rotation, label: xlabels[sortkey]};
@@ -229,6 +252,14 @@ async function replot(sortkey) {
         )
       ];
 
+      agg_marks_proj = [
+        Plot.barY(agg_plotdata_proj, Plot.groupX(proj_agg_transform_yred, agg_transform_in)),
+        Plot.ruleY([0]),
+        Plot.text(agg_plotdata_proj,
+          Plot.groupX(Object.assign({text: "first"}, proj_agg_transform_yred), open_closed_in),
+        )
+      ];
+
       ms_trf = Object.assign(agg_transform_in, {y: 'mstime'});
       ms_agg_marks = [
         Plot.barY(agg_plotdata, Plot.groupX(ms_agg_transform_yred, ms_trf)),
@@ -242,7 +273,7 @@ async function replot(sortkey) {
     } else if (sortkey === 'duration') {
       // Duration needs binning, so the aggregate plots get own code
       agg_y = { label: 'Datasets', grid: true};
-      agg_col = { legend: true, opacity: 0.3};
+      agg_y_proj = { label: 'Projects', grid: true};
       agg_transform_in = {x: {thresholds: 20, value: sortkey}, fill: 'state', opacity: 0.3};
       ms_trf = Object.assign(agg_transform_in, {y: 'mstime'});
       agg_x = {label: xlabels[sortkey]};
@@ -258,17 +289,28 @@ async function replot(sortkey) {
     }
 
     aggregate_plot = Plot.plot({
-           color: agg_col,
-           y: agg_y,
-           x: agg_x, 
-           fx: agg_fx,
-           marks: agg_marks,
+      title: 'Aggregated datasets',
+      color: color,
+      y: agg_y,
+      x: agg_x, 
+      fx: agg_fx,
+      marks: agg_marks,
+    })
+    aggregate_plot_proj = Plot.plot({
+      title: 'Aggregated projects',
+      color: color,
+      y: agg_y_proj,
+      x: agg_x, 
+      fx: agg_fx,
+      marks: agg_marks_proj,
     })
 
+
     ms_agg_plot = Plot.plot({
+      title: 'Aggregated MS time',
       marginBottom: 75,
       marginTop: 75,
-      color: {...agg_col},
+      color: color,
       y: { label: 'MS time(min)', grid: true },
       x: agg_x,
       fx: agg_fx,
@@ -277,10 +319,11 @@ async function replot(sortkey) {
 
     //  MS time
     ms_proj_plot = Plot.plot({
+      title: 'MS time',
       marginRight: 75,
       marginLeft: 75,
       marginBottom: 20,
-      color: {...colorscale, legend: true, opacity: 0.3},
+      color: color,
       x: {axis: "top", label: 'MS time (min)', labelAnchor: 'center', grid: true,},
           y: {axis: "left", label: sortkey },
           marks: [
@@ -323,7 +366,8 @@ async function replot(sortkey) {
         msplots?.lastChild?.remove();
       }
       plots?.append(individual_proj_plot);
-      plots?.append(aggregate_plot);
+      plots?.append(aggregate_plot_proj);
+      dsplots?.append(aggregate_plot);
       msplots?.append(ms_proj_plot);
       msplots?.append(ms_agg_plot);
     }
@@ -343,10 +387,10 @@ let notif = {errors: {}, messages: {}};
   <span class="is-size-7">Sort and aggregate on: </span>
   {#each Object.entries(sortkeys) as [key, txt] }
   <button class={`${plot_sort_by === key ? 'is-focused' : ''} button is-small`} on:click={e => replot(key)}>{txt}</button>
-
   {/each}
 
   <div style="display: flex" bind:this={plots}></div>
+  <div style="display: flex" bind:this={dsplots}></div>
   <div style="display: flex" bind:this={msplots}></div>
 </div>
 
