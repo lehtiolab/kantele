@@ -2080,11 +2080,16 @@ class TestAutoDelete(BaseIntegrationTest):
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
         dsrmjob = jm.Job.objects.filter(funcname='remove_dset_files_servershare',
                 state=jj.Jobstates.PENDING)
+        dirjob = jm.Job.objects.filter(funcname='delete_empty_directory', state=jj.Jobstates.PENDING)
 
         self.assertTrue(dsrmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
         self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
         self.oldsss.refresh_from_db()
         self.assertFalse(self.oldsss.active)
+        self.assertTrue(dirjob.filter(kwargs__path=self.olddss.storage_loc,
+            kwargs__share_id=self.olddss.storageshare_id).exists())
+        self.assertTrue(dirjob.filter(kwargs__path=self.anasfl3.path,
+            kwargs__share_id=self.anasfl3.servershare_id).exists())
 
         self.assertFalse(self.ana3.deleted)
         self.ana3.refresh_from_db()
@@ -2106,14 +2111,22 @@ class TestAutoDelete(BaseIntegrationTest):
         self.assertTrue(self.usm_ana_del.exists())
         self.assertTrue(self.usm_ana_exp.exists())
 
+
     def test_analysis(self):
         call_command('delete_expired_files', analysis=True)
 
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
+        dirjob = jm.Job.objects.filter(funcname='delete_empty_directory', state=jj.Jobstates.PENDING)
         dsrmjob = jm.Job.objects.filter(funcname='remove_dset_files_servershare',
                 state=jj.Jobstates.PENDING)
 
         self.assertFalse(self.ana3.deleted)
+        self.assertTrue(dirjob.filter(kwargs__path=self.anasfl3.path,
+            kwargs__share_id=self.anasfl3.servershare_id).exists())
+        self.assertFalse(dirjob.filter(kwargs__path=self.anasfl2.path,
+            kwargs__share_id=self.anasfl2.servershare_id).exists())
+        self.assertFalse(dirjob.filter(kwargs__path=self.olddss.storage_loc,
+            kwargs__share_id=self.olddss.storageshare_id).exists())
         self.ana3.refresh_from_db()
         self.assertTrue(self.ana3.deleted)
         self.oldds.refresh_from_db()
@@ -2182,11 +2195,16 @@ class TestAutoDelete(BaseIntegrationTest):
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
         dsrmjob = jm.Job.objects.filter(funcname='remove_dset_files_servershare',
                 state=jj.Jobstates.PENDING)
+        dirjob = jm.Job.objects.filter(funcname='delete_empty_directory', state=jj.Jobstates.PENDING)
 
         self.oldsss.refresh_from_db()
         self.assertFalse(self.oldsss.active)
         self.assertTrue(dsrmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
         self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
+        self.assertTrue(dirjob.filter(kwargs__path=self.olddss.storage_loc,
+            kwargs__share_id=self.olddss.storageshare_id).exists())
+        self.assertFalse(dirjob.filter(kwargs__path=self.anasfl3.path,
+            kwargs__share_id=self.anasfl3.servershare_id).exists())
 
         # Files not deleted
         self.not_deleted_sfl = [self.f3sssana, self.f3sssinbox, self.reportsfl, self.anasfl,
@@ -2242,11 +2260,16 @@ class TestAutoDeleteExpiredProject(TestAutoDelete):
         rmjob = jm.Job.objects.filter(funcname='purge_files', state=jj.Jobstates.PENDING)
         dsrmjob = jm.Job.objects.filter(funcname='remove_dset_files_servershare',
                 state=jj.Jobstates.PENDING)
+        dirjob = jm.Job.objects.filter(funcname='delete_empty_directory', state=jj.Jobstates.PENDING)
 
         self.assertTrue(dsrmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
         self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[self.oldsss.pk]).exists())
         self.oldsss.refresh_from_db()
         self.assertFalse(self.oldsss.active)
+        self.assertTrue(dirjob.filter(kwargs__path=self.olddss.storage_loc,
+            kwargs__share_id=self.olddss.storageshare_id).exists())
+        self.assertTrue(dirjob.filter(kwargs__path=self.anasfl3.path,
+            kwargs__share_id=self.anasfl3.servershare_id).exists())
 
         self.not_deleted_sfl = [self.tmpsss, self.f3sssana, self.reportsfl, self.anasfl,
                 self.expreportsfl, self.nfc_loc, self.anasfl2]

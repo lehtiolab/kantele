@@ -71,7 +71,7 @@ class Command(BaseCommand):
                 dss_exp_share = dm.DatasetServer.objects.filter(storageshare=share, active=True,
                         last_date_used__lt=timezone.now() - timedelta(days=share.maxdays_data))
                 for dss_exp in dss_exp_share.union(exp_proj_dss).values('dataset_id', 'pk',
-                        'dataset__datasetowner__user'):
+                        'storage_loc', 'storageshare_id', 'dataset__datasetowner__user'):
                     dss_sfl = activefns_raw.filter(servershare=share,
                             sfile__rawfile__datasetrawfile__dataset_id=dss_exp['dataset_id'])
                     dssrmsfl = activefns_raw_bup.filter(servershare=share,
@@ -89,6 +89,8 @@ class Command(BaseCommand):
                             create_job('remove_dset_files_servershare', dss_id=dss_exp['pk'],
                                     sfloc_ids=dssrmsfl_ids)
                             nr_dsssfl = dssrmsfl.update(active=False)
+                            create_job('delete_empty_directory', path=dss_exp['storage_loc'],
+                                    share_id=dss_exp['storageshare_id'], sfloc_ids=dssrmsfl_ids)
                             rm.StoredFile.objects.filter(storedfileloc__pk__in=dssrmsfl_ids).exclude(
                                 storedfileloc__active=True).update(deleted=True)
                             dm.DatasetServer.objects.filter(pk=dss_exp['pk']).update(active=False)
@@ -161,6 +163,7 @@ class Command(BaseCommand):
                         analysisresultfile__sfile__storedfileloc__id__in=pre_multiana_fns.filter(
                             last_date_used__gt=timezone.now() - timedelta(days=share.maxdays_data))
                         ).exclude(pk__in=rm_ana_ids)
+                all_rm_ana_pks = []
                 if rm_ana_sfl := pre_multiana_fns.exclude(sfile__analysisresultfile__analysis__in=notrm_ana):
                     if options['dry_run']:
                         ana_nr = rm_ana_sfl.count()
@@ -169,12 +172,20 @@ class Command(BaseCommand):
                     else:
                         for chunk in chunk_iter(rm_ana_sfl.values('pk'), 100):
                             rm_ana_pks = [x['pk'] for x in chunk]
+                            all_rm_ana_pks.extend(rm_ana_pks)
                             create_job('purge_files', sfloc_ids=rm_ana_pks)
+                        for analoc in rm_ana_sfl.values('servershare_id', 'path',
+                                'sfile__analysisresultfile__analysis_id').distinct():
+                            analoc_sfls = rm.StoredFileLoc.objects.values('pk').filter(
+                                    sfile__analysisresultfile__analysis_id=analoc[
+                                        'sfile__analysisresultfile__analysis_id'])
+                            create_job('delete_empty_directory', path=analoc['path'], 
+                                    share_id=analoc['servershare_id'], sfloc_ids=[x['pk'] for x in analoc_sfls])
                         ana_nr = rm_ana_sfl.update(active=False)
-                        rm.StoredFile.objects.filter(storedfileloc__in=rm_ana_pks).exclude(
-                                storedfileloc__active=True).update(deleted=True)
                         print(f'Queued {ana_nr} expired analysis result files from share '
                                 f'{share.name} for deletion')
+                        rm.StoredFile.objects.filter(storedfileloc__in=all_rm_ana_pks).exclude(
+                                    storedfileloc__active=True).update(deleted=True)
 
             # set deleted=True on analysis if all its files are inactive,
             # when a shared active file is there, currently dont delete, 
@@ -197,6 +208,7 @@ class Command(BaseCommand):
                         filter=Q(analysisresultfile__sfile__storedfileloc__active=True)),
                         nr_soon=Count('analysisresultfile__sfile__storedfileloc',
                         filter=Q(analysisresultfile__sfile__storedfileloc__active=True,
+                        analysisresultfile__sfile__storedfileloc__servershare__maxdays_data__gt=0,
                         analysisresultfile__sfile__storedfileloc__last_date_used__lt=timezone.now() + 
                             timedelta(days=settings.ANALYSIS_EXPIRY_DAYS_MESSAGE) - 
                             timedelta(days=1) * F('analysisresultfile__sfile__storedfileloc__servershare__maxdays_data')))
