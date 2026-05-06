@@ -70,10 +70,13 @@ def get_project_plotdata(request):
     for dp in dm.Dataset.objects.filter(runname__experiment__project_id__in=data['proj_ids']
             ).values('pk', 'locked', 'runname__experiment__project__registered',
                     'runname__name', 'runname__experiment__name',
+                    'runname__experiment__project__externalref', 
                     'runname__experiment__project__name', 'runname__experiment__project_id',
                     'runname__experiment__project__active'):
         bartext = (f'{dp["runname__experiment__project__name"]} / {dp["runname__experiment__name"]} '
                 f'/ {dp["runname__name"]}')
+        if dp['runname__experiment__project__externalref']:
+            bartext = f'{dp["runname__experiment__project__externalref"]} - {bartext}'
         owner_q = dm.DatasetOwner.objects.filter(dataset_id=dp['pk']).values('user__username')
         ds_owners[dp['pk']] = owner_q.first()['user__username']
         if anas := am.Analysis.objects.filter(datasetanalysis__dataset_id=dp['pk']).values('date',
@@ -202,6 +205,7 @@ def get_project_plotdata(request):
             pp['fsize'] = files.aggregate(Sum('size'))['size__sum']
             pp['mstime'] = msfiles.aggregate(Sum('mstime'))['mstime__sum'] or 0
             mstimes[pp['dset']] = pp['mstime']
+            pp['owner'] = ds_owners[pp['dset']]
 
     for pp in perprojects:
         # Mark last segments in dset, add open/owner and start of dset there
