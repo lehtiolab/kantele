@@ -7,12 +7,17 @@ echo Cleaning up
 git clean -xf data/teststorage
 git checkout -- data/teststorage
 
-export GROUP_ID=$(id -g)
-export USER_ID=$(id -u)
+if [ "$(uname)" = "Darwin" ]; then
+  export USER_ID=1000
+  export GROUP_ID=1000
+else
+  export USER_ID=$(id -u)
+  export GROUP_ID=$(id -g)
+fi
 
 # Lint seems to operate on the local dir
 echo Running linting
-$DOCKERCMD run web pylint -E --disable E1101,E0307 --ignore-paths '.*\/migrations\/[0-9]+.*.py' \
+$DOCKERCMD run -T web pylint -E --disable E1101,E0307 --ignore-paths '.*\/migrations\/[0-9]+.*.py' \
    analysis \
    datasets \
    dashboard \
@@ -33,7 +38,7 @@ echo Init fixture repo
 if [ ! -e data/test/nfrepo/.git ]
 then
 	cd data/test/nfrepo
-	git init
+	git -c init.defaultBranch=master init # Make sure that you use the same git branch naming conventions
 	git add *.py
 	git commit -m 'test fixtures'
 	cd ../../../
@@ -51,5 +56,5 @@ then
 else
     $DOCKERCMD run --use-aliases web $TESTCMD $1
 fi
-
+echo Remove Git nfrepo
 rm -rf data/test/nfrepo/.git

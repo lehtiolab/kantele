@@ -16,9 +16,11 @@ cp .env.example .env
 # Build containers, with static files and database skeleton
 bash src/docker/init_develop.sh
 
-# Now you can run and go to http://${your-machine-url}/
-# The admin login / password is test / test
+# First, ensure that docker containers are running
 docker compose up
+
+# You can access a local development page http://localhost or http://${your-machine-url}/
+# The admin login = test & password = test
 ```
 
 ## Development:
@@ -43,6 +45,8 @@ npm run dev
 # Also does Django static file collection
 bash src/docker/create_static.sh
 ```
+
+Note that changes can be viewed at `http://localhost` (using default ports - as seen in `docker-compose.yml`).
 
 If you want to rebuild the containers:
 ```

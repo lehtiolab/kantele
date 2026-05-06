@@ -4,12 +4,13 @@
 services:
     web:
         depends_on:
-            - db 
+            db:
+                condition: service_healthy
         extends:
             file: ./src/docker/docker-compose-base.yml
             service: web
         env_file:
-            - ./src/docker/stage.env
+            - ./src/docker/${APP_ENV:-develop}.env
         environment:
             PROTOCOL: http
             DB_HOST: db
@@ -37,7 +38,7 @@ services:
     db: 
         extends:
             file: ./src/docker/docker-compose-base.yml
-            service: db 
+            service: db
         environment:
             KANTELE_PASSWORD: "${PG_KANTELE_PASSWORD}"
             KANTELE_DB: "${KANTELE_DB_NAME}"
@@ -46,6 +47,12 @@ services:
             - "./src/docker/create_kantele_db.sh:/docker-entrypoint-initdb.d/create_kantele_db.sh"
             - "${PG_DATA_PATH:-./false_pg_data}:/var/lib/postgresql/data"
             - "${BACKUP_PATH}:/pgbackups"
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U ${PG_KANTELE_USER} -d ${KANTELE_DB_NAME}"]
+            interval: 5s
+            timeout: 5s
+            retries: 5
+            start_period: 10s
 
     mq:
         extends:
@@ -59,7 +66,7 @@ services:
             file: ./src/docker/docker-compose-base.yml
             service: jobrunner
         env_file:
-            - ./src/docker/stage.env
+            - ./src/docker/${APP_ENV:-develop}.env
         volumes:
             - ./src/backend:/kantele
         environment:
@@ -71,7 +78,7 @@ services:
         depends_on:
             - mq
         env_file:
-            - ./src/docker/stage.env
+            - ./src/docker/${APP_ENV:-develop}.env
         extends:
             file: ./src/docker/docker-compose-dev.yml
             service: storage
@@ -82,7 +89,7 @@ services:
         depends_on:
             - mq
         env_file:
-            - ./src/docker/stage.env
+            - ./src/docker/${APP_ENV:-develop}.env
         extends:
             file: ./src/docker/docker-compose-dev.yml
             service: storage
@@ -100,7 +107,7 @@ services:
       depends_on:
         - mq
       env_file:
-        - ./src/docker/stage.env
+        - ./src/docker/${APP_ENV:-develop}.env
       extends:
         file: ./src/docker/docker-compose-dev.yml
         service: storage
@@ -137,7 +144,7 @@ services:
             #            - web
             #        command: celery -A kantele worker -Q nextflow -n analysis.%h --concurrency=1
             #        env_file:
-            #            - ./src/docker/stage.env
+            #            - ./src/docker/${APP_ENV:-develop}.env
             #        volumes:
             #            - ./data/storage:/storage
             #            - ./src/backend:/kantele
