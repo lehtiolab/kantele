@@ -15,7 +15,6 @@ from django.utils import timezone
 from corefac import models as cm
 from rawstatus import models as rm
 from datasets import models as dm
-from datasets import views as dv
 from analysis import models as am
 from jobs import models as jm
 from jobs import jobs as jj
@@ -64,11 +63,12 @@ def get_project_plotdata(request):
         closeprojdates[closeplog['project_id']] = datetime.strftime(closeplog['lastclose'], datefmt)
 
     perprojects = []
+    # Firstdate is first date in entire plot
     firstdate = timezone.now()
     today = timezone.now()
     ds_owners = {}
     for dp in dm.Dataset.objects.filter(runname__experiment__project_id__in=data['proj_ids']
-            ).values('pk', 'locked', 'runname__experiment__project__registered',
+            ).values('pk', 'locked', 'deleted', 'runname__experiment__project__registered',
                     'runname__name', 'runname__experiment__name',
                     'runname__experiment__project__externalref', 
                     'runname__experiment__project__name', 'runname__experiment__project_id',
@@ -77,8 +77,10 @@ def get_project_plotdata(request):
                 f'/ {dp["runname__name"]}')
         if dp['runname__experiment__project__externalref']:
             bartext = f'{dp["runname__experiment__project__externalref"]} - {bartext}'
+        projid = dp['runname__experiment__project_id']
         owner_q = dm.DatasetOwner.objects.filter(dataset_id=dp['pk']).values('user__username')
         ds_owners[dp['pk']] = owner_q.first()['user__username']
+        ana_pp = False
         if anas := am.Analysis.objects.filter(datasetanalysis__dataset_id=dp['pk']).values('date',
                 'pk').order_by('date'):
             # Create a "search" bar segment
@@ -95,9 +97,9 @@ def get_project_plotdata(request):
                     end = lastjob['timestamp']
                 else:
                     end = today
-                perprojects.append({'proj': bartext, 'dset': dp['pk'],
-                    'stage': Stages.SEARCH, 'start': anadate, 'end': end})
-
+                ana_pp = {'proj': bartext, 'projid': projid, 'dset': dp['pk'],
+                    'stage': Stages.SEARCH, 'start': anadate, 'end': end}
+                perprojects.append(ana_pp)
         # Raws can come way before project opening, so lets start with them
         firstfile_date = False
         if raws := rm.RawFile.objects.filter(datasetrawfile__dataset_id=dp['pk']).order_by('date'
@@ -106,8 +108,8 @@ def get_project_plotdata(request):
             if firstfile_date < firstdate:
                 firstdate = firstfile_date
             rawpp = {'proj': bartext, 'dset': dp['pk'], 'stage': Stages.MS, 'start': firstfile_date,
-                    }
-            if dp['locked'] or anas:
+                    'projid': projid, }
+            if anas or dp['locked'] or dp['deleted'] or not dp['runname__experiment__project__active']:
                 sf = rm.StoredFile.objects.values('regdate').get(rawfile_id=raws.last()['pk'],
                         mzmlfile__isnull=True)
                 # Use regdate on last file to include the time spent transferring
@@ -118,55 +120,54 @@ def get_project_plotdata(request):
         openpp = False
         opendate = dp['runname__experiment__project__registered']
         if not firstfile_date or opendate < firstfile_date:
+            # Normal, opening of project before acquisition of files
             if opendate < firstdate:
                 firstdate = opendate
             firstbar_start = opendate
-            openpp = {'proj': bartext, 'dset': dp['pk'],
+            openpp = {'proj': bartext, 'projid': projid, 'dset': dp['pk'],
                     'open': dp['runname__experiment__project__active'],
-                    'pid': dp['runname__experiment__project_id'],
                     'stage': Stages.OPENED, 'start': opendate,
                     'first': True}
-        else:
+        elif raws:
             # The opening of project was done after acquisition of files
-            rawpp.update({'first': True, 'pid': dp['runname__experiment__project_id'],
-                    'open': dp['runname__experiment__project__active'],
-                })
+            # We dont put a project opened bar
+            rawpp.update({'first': True, 'open': dp['runname__experiment__project__active']})
             firstbar_start = firstfile_date
         if raws:
             perprojects.append(rawpp)
 
         track_pipeline = False
-        if openpp:
-            firststage = openpp['start']
-        elif firstfile_date:
-            firststage = firstfile_date
-        
         for tr in cm.DatasetPrepTracking.objects.filter(dspipe__dataset_id=dp['pk']).order_by(
                 'timestamp'):
             track_pipeline = True
-            if tr.stage == cm.TrackingStages.SAMPLESREADY and tr.timestamp > firstbar_start:
+            if tr.stage == cm.TrackingStages.SAMPLESREADY and (tr.timestamp - firstbar_start).days >= 0:
                 # Normal, i.e first opened proj, then samples arrive
+                # compare days >= 0 since one can open project (timestamped with actuaal time) and 
+                # press samples ready (only timestamped with day, 0:00, as it is picked in calendar)
                 if openpp:
                     openpp['end'] = tr.timestamp
-                pp = {'proj': bartext, 'dset': dp['pk'],
+                pp = {'proj': bartext, 'projid': projid, 'dset': dp['pk'],
                         'stage': Stages.SAMPLES, 'start': tr.timestamp}
 
             elif tr.stage == cm.TrackingStages.SAMPLESREADY:
-                # Samples ready before opening project
-                pp = {'proj': bartext, 'dset': dp['pk'],
-                        'stage': Stages.SAMPLES, 'start': tr.timestamp}
+                # Samples ready before opening project, backdated by user
+                # we dont do open project bar
+                openpp = False
+                pp = {'proj': bartext, 'first': True, 'projid': projid, 'dset': dp['pk'],
+                        'open': dp['runname__experiment__project__active'], 'stage': Stages.SAMPLES,
+                        'start': tr.timestamp}
 
             elif tr.stage == cm.TrackingStages.PREPSTARTED and pp['stage'] == Stages.SAMPLES:
                 pp['end'] = tr.timestamp
                 perprojects.append(pp)
-                pp = {'proj': bartext, 'dset': dp['pk'],
+                pp = {'proj': bartext, 'projid': projid, 'dset': dp['pk'],
                         'stage': Stages.PREP, 'start': tr.timestamp}
             elif tr.stage == cm.TrackingStages.PREPFINISHED and pp['stage'] == Stages.PREP:
                 pp['end'] = tr.timestamp
                 perprojects.append(pp)
 
             elif tr.stage == cm.TrackingStages.MSQUEUED:
-                pp = {'proj': bartext, 'dset': dp['pk'],
+                pp = {'proj': bartext, 'projid': projid, 'dset': dp['pk'],
                         'stage': Stages.QUEUE, 'start': tr.timestamp}
 
         if track_pipeline:
@@ -176,10 +177,9 @@ def get_project_plotdata(request):
                 else:
                     pp['end'] = today
             elif 'end' not in pp:
-                if dp['locked']:
-                    lockdate = dm.ProjectLog.objects.filter(project_id=dp['runname__experiment__project_id'],
-                            level=dm.ProjLogLevels.INFO, message__endswith=f'locked dataset {dp["pk"]}')
-                    pp['end'] = lockdate.values('date').last()['date']
+                possible_tracking_end = []
+                if raws:
+                    pp['end'] = rawpp['start']
                 else:
                     pp['end'] = today
                 perprojects.append(pp)
@@ -211,6 +211,7 @@ def get_project_plotdata(request):
         # Mark last segments in dset, add open/owner and start of dset there
         if lastdates[pp['dset']] == pp['end']:
             pp['last'] = True
+            pp['duration'] = (lastdates[pp['dset']] - firstdates_open[pp['dset']][0]).days
             pp['startdset'] = firstdates_open[pp['dset']][0]
             pp['open'] = firstdates_open[pp['dset']][1]
             pp['owner'] = ds_owners[pp['dset']]

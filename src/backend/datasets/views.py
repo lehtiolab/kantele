@@ -938,8 +938,13 @@ def close_project(request):
         # been done, so they cant be changed
         models.ProjectExpiry.objects.update_or_create(project_id=data['item_id'],
                 defaults={'date': datetime.now() + timedelta(expirydays), 'active': True})
-        models.Dataset.objects.filter(runname__experiment__project_id=data['item_id']).update(
-                locked=True)
+        dsets = models.Dataset.objects.filter(runname__experiment__project_id=data['item_id'],
+                locked=False)
+        dsets.update(locked=True)
+        models.ProjectLog.objects.bulk_create([models.ProjectLog(project_id=data['item_id'],
+            level=models.ProjLogLevels.INFO,
+            message=f'User {request.user.id} locked dataset {ds["pk"]}')
+            for ds in dsets.values('pk')])
     elif projquery:
         # Only do this for open projects, not when it is under expiry
         # Cold store all datasets, delete them from active

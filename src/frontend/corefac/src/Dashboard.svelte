@@ -2,7 +2,7 @@
 
 import { push } from 'svelte-spa-router';
 import * as Plot from '@observablehq/plot';
-import { closeProject } from '../../home/src/util.js'
+import { closeProject, setExpiryProject } from '../../home/src/util.js'
 import { flashtime } from '../../util.js'
 import { postJSON, getJSON } from '../../datasets/src/funcJSON.js'
 import Table from '../../home/src/Table.svelte';
@@ -17,6 +17,7 @@ $: {
 }
 let selectedProjs = false;
 let addItem;
+let notif = {errors: {}, messages: {}};
 
 let plots;
 let msplots;
@@ -38,9 +39,14 @@ function showDetails(event) {
 
 const actionmap = {
   close: closeProject,
+  'phase out': setExpiryProject,
 }
-async function doAction(action, projid) {
-  await actionmap[action](projid, loadedProjects, notif);
+async function doAction(action, projid, invalue_placeholder_list) {
+  let pass_value = false;
+  if (invalue_placeholder_list) {
+    pass_value = invalue_placeholder_list[0];
+  }
+  await actionmap[action](projid, loadedProjects, pass_value, notif);
   loadedProjects = loadedProjects;
   updateNotif();
 }
@@ -76,7 +82,7 @@ const tablefields = [
   {id: 'dsets', name: 'Datasets', type: 'count', count: 'dset_ids', multi: false},
   {id: 'start', name: 'Registered', type: 'str', multi: false},
   {id: 'lastactive', name: 'Last active', type: 'str', multi: false},
-  {id: 'actions', name: '', type: 'button', multi: true, confirm: ['close']},
+  {id: 'actions', name: '', type: 'button', multi: true, confirm: ['close', 'phase out'], inputvalues: {'phase out': 'Expire in days (e.g. 60)'}},
 ];
 
 
@@ -119,12 +125,12 @@ async function replot(sortkey) {
 
   try {
     const colorscale = Plot.scale({color: {scheme: 'Observable10', domain: resp.stage_order}});
-    const color = {...colorscale, legend: true, opacity: 0.3};
+    let color = {color: {...colorscale, legend: true, opacity: 0.3}};
     individual_proj_plot = Plot.plot({
           title: 'Datasets',
           marginRight: 130,
           axis: null,
-          color: color,
+          ...color,
           x: {
                 axis: "top",
                 grid: true,
@@ -158,14 +164,14 @@ async function replot(sortkey) {
                       }),
 
                 Plot.text(perProject, {
-                  filter: (d) => d.first && resp.closedates[d.pid],
-                    x: (d) => new Date(resp.closedates[d.pid]),
+                  filter: (d) => d.first && resp.closedates[d.projid],
+                    x: (d) => new Date(resp.closedates[d.projid]),
                     y: "dset",
                     //U+2705
                     text: (d) => '✅',
                     }),
                 Plot.text(perProject, {
-                  filter: (d) => d.first && !resp.closedates[d.pid],
+                  filter: (d) => d.first && !resp.closedates[d.projid],
                     x: (d) => today,
                     y: "dset",
                     //U+23F1
@@ -199,20 +205,23 @@ async function replot(sortkey) {
     }
     // Datasets aggregates, project aggregates
     const bar_to_aggregate = sortkey === 'duration' ? 'first' : 'last';
-    const agg_plotdata = perProject.filter(d => d[bar_to_aggregate]);
     const stagenums = Object.fromEntries(resp.stage_order.map((x, ix) => [x, ix]));
+    let agg_plotdata = perProject.filter(d => d[bar_to_aggregate]);
+    if (sortkey === 'stage') {
+      agg_plotdata = agg_plotdata.sort((a,b) => stagenums[a.stage] > stagenums[b.stage]);
+    }
+
+
     function keepEarliest(accu, entry) {
-      if (!(entry.proj in accu) || stagenums[entry.stage] < stagenums[accu[entry.proj].stage]) {
+      if (!(entry.projid in accu) || stagenums[entry.stage] < stagenums[accu[entry.projid].stage]) {
         let newentry = {};
-        newentry[entry.proj] = {...entry};
+        newentry[entry.projid] = {...entry};
         return Object.assign(accu, newentry);
       } else {
         return accu;
        }
      }
-    const agg_plotdata_proj = Object.values(perProject.reduce(keepEarliest, {}))
-      .filter(d => d[bar_to_aggregate]);
-    console.log(agg_plotdata_proj)
+    const agg_plotdata_proj = Object.values(perProject.filter(d => d[bar_to_aggregate]).reduce(keepEarliest, {}));
     let sortkey_mod = ['stage', 'owner'].indexOf(sortkey) > -1 ? sortkey : `month${sortkey}`;
     sortkey_mod = sortkey_mod === 'monthstart' ? 'monthstartdset' : sortkey_mod;
     const rotation = ['stage', 'owner'].indexOf(sortkey) > -1 ? 0 : 90;
@@ -223,6 +232,7 @@ async function replot(sortkey) {
     let ms_trf;
     let agg_x;
     let agg_fx;
+    let agg_fx_proj;
     let agg_y;
     let agg_y_proj;
     let agg_marks;
@@ -236,6 +246,13 @@ async function replot(sortkey) {
       agg_transform_in = {fx: sortkey_mod, x: 'state', fill: 'stage', opacity: 0.3};
       agg_x = {axis: null};
       agg_fx = {axis: 'bottom', tickRotate: rotation, label: xlabels[sortkey]};
+      if (sortkey === 'stage') {
+        const allstages = new Set(agg_plotdata.map(x => x.stage));
+        const allstages_proj = new Set(agg_plotdata_proj.map(x => x.stage));
+        agg_fx.domain = resp.stage_order.filter(x => allstages.has(x));
+        agg_fx_proj = {...agg_fx, domain: resp.stage_order.filter(x => allstages.has(x))};
+      }
+
 
       open_closed_in = {
           fx: sortkey_mod,
@@ -271,6 +288,7 @@ async function replot(sortkey) {
       ];
       
     } else if (sortkey === 'duration') {
+      color = {},
       // Duration needs binning, so the aggregate plots get own code
       agg_y = { label: 'Datasets', grid: true};
       agg_y_proj = { label: 'Projects', grid: true};
@@ -282,6 +300,10 @@ async function replot(sortkey) {
         Plot.barY(agg_plotdata, Plot.binX(proj_agg_transform_yred, agg_transform_in)),
         Plot.ruleY([0]),
       ];
+      agg_marks_proj = [
+        Plot.barY(agg_plotdata_proj, Plot.binX(proj_agg_transform_yred, agg_transform_in)),
+        Plot.ruleY([0]),
+      ];
       ms_agg_marks = [
         Plot.barY(agg_plotdata, Plot.binX(ms_agg_transform_yred, ms_trf)),
         Plot.ruleY([0]),
@@ -290,7 +312,7 @@ async function replot(sortkey) {
 
     aggregate_plot = Plot.plot({
       title: 'Aggregated datasets',
-      color: color,
+      ...color,
       y: agg_y,
       x: agg_x, 
       fx: agg_fx,
@@ -298,10 +320,10 @@ async function replot(sortkey) {
     })
     aggregate_plot_proj = Plot.plot({
       title: 'Aggregated projects',
-      color: color,
+      ...color,
       y: agg_y_proj,
       x: agg_x, 
-      fx: agg_fx,
+      fx: agg_fx_proj,
       marks: agg_marks_proj,
     })
 
@@ -310,7 +332,7 @@ async function replot(sortkey) {
       title: 'Aggregated MS time',
       marginBottom: 75,
       marginTop: 75,
-      color: color,
+      ...color,
       y: { label: 'MS time(min)', grid: true },
       x: agg_x,
       fx: agg_fx,
@@ -323,7 +345,7 @@ async function replot(sortkey) {
       marginRight: 75,
       marginLeft: 75,
       marginBottom: 20,
-      color: color,
+      ...color,
       x: {axis: "top", label: 'MS time (min)', labelAnchor: 'center', grid: true,},
           y: {axis: "left", label: sortkey },
           marks: [
@@ -365,6 +387,9 @@ async function replot(sortkey) {
       while (msplots.firstChild) {
         msplots?.lastChild?.remove();
       }
+      while (dsplots.firstChild) {
+        dsplots?.lastChild?.remove();
+      }
       plots?.append(individual_proj_plot);
       plots?.append(aggregate_plot_proj);
       dsplots?.append(aggregate_plot);
@@ -376,7 +401,6 @@ async function replot(sortkey) {
     showError(`Some error occurred: ${error}`);
   }
 }
-let notif = {errors: {}, messages: {}};
 </script>
 
 
@@ -408,5 +432,5 @@ let notif = {errors: {}, messages: {}};
   inactive={['inactive']}
   on:detailview={showDetails}
   allowedActions={Object.keys(actionmap)}
-  on:rowAction={e => doAction(e.detail.action, e.detail.id)}
+  on:rowAction={e => doAction(e.detail.action, e.detail.id, e.detail.values)}
   />
