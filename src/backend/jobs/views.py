@@ -164,9 +164,9 @@ def resume_job(request):
     ownership = get_job_ownership(job, request)
     if not ownership['owner_loggedin'] and not ownership['is_staff']:
         return JsonResponse({'error': 'Only job owners and admin can resume this job'}, status=403)
-    elif job.state not in Jobstates.WAITING:
-        return JsonResponse({'error': 'Only jobs that are paused can be resumed, this job is in state '
-        '{}'.format(job.state)}, status=403)
+    elif job.state not in [Jobstates.WAITING, Jobstates.HOLD]:
+        return JsonResponse({'error': 'Only jobs that are paused can be resumed, this job is in '
+            f' state {job.state}'}, status=403)
     job.state = Jobstates.PENDING
     job.save()
     return JsonResponse({}) 
