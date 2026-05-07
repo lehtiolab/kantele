@@ -8,9 +8,11 @@
   {% endblock head %}
 
   {% load static %}
+  {{ user.username | json_script:'username'}}
   {{ user.is_staff|json_script:'admin'}}
   <script>
-    is_staff = JSON.parse(document.getElementById('admin').text);
+    const username = JSON.parse(document.getElementById('username').text);
+    const is_staff = JSON.parse(document.getElementById('admin').text);
   </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
   <link rel="stylesheet" type="text/css" href="{% static "datasets/style.css" %}">
@@ -36,7 +38,7 @@
 		    {% endif %}
 		    <form method="post" action="{% url 'logout' %}">
 		      {% csrf_token %}
-		    <button class="is-light button mt-1" type="submit" >LOGOUT {{ user }}</button>
+		    <button class="is-light button mt-1" type="submit" >LOGOUT {{ username }}</button>
 		    </form>
 		  {% endwith %}
 	    </div>

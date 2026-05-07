@@ -12,6 +12,7 @@ from django.contrib.auth.models import User
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
 from django.db.models import Q, Sum, Count, F, Value
 from django.db.models.functions import Trunc
+from django.utils import timezone
 from collections import OrderedDict, defaultdict
 
 from home import models as hm
@@ -64,7 +65,13 @@ def find_projects(userquery):
             case ['name', name]:
                 parsed_query &= Q(name=name)
             case ['active', yesno]:
-                parsed_query &= Q(active={'yes': True, 'true': True, 'no': False, 'false': False}[yesno])
+                parsed_query &= Q(active={'yes': True, 'true': True, 'no': False,
+                    'false': False}[yesno])
+            case ['expiring', yesno]:
+                if {'yes': True, 'true': True, 'no': False, 'false': False}[yesno]:
+                    parsed_query &= Q(projectexpiry__active=True)
+                else:
+                    parsed_query &= Q(projectexpiry__isnull=True)
             case ['user', username]:
                 parsed_query &= Q(experiment__runname__dataset__datasetowner__user__username=username)
             case _:
@@ -547,7 +554,8 @@ def populate_analysis(analyses, user):
 @login_required
 def get_proj_info(request, proj_id):
     proj = dsmodels.Project.objects.filter(pk=proj_id).values('ptype_id', 'ptype__name', 'name',
-            'externalref', 'registered', 'pi_id').get()
+            'externalref', 'registered', 'pi_id', 'projectexpiry__date', 'projectexpiry__active'
+            ).get()
     files = filemodels.StoredFile.objects.filter(mzmlfile__isnull=True,
             rawfile__datasetrawfile__dataset__runname__experiment__project_id=proj_id)
     nr_files = files.values('filetype__name').annotate(ftcount=Count('filetype__name')).order_by()
@@ -565,10 +573,21 @@ def get_proj_info(request, proj_id):
             'instruments': [x['rawfile__producer__name'] for x in
                 files.values('rawfile__producer__name').distinct()],
             'nrdsets': dsets.count(),
+            'expirydate': False, 'expirydays': False,
             'log': [{'date': x['date'], 'msg': x['message']} for x in
                 dsmodels.ProjectLog.objects.filter(project_id=proj_id).order_by('date').values(
                     'date', 'message')],
         }
+    if proj['projectexpiry__active']:
+        diff = proj['projectexpiry__date'] - timezone.now()
+        if diff.seconds / 3600 > 12:
+            expdays = diff.days + 1
+        else:
+            expdays = diff.days
+        info.update({
+            'expirydate': datetime.strftime(proj['projectexpiry__date'], '%Y-%m-%d %H:%M'),
+            'expirydays': expdays,
+            })
     return JsonResponse(info)
 
 

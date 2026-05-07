@@ -14,7 +14,12 @@ from home import models as hm
 
 
 class Command(BaseCommand):
-    '''Go through files and purge those from disks which are expired'''
+    '''Go through files and purge those from disks which are expired. Expiration can be:
+       - storage share has expiration, e.g. analysis server, sensitive data storage
+       - project is "phased out", i.e. is closed but has expiration date to delete files
+       - files have been claimed from INBOX (which can also have an expiration date as a share)
+       - mzML files have config storage time
+    '''
 
     def add_arguments(self, parser):
         # --dry-run only shows how many files will be deleted
@@ -49,17 +54,24 @@ class Command(BaseCommand):
                 sfile__rawfile__storedfile__pdcbackedupfile__success=True,
                 sfile__rawfile__storedfile__pdcbackedupfile__deleted=False)
 
+        # List all projects which are actively expiring
+        expired_projects = [x['pk'] for x in dm.Project.objects.filter(active=False,
+            projectexpiry__active=True, projectexpiry__date__lt=timezone.now()).values('pk')]
+
         if run_all or options['datasets']:
-            # Files in dset (dont delete half a dataset)
-            # Loop over shares (not many) to be able to connect dss and sfloc via their share
+            # Files in dset deletion (dont delete half a dataset)
             remove_dsets = set()
+
+            # Loop over shares (not many) to be able to connect dss and sfloc via their share
             for share in rm.ServerShare.objects.filter(active=True, function=rm.ShareFunction.RAWDATA,
                     maxdays_data__gt=0):
                 total_rm_ds_fns = 0
-
-                dss_exps = dm.DatasetServer.objects.filter(storageshare=share, active=True,
+                exp_proj_dss = dm.DatasetServer.objects.filter(storageshare=share, active=True,
+                        dataset__runname__experiment__project_id__in=expired_projects)
+                dss_exp_share = dm.DatasetServer.objects.filter(storageshare=share, active=True,
                         last_date_used__lt=timezone.now() - timedelta(days=share.maxdays_data))
-                for dss_exp in dss_exps.values('dataset_id', 'pk', 'dataset__datasetowner__user'):
+                for dss_exp in dss_exp_share.union(exp_proj_dss).values('dataset_id', 'pk',
+                        'storage_loc', 'storageshare_id', 'dataset__datasetowner__user'):
                     dss_sfl = activefns_raw.filter(servershare=share,
                             sfile__rawfile__datasetrawfile__dataset_id=dss_exp['dataset_id'])
                     dssrmsfl = activefns_raw_bup.filter(servershare=share,
@@ -77,6 +89,8 @@ class Command(BaseCommand):
                             create_job('remove_dset_files_servershare', dss_id=dss_exp['pk'],
                                     sfloc_ids=dssrmsfl_ids)
                             nr_dsssfl = dssrmsfl.update(active=False)
+                            create_job('delete_empty_directory', path=dss_exp['storage_loc'],
+                                    share_id=dss_exp['storageshare_id'], sfloc_ids=dssrmsfl_ids)
                             rm.StoredFile.objects.filter(storedfileloc__pk__in=dssrmsfl_ids).exclude(
                                 storedfileloc__active=True).update(deleted=True)
                             dm.DatasetServer.objects.filter(pk=dss_exp['pk']).update(active=False)
@@ -128,13 +142,18 @@ class Command(BaseCommand):
             # of the analysis files either!
             all_ana_fns = activefns_raw_bup.filter(sfile__analysisresultfile__isnull=False)
             all_rm_anas = set()
+            # List analyses with input dsets from projects that have expired:
+            exp_proj_ana = [x['pk'] for x in am.Analysis.objects.values('pk').filter(
+                    datasetanalysis__dataset__runname__experiment__project__id__in=expired_projects)]
             for share in rm.ServerShare.objects.filter(active=True, maxdays_data__gt=0,
                     function__in=[rm.ShareFunction.ANALYSIS_DELIVERY, rm.ShareFunction.ANALYSISRESULTS]):
                 share_ana_fns = all_ana_fns.filter(servershare=share)
+                exp_p_a_sharefn = share_ana_fns.filter(sfile__analysisresultfile__analysis_id__in=exp_proj_ana)
                 # get analysis_id, max_date of last_used in analysis share files
-                exp_ana = share_ana_fns.values('sfile__analysisresultfile__analysis_id').filter(
+                exp_share_ana = share_ana_fns.filter(
                         last_date_used__lt=timezone.now() - timedelta(days=share.maxdays_data))
-                rm_ana_ids = {x['sfile__analysisresultfile__analysis_id'] for x in exp_ana}
+                rm_ana_ids = {x['sfile__analysisresultfile__analysis_id'] for x in
+                        exp_share_ana.union(exp_p_a_sharefn).values('sfile__analysisresultfile__analysis_id')}
                 all_rm_anas.update(rm_ana_ids)
                 # if file is shared between two analyses, of which only one has expired, 
                 # make sure the file doesnt get deleted!
@@ -144,6 +163,7 @@ class Command(BaseCommand):
                         analysisresultfile__sfile__storedfileloc__id__in=pre_multiana_fns.filter(
                             last_date_used__gt=timezone.now() - timedelta(days=share.maxdays_data))
                         ).exclude(pk__in=rm_ana_ids)
+                all_rm_ana_pks = []
                 if rm_ana_sfl := pre_multiana_fns.exclude(sfile__analysisresultfile__analysis__in=notrm_ana):
                     if options['dry_run']:
                         ana_nr = rm_ana_sfl.count()
@@ -152,12 +172,20 @@ class Command(BaseCommand):
                     else:
                         for chunk in chunk_iter(rm_ana_sfl.values('pk'), 100):
                             rm_ana_pks = [x['pk'] for x in chunk]
+                            all_rm_ana_pks.extend(rm_ana_pks)
                             create_job('purge_files', sfloc_ids=rm_ana_pks)
+                        for analoc in rm_ana_sfl.values('servershare_id', 'path',
+                                'sfile__analysisresultfile__analysis_id').distinct():
+                            analoc_sfls = rm.StoredFileLoc.objects.values('pk').filter(
+                                    sfile__analysisresultfile__analysis_id=analoc[
+                                        'sfile__analysisresultfile__analysis_id'])
+                            create_job('delete_empty_directory', path=analoc['path'], 
+                                    share_id=analoc['servershare_id'], sfloc_ids=[x['pk'] for x in analoc_sfls])
                         ana_nr = rm_ana_sfl.update(active=False)
-                        rm.StoredFile.objects.filter(storedfileloc__in=rm_ana_pks).exclude(
-                                storedfileloc__active=True).update(deleted=True)
                         print(f'Queued {ana_nr} expired analysis result files from share '
                                 f'{share.name} for deletion')
+                        rm.StoredFile.objects.filter(storedfileloc__in=all_rm_ana_pks).exclude(
+                                    storedfileloc__active=True).update(deleted=True)
 
             # set deleted=True on analysis if all its files are inactive,
             # when a shared active file is there, currently dont delete, 
@@ -180,6 +208,7 @@ class Command(BaseCommand):
                         filter=Q(analysisresultfile__sfile__storedfileloc__active=True)),
                         nr_soon=Count('analysisresultfile__sfile__storedfileloc',
                         filter=Q(analysisresultfile__sfile__storedfileloc__active=True,
+                        analysisresultfile__sfile__storedfileloc__servershare__maxdays_data__gt=0,
                         analysisresultfile__sfile__storedfileloc__last_date_used__lt=timezone.now() + 
                             timedelta(days=settings.ANALYSIS_EXPIRY_DAYS_MESSAGE) - 
                             timedelta(days=1) * F('analysisresultfile__sfile__storedfileloc__servershare__maxdays_data')))

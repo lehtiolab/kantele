@@ -317,7 +317,7 @@ def request_upload_token(request):
         return JsonResponse({'success': False, 'msg': 'Can only upload raw, library, user files '})
 
     ufu = UploadToken.create_upload_token(data['ftype_id'], request.user.id, producer, uploadtype)
-    host = settings.KANTELEHOST or request.build_absolute_uri('/')
+    host = settings.KANTELEHOST if settings.KANTELEHOST_NOPROTO else request.build_absolute_uri('/')
     return JsonResponse(ufu.parse_token_for_frontend(host))
 
 

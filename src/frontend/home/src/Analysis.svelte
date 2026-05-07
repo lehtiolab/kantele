@@ -133,7 +133,7 @@ async function unDeleteAnalyses() {
  bind:selected={selectedAnalyses}
  fetchUrl="/show/analyses"
  findUrl="/show/analyses"
- defaultq=""
+ defaultQ="user:{username} from:365d "
  search_examples="type:pisep/std/spec/... from:20250801 to:2025 deleted:yes/no success:yes/no user:yourname"
  on:detailview={showDetails}
  getdetails={getAnalysisDetails}

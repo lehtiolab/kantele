@@ -12,6 +12,8 @@ export let icon;
 export let inactive;
 export let allowedActions = [];
 
+let fieldinput;
+
 let confirmReady = false;
 let color = statecolors[field.id];
 let helptext = helptexts[field.id] ? helptexts[field.id][value] : false;
@@ -48,12 +50,19 @@ function setConfirm() {
 
 {:else if field.type === 'button' && allowedActions.indexOf(value) > -1}
 
-  {#if field.confirm && field.confirm.indexOf(value) > -1 && !confirmReady}
+  {#if field.confirm && field.confirm.indexOf(value) > -1 && !confirmReady && !fieldinput}
   <button on:click={setConfirm} class="button is-small">{value}</button>
-  {:else if field.confirm && field.confirm.indexOf(value) > -1}
-  <button on:click={e => dispatch('rowAction', {id: rowid, action: value})} class="button is-small is-danger is-light">{value} - Are you sure?</button>
+
+  {:else if fieldinput || field.confirm && field.confirm.indexOf(value) > -1}
+  <button on:click={e => dispatch('rowAction', {id: rowid, action: value, values: fieldinput})} class="button is-small is-danger is-light">{value} - Are you sure?</button>
+
   {:else}
-  <button on:click={e => dispatch('rowAction', {id: rowid, action: value})} class="button is-small">{value}</button>
+  <button on:click={e => dispatch('rowAction', {id: rowid, action: value, values: fieldinput})} class="button is-small">{value}</button>
+
+  {/if}
+
+  {#if fieldinput || field.inputvalues && field.inputvalues[value] && confirmReady}
+  <input class="input" bind:value={fieldinput} type="text" placeholder={field.inputvalues[value]} />
   {/if}
 
 {:else if field.type === 'smallcoloured'}

@@ -1314,7 +1314,7 @@ def renew_token(request):
             rm.UploadFileType.ANALYSIS)
     analysis.externalanalysis.last_token = new_token
     analysis.externalanalysis.save()
-    host = settings.KANTELEHOST or request.build_absolute_uri('/')
+    host = settings.KANTELEHOST if settings.KANTELEHOST_NOPROTO else request.build_absolute_uri('/')
     api_token = new_token.parse_token_for_frontend(host)
     return JsonResponse({'error': False, 'token': api_token})
 

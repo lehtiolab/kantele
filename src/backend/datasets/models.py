@@ -48,6 +48,26 @@ class ProjectLog(models.Model):
     message = models.TextField()
 
 
+class ProjectExpiry(models.Model):
+    '''When project is set to expire, it will behave as a closed project, i.e.
+    active=False
+    - it is not possible to make new datasets,
+    - it is not possible to add files to existing datasets
+    But, its data will be available until the expiry date is finished
+    - Raws are still on disk
+    - You can still run an analysis on the datasets
+    A record in this table is treated as a job, not a log, so changes to expiry, or
+    expiry/reopen/new expire will not be tracked
+    '''
+    project = models.OneToOneField(Project, on_delete=models.CASCADE)
+    date = models.DateTimeField()
+    # active is basically now() < date, but its fast and easy to do a boolean lookup
+    # and also need to know if an expired project has been cleaned up
+    # active is updated in a cron job that runs delete_expired_files
+    # so if that is not running, it will never update
+    active = models.BooleanField(default=True)
+
+
 class UserPtype(models.Model):
     # FIXME deprecate, we dont use this? is_staff now  is used for CF users
     # probably not a good idea anyway

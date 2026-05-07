@@ -1,0 +1,38 @@
+---
+name: release-uploadclient
+run-name: Build upload client TUI executables, delete old ones, and keep new ones
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - 'src/backend/rawstatus/file_inputs/tui/*'
+
+jobs:
+  package-client:
+    uses: ./.github/workflows/package_upload_client.yml
+
+  release-client:
+    runs-on: ubuntu-latest
+    needs: package-client
+    steps:
+      - name: Download artifacts to runner
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: "${{ needs.package-client.outputs.macos_client }},${{ needs.package-client.outputs.macos_client }}"
+          merge-multiple: true
+  
+      - name: Get date for release, latest commit
+        shell: bash
+        run: |
+          echo "COMMIT_DATE=$(git show -s --format=%cd --date=short)"
+
+      - name: Release client and upload artifacts
+        uses: ncipollo/release-action@v1
+        with:
+          generateReleaseNotes: false
+          tag: "uploadclient-release-${{ env.COMMIT_DATE }}"
+          name: "Upload client package ${{ env.COMMIT_DATE }}"
+          artifacts: 'kantele_client_macos,kantele_client_win.exe'
+
