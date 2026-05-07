@@ -17,22 +17,24 @@ jobs:
     runs-on: ubuntu-latest
     needs: package-client
     steps:
+      - uses: actions/checkout@v6
       - name: Download artifacts to runner
         uses: actions/download-artifact@v8
         with:
-          artifact-ids: "${{ needs.package-client.outputs.macos_client }},${{ needs.package-client.outputs.macos_client }}"
+          artifact-ids: "${{ needs.package-client.outputs.macos_client }},${{ needs.package-client.outputs.win_client }}"
           merge-multiple: true
   
       - name: Get date for release, latest commit
         shell: bash
         run: |
-          echo "COMMIT_DATE=$(git show -s --format=%cd --date=short)"
+          echo "COMMIT_DATE=$(git show -s --format=%cd --date=short)" >> "$GITHUB_ENV"
 
       - name: Release client and upload artifacts
         uses: ncipollo/release-action@v1
         with:
           generateReleaseNotes: false
           tag: "uploadclient-release-${{ env.COMMIT_DATE }}"
-          name: "Upload client package ${{ env.COMMIT_DATE }}"
+          commit: "${{ github.sha }}"
+          name: "Uploadclient package ${{ env.COMMIT_DATE }}"
           artifacts: 'kantele_client_macos,kantele_client_win.exe'
 
