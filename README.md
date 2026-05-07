@@ -1,5 +1,26 @@
 # Kantele
 
+## Core facility
+Core facility has its own top level page, where projects are plotted that are of core facility
+type. These plots are populated with data selected from a project table, which functions as in
+the home page, i.e. one can filter on user, name, dates, type, activity, expiration, etc.
+It is possible to close projects in this page, as well as phasing out of projects (i.e. closes
+and sets an expiration date). In the default table all open CF projects are shown. Closing or phasing out a project will mark them with a ✅ in the plots.
+
+## Auto-deletion
+A cron job exists (TODO, currently not running) for a custom Django command to delete expired files.
+This can be run by hand as well, like this:
+```
+docker compose [options] exec web python manage.py delete_expired_files --help
+```
+Using `--dry-run` will only show the potential files to be deleted, otherwise one can also specify
+e.g. `--analysis`, `--datasets`, etc. The command will queue files for deletion:
+- files in INBOX which are also in a dataset
+- files in datasets on shares with an expiry time (e.g. sensitive data, space-constrained analysis cluster)
+- Also other files in shares with an expiry time, e.g. analysis output, library files, web-served report files
+- mzML converted files which have a configured lifespan in `settings.py`
+
+
 ## Development, before starting
 Prerequisites:
 
