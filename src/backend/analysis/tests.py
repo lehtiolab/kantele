@@ -689,8 +689,9 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.wftype = am.UserWorkflow.WFTypeChoices.STD
         self.wf = am.UserWorkflow.objects.create(name='testwf', wftype=self.wftype, public=True)
         self.wf.nfwfversionparamsets.add(self.nfwf)
-        am.NfConfigFile.objects.create(serverprofile=self.anaprofile, nfpipe=self.nfwf, nfconfig=self.nfc_lf)
-        am.NfConfigFile.objects.create(serverprofile=self.anaprofile2, nfpipe=self.nfwf, nfconfig=self.nfc_lf)
+        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwf, config_commit='123jkl')
+        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf)
+        am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwf, config_commit='123jkl')
 
 
     def test_store_external_analysis(self):
@@ -877,8 +878,9 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
     url = '/analysis/store/'
 
     def test_existing_analysis(self):
-        am.NfConfigFile.objects.create(serverprofile=self.anaprofile, nfpipe=self.nfwf, nfconfig=self.nfc_lf)
-        am.NfConfigFile.objects.create(serverprofile=self.anaprofile2, nfpipe=self.nfwf, nfconfig=self.nfc_lf)
+        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwf, config_commit='123jkl')
+        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf)
+        am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwf, config_commit='123jkl')
         quant = self.ds.quantdataset.quanttype
         remotedss = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.analocalstor,
                 storage_loc_ui=self.storloc, storage_loc=self.storloc, startdate=timezone.now())
@@ -1039,8 +1041,9 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
                 'selected analysis server', resp.json()['multierror'])
 
     def test_existing_analysis(self):
-        am.NfConfigFile.objects.create(serverprofile=self.anaprofile, nfpipe=self.nfwf, nfconfig=self.nfc_lf)
-        am.NfConfigFile.objects.create(serverprofile=self.anaprofile2, nfpipe=self.nfwf, nfconfig=self.nfc_lf)
+        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwf, config_commit='123jkl')
+        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf)
+        am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwf, config_commit='123jkl')
         c_ch = am.PsetComponent.ComponentChoices
         am.PsetComponent.objects.get_or_create(pset=self.pset,
                 component=am.PsetComponent.ComponentChoices.COMPLEMENT_ANALYSIS)

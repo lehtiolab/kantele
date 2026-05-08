@@ -1125,7 +1125,8 @@ def create_mzmls(request):
     nfwf = anmodels.NextflowWfVersionParamset.objects.select_related('nfworkflow').get(
             pk=pwiz.nf_version_id)
     if anaprof_q := filemodels.AnalysisServerProfile.objects.filter(server__active=True,
-            nfconfigfile__nfpipe=nfwf, server__fileservershare__share_id=source_ssid):
+            nfreposerverconfig__nfconfigversion__nfpipe=nfwf,
+            server__fileservershare__share_id=source_ssid):
         anaprofile = anaprof_q.values('pk', 'server_id').first()
     else:
         return JsonResponse({'error': 'Analysis server cannot be found in config, please check '
@@ -1159,8 +1160,9 @@ def create_mzmls(request):
             pwiz_id=pwiz.pk, timestamp=datetime.strftime(datetime.now(), '%Y%m%d_%H.%M'),
             server_id=anaprofile['server_id'], anaserverprofile_id=anaprofile['pk'],
             sfloc_ids=srcsfl_pk,
-            nfconfig_id=anmodels.LibraryFile.objects.filter(nfconfigfile__nfpipe=nfwf,
-                nfconfigfile__serverprofile=anaprofile['pk']
+            nfconfig_id=anmodels.LibraryFile.objects.filter(
+                nfreposerverconfig__nfconfigversion__nfpipe=nfwf,
+                nfreposerverconfig__serverprofile=anaprofile['pk']
                 ).values('sfile_id').get()['sfile_id'])
     if mzjob['error']:
         pass
@@ -1258,7 +1260,7 @@ def refine_mzmls(request):
     srcdss = dsmodels.DatasetServer.objects.filter(dataset=dset,
             storageshare_id__in=mzmlsfl.values('servershare_id')).values('pk', 'storageshare_id').first()
     if anaprof_q := filemodels.AnalysisServerProfile.objects.filter(
-            nfconfigfile__nfpipe_id=data['wfid'], server__active=True,
+            nfreposerverconfig__nfconfigversion__nfpipe_id=data['wfid'], server__active=True,
             server__fileservershare__share_id=srcdss['storageshare_id']).values('pk', 'server_id'):
         anaprofile = anaprof_q.first()
     else:
@@ -1276,8 +1278,9 @@ def refine_mzmls(request):
     dss_id, source_ssid = srcdss['pk'], srcdss['storageshare_id']
     srcsfl_pk = [x['pk'] for x in mzmlsfl.filter(servershare_id=source_ssid).exclude(
         sfile__rawfile__in=[x['rawfile'] for x in existing_refined.values('rawfile')]).values('pk')]
-    nfconfig_id = anmodels.LibraryFile.objects.filter(nfconfigfile__nfpipe_id=data['wfid'],
-            nfconfigfile__serverprofile_id=anaprofile['pk']).values('sfile_id').get()['sfile_id']
+    nfconfig_id = anmodels.LibraryFile.objects.filter(
+            nfreposerverconfig__nfconfigversion__nfpipe_id=data['wfid'],
+            nfreposerverconfig__serverprofile_id=anaprofile['pk']).values('sfile_id').get()['sfile_id']
     job = create_job('refine_mzmls', dss_id=dss_id, analysis_id=analysis.id, wfv_id=data['wfid'],
             sfloc_ids=srcsfl_pk, dbfn_id=dbid, qtype=dset.quantdataset.quanttype.shortname,
             instrument=instrument, anaserverprofile_id=anaprofile['pk'],
