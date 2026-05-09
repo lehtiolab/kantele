@@ -933,8 +933,8 @@ def rsync_qc_to_analysis(sfl_q, nfwfvid):
     '''
 
     fss_q = FileserverShare.objects.filter(share__function=ShareFunction.RAWDATA,
-            server__analysisserverprofile__nfconfigfile__nfpipe_id=nfwfvid, server__active=True,
-            share__active=True)
+            server__analysisserverprofile__nfreposerverconfig__nfconfigversion__nfpipe_id=nfwfvid,
+            server__active=True, share__active=True)
     if ana_sfl := sfl_q.filter(servershare__fileservershare__in=fss_q):
         # File is on analysis server with QC pipe 
         sfloc = ana_sfl.first()
@@ -965,7 +965,8 @@ def rsync_qc_to_analysis(sfl_q, nfwfvid):
         fss = False
         return False, False, msg
     # Run on first available profile for the server
-    anaprofile = AnalysisServerProfile.objects.filter(nfconfigfile__nfpipe_id=nfwfvid,
+    anaprofile = AnalysisServerProfile.objects.filter(
+            nfreposerverconfig__nfconfigversion__nfpipe_id=nfwfvid,
             server__fileservershare__id=fss['pk'], server__active=True).values('pk').first()
     return sfloc, fss['server_id'], anaprofile['pk'], False
 
@@ -991,8 +992,8 @@ def run_singlefile_qc(sfloc_q, user_op, acqtype):
     trackpeps = [[x['peptide__pk'], x['peptide__sequence'], x['peptide__charge']] for x in
             dashmodels.PeptideInSet.objects.filter(peptideset=tps).values('peptide__pk',
             'peptide__sequence', 'peptide__charge')]
-    nfconfig = LibraryFile.objects.filter(nfconfigfile__serverprofile__server_id=server_id,
-            nfconfigfile__nfpipe_id=nfwfvid).values('sfile_id').get()['sfile_id']
+    nfconfig = LibraryFile.objects.filter(nfreposerverconfig__serverprofile__server_id=server_id,
+            nfreposerverconfig__nfconfigversion__nfpipe_id=nfwfvid).values('sfile_id').get()['sfile_id']
     create_job('run_longit_qc_workflow', sfloc_id=sfloc.id, analysis_id=analysis.id, wf_id=wf.pk,
             nfwfvid=nfwfvid, fserver_id=server_id, anaserverprofile_id=anaprofile_id,
             nfconfig_id=nfconfig, qcrun_id=qcrun.pk, params=params, trackpeptides=trackpeps)

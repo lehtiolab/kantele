@@ -690,7 +690,7 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.wf = am.UserWorkflow.objects.create(name='testwf', wftype=self.wftype, public=True)
         self.wf.nfwfversionparamsets.add(self.nfwf)
         am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwf, config_commit='123jkl')
-        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf)
+        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf, repolocation=self.nfw.repo)
         am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwf, config_commit='123jkl')
 
 
@@ -879,7 +879,7 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
 
     def test_existing_analysis(self):
         am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwf, config_commit='123jkl')
-        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf)
+        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf, repolocation=self.nfw.repo)
         am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwf, config_commit='123jkl')
         quant = self.ds.quantdataset.quanttype
         remotedss = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.analocalstor,
@@ -1042,7 +1042,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
 
     def test_existing_analysis(self):
         am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwf, config_commit='123jkl')
-        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf)
+        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf, repolocation=self.nfw.repo)
         am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwf, config_commit='123jkl')
         c_ch = am.PsetComponent.ComponentChoices
         am.PsetComponent.objects.get_or_create(pset=self.pset,

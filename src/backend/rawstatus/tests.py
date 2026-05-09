@@ -777,7 +777,8 @@ class TestUploadScript(BaseIntegrationTest):
             'rejected_files': []})
         self.assertEqual(resp.status_code, 200)
         self.url = '/mzml/create/'
-        am.NfConfigFile.objects.create(serverprofile=self.anaprofile2, nfpipe=self.nfwv, nfconfig=self.nfc_lf)
+        nfrepo = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf, repolocation=self.nfw.repo)
+        am.NfConfigVersion.objects.create(nfservercfg=nfrepo, nfpipe=self.nfwv, config_commit='123jkl')
         resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pwiz.pk,
             'dsid': self.oldds.pk})
         self.assertEqual(resp.status_code, 200)

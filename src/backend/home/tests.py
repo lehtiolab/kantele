@@ -30,7 +30,7 @@ class MzmlTests(BaseIntegrationTest):
         self.wf = am.UserWorkflow.objects.create(name='refine', wftype=am.UserWorkflow.WFTypeChoices.SPEC,
                 public=False)
         self.wf.nfwfversionparamsets.add(self.refinewf)
-        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf)
+        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf, repolocation=self.nfw.repo)
         am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwv, config_commit='123jkl')
         am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwv, config_commit='123jkl')
         am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.refinewf, config_commit='123jkl')

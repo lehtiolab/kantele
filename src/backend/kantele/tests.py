@@ -205,7 +205,7 @@ class BaseTest(TestCase):
                 wftype=am.UserWorkflow.WFTypeChoices.QC)
         self.qcwf.nfwfversionparamsets.add(self.qcnfwf)
         self.nfrepo = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile, nfrepo=self.nfw,
-                configincluder=self.nfc_lf)
+                configincluder=self.nfc_lf, repolocation=self.nfw.repo)
         am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.qcnfwf,
                 config_commit='123abd')
 
