@@ -114,6 +114,8 @@ class NfConfigVersion(models.Model):
     config_commit = models.CharField(max_length=50,
             help_text='Commit of version of config file for this pipeline on this server, will be passed to --config_commit')
 
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['nfpipe', 'nfservercfg'], name='uni_nfserverpipe')]
 
 class UserWorkflow(models.Model):
 
