@@ -54,10 +54,18 @@ function setConfirm() {
   <button on:click={setConfirm} class="button is-small">{value}</button>
 
   {:else if fieldinput || field.confirm && field.confirm.indexOf(value) > -1}
-  <button on:click={e => dispatch('rowAction', {id: rowid, action: value, values: fieldinput})} class="button is-small is-danger is-light">{value} - Are you sure?</button>
+  <button on:click={e => {
+    dispatch('rowAction', {id: rowid, action: value, values: fieldinput});
+    fieldinput = '';
+    }
+  } class="button is-small is-danger is-light">{value} - Are you sure?</button>
 
   {:else}
-  <button on:click={e => dispatch('rowAction', {id: rowid, action: value, values: fieldinput})} class="button is-small">{value}</button>
+  <button on:click={e => {
+    dispatch('rowAction', {id: rowid, action: value, values: fieldinput});
+    fieldinput = '';
+    }
+  } class="button is-small">{value}</button>
 
   {/if}
 

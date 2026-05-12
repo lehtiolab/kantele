@@ -141,18 +141,8 @@ class Dataset(models.Model):
 
     @staticmethod
     def query_creator(searchterms):
-        query = Q(runname__name__icontains=searchterms[0])
-        query |= Q(runname__experiment__name__icontains=searchterms[0])
-        query |= Q(runname__experiment__project__name__icontains=searchterms[0])
-        query |= Q(datatype__name__icontains=searchterms[0])
-        try:
-            float(searchterms[0])
-        except ValueError:
-            pass
-        else:
-            query |= Q(prefractionationdataset__hiriefdataset__hirief__start=searchterms[0])
-            query |= Q(prefractionationdataset__hiriefdataset__hirief__end=searchterms[0])
-        for term in searchterms[1:]:
+        query = Q()
+        for term in searchterms:
             subquery = Q(runname__name__icontains=term)
             subquery |= Q(runname__experiment__name__icontains=term)
             subquery |= Q(runname__experiment__project__name__icontains=term)
@@ -164,6 +154,12 @@ class Dataset(models.Model):
             else:
                 subquery |= Q(prefractionationdataset__hiriefdataset__hirief__start=term)
                 subquery |= Q(prefractionationdataset__hiriefdataset__hirief__end=term)
+            try:
+                int(term)
+            except ValueError:
+                pass
+            else:
+                subquery |= Q(pk=term)
             query &= subquery
         return query
 

@@ -1470,7 +1470,7 @@ class TestArchiveProject(BaseTest):
         dm.DatasetOwner.objects.create(dataset=ds, user=otheruser)
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.p1.pk})
         self.assertEqual(resp.status_code, 403)
-        self.assertEqual(resp.json()['error'], 'User has no permission to retire this project, does not own all datasets in project')
+        self.assertEqual(resp.json()['error'], 'User has no permission to update this project, does not own all datasets in project')
 
     def test_ok(self):
         # p1, no expiration

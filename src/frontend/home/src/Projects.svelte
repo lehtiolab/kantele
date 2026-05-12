@@ -35,7 +35,7 @@ const tablefields = [
   {id: 'ptype', name: 'Type', type: 'str', multi: false},
   {id: 'start', name: 'Registered', type: 'str', multi: false},
   {id: 'lastactive', name: 'Last active', type: 'str', multi: false},
-  {id: 'actions', name: '', type: 'button', multi: true, confirm: ['close', 'phase out'], inputvalues: {'phase out': 'Expire in days (e.g. 60)'}},
+  {id: 'actions', name: '', type: 'button', multi: true, confirm: ['close', 'phase out'], inputvalues: {'phase out': 'Expire in days (e.g. 60) - to cancel expiry, write 0 days'}},
 ];
 
 const fixedbuttons = [

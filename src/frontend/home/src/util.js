@@ -46,7 +46,8 @@ export async function closeProject(projid, projects, _expire, notif) {
 
 export async function setExpiryProject(projid, projects, expire_days, notif) {
   const callback = false ;// (proj) => {refreshProj(proj.id)};
-  if (!parseInt(Number(expire_days))) {
+  const parsed_num = parseInt(Number(expire_days));
+  if (!parsed_num && expire_days !== '0') {
     notif.errors['Must fill in a number days after which the project will expire'] = 1;
     return
   }

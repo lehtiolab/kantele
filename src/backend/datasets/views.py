@@ -916,36 +916,51 @@ def close_project(request):
     '''Closes project:
         - Set to not active in DB
         - For each dataset, archive if needed, and remove from servers
+    If expires_in_days is passed, this will soft-close the project, i.e. set it to inactive,
+    and set an expirydate for the datasets
+    If expires_in_days is 0, it will set the project to active again and remove the expiration
+    date from datasets
     '''
     data = json.loads(request.body.decode('utf-8'))
     if 'item_id' not in data or not data['item_id']:
         return JsonResponse({'state': 'error', 'error': 'No project specified for closing'}, status=400)
-    projquery = models.Project.objects.filter(pk=data['item_id'], active=True)
-    expiry_q = models.ProjectExpiry.objects.filter(project_id=data['item_id'], active=True)
-    if not projquery and (not expiry_q or not data['expires_in_days']):
+    projquery = models.Project.objects.filter(pk=data['item_id'])
+    proj_active_q = projquery.filter(active=True)
+    expiry_q = models.ProjectExpiry.objects.filter(project_id=data['item_id'], active=True,
+            project__active=False)
+    if not proj_active_q and (not expiry_q or not data['expires_in_days']):
         return JsonResponse({'state': 'error', 'error': 'Project is already closed, purged or never existed'}, status=400)
     # Retiring a project is only allowed if user owns ALL datasets in project or is staff
     dsetowners = models.DatasetOwner.objects.filter(dataset__runname__experiment__project_id=data['item_id'], dataset__purged=False).select_related('dataset')
     if dsetowners.filter(user=request.user).count() != dsetowners.distinct('dataset').count() and not request.user.is_staff:
-        return JsonResponse({'state': 'error', 'error': 'User has no permission to retire this project, does not own all datasets in project'}, status=403)
+        return JsonResponse({'state': 'error', 'error': 'User has no permission to update this project, does not own all datasets in project'}, status=403)
 
+    proj_active = False
     if expirydays := data['expires_in_days']:
         try:
             expirydays = int(expirydays)
         except ValueError:
             return JsonResponse({'state': 'error', 'error': 'Cannot phase out project without number of days'}, status=400)
-        # Do not delete datasets when expiring later, but lock them in case that has not
-        # been done, so they cant be changed
-        models.ProjectExpiry.objects.update_or_create(project_id=data['item_id'],
-                defaults={'date': datetime.now() + timedelta(expirydays), 'active': True})
-        dsets = models.Dataset.objects.filter(runname__experiment__project_id=data['item_id'],
-                locked=False)
-        dsets.update(locked=True)
-        models.ProjectLog.objects.bulk_create([models.ProjectLog(project_id=data['item_id'],
-            level=models.ProjLogLevels.INFO,
-            message=f'User {request.user.id} locked dataset {ds["pk"]}')
-            for ds in dsets.values('pk')])
-    elif projquery:
+        if expiry_q and expirydays == 0:
+            # Unexpire if user passes zero
+            models.ProjectExpiry.objects.filter(project_id=data['item_id']).delete()
+            proj_active = True
+        elif expirydays > 0:
+            # Do not delete datasets when expiring later, but lock them in case that has not
+            # been done, so they cant be changed
+            models.ProjectExpiry.objects.update_or_create(project_id=data['item_id'],
+                    defaults={'date': datetime.now() + timedelta(expirydays), 'active': True})
+            dsets = models.Dataset.objects.filter(runname__experiment__project_id=data['item_id'],
+                    locked=False)
+            dsets.update(locked=True)
+            models.ProjectLog.objects.bulk_create([models.ProjectLog(project_id=data['item_id'],
+                level=models.ProjLogLevels.INFO,
+                message=f'User {request.user.id} locked dataset {ds["pk"]}')
+                for ds in dsets.values('pk')])
+        else:
+            return JsonResponse({'state': 'error', 'error': 'Cannot set expiry date with 0 days'},
+                    status=400)
+    elif proj_active_q:
         # Only do this for open projects, not when it is under expiry
         # Cold store all datasets, delete them from active
         result = {'errormsgs': []}
@@ -967,12 +982,12 @@ def close_project(request):
 
         # if any dataset cannot be cold stored, report it, do not mark proj as retired
         if result['errormsgs']:
-            projquery.update(active=True)
             result['error'] = '{} Errors: {}'.format(result['error'], '; '.join(result.pop('errormsgs')))
             return JsonResponse(result, status=500)
-    projquery.update(active=False)
-    models.ProjectLog.objects.create(project_id=data['item_id'],
-            level=models.ProjLogLevels.CLOSE, message=f'User {request.user.id} closed project')
+    projquery.update(active=proj_active)
+    if not proj_active:
+        models.ProjectLog.objects.create(project_id=data['item_id'],
+                level=models.ProjLogLevels.CLOSE, message=f'User {request.user.id} closed project')
     return JsonResponse({})
 
 
