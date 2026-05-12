@@ -71,11 +71,29 @@ class NextflowWorkflowRepo(models.Model):
         return self.description
 
 
+class NfRepoServerConfig(models.Model):
+    '''Not all repos can be sourced from public locations, e.g. when on a server
+    with no network, or when a repo is private. Also get the NF server config includer file
+    which will typically do
+    includeConfig "/path/or/url/to/${config_commit :? master}/servername_pipeline.nf"
+    '''
+    # link to serverprofile to make sure the server is an analysis server and to
+    # possibly limit projects to run specific pipelines only on HPC
+    serverprofile = models.ForeignKey(filemodels.AnalysisServerProfile, on_delete=models.CASCADE)
+    configincluder = models.ForeignKey(LibraryFile, on_delete=models.CASCADE)
+    nfrepo = models.ForeignKey(NextflowWorkflowRepo, on_delete=models.CASCADE)
+    repolocation = models.TextField(help_text='Usually a github repo, but if needed you can '
+            'specify a path here')
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['serverprofile', 'nfrepo'], name='uni_nfrepocfg')]
+
+
 class NextflowWfVersionParamset(models.Model):
     update = models.TextField(help_text='Description of workflow update')
     # NB commit cannot be unique, in case of multiple paramsets
     commit = models.CharField(max_length=50)
-    filename = models.TextField()
+    filename = models.TextField(help_text='Usually main.nf')
     nfworkflow = models.ForeignKey(NextflowWorkflowRepo, on_delete=models.CASCADE)
     paramset = models.ForeignKey(ParameterSet, on_delete=models.CASCADE)
     date = models.DateTimeField(auto_now=True)
@@ -86,15 +104,18 @@ class NextflowWfVersionParamset(models.Model):
         return '{} - {}'.format(self.nfworkflow.description, self.update)
 
 
-class NfConfigFile(models.Model):
-    serverprofile = models.ForeignKey(filemodels.AnalysisServerProfile, on_delete=models.CASCADE)
+class NfConfigVersion(models.Model):
+    '''Versioning of server config for this pipeline. Needed since pipeline upgrades come with
+    different processes to config. The config_commit is passed to --config_commit
+    '''
+    nfservercfg = models.ForeignKey(NfRepoServerConfig, on_delete=models.CASCADE)
     nfpipe = models.ForeignKey(NextflowWfVersionParamset, on_delete=models.CASCADE)
-    nfconfig = models.ForeignKey(LibraryFile, on_delete=models.CASCADE)
+    # FIXME use config_ccmmit!
+    config_commit = models.CharField(max_length=50,
+            help_text='Commit of version of config file for this pipeline on this server, will be passed to --config_commit')
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=['serverprofile', 'nfpipe', 'nfconfig'], name='uni_nfconfigfile')]
-
-
+        constraints = [models.UniqueConstraint(fields=['nfpipe', 'nfservercfg'], name='uni_nfserverpipe')]
 
 class UserWorkflow(models.Model):
 

@@ -204,8 +204,10 @@ class BaseTest(TestCase):
         self.qcwf = am.UserWorkflow.objects.create(name='testwfqc', public=True,
                 wftype=am.UserWorkflow.WFTypeChoices.QC)
         self.qcwf.nfwfversionparamsets.add(self.qcnfwf)
-        am.NfConfigFile.objects.create(serverprofile=self.anaprofile, nfpipe=self.qcnfwf,
-                nfconfig=self.nfc_lf)
+        self.nfrepo = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile, nfrepo=self.nfw,
+                configincluder=self.nfc_lf, repolocation=self.nfw.repo)
+        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.qcnfwf,
+                config_commit='123abd')
 
 
         # Project/dataset/files on old storage
