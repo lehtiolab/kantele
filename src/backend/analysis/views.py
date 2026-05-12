@@ -1152,10 +1152,11 @@ def store_analysis(request):
     # Special -c config nextflow file
     if req['nfwfvid']:
         # Not doing this for external analysis saves
-        jobinputs['singlefiles']['-c'] = am.LibraryFile.objects.filter(
-                nfreposerverconfig__serverprofile_id=req['analysisprofile_id'],
-                nfreposerverconfig__nfconfigversion__nfpipe=nfwf_ver).values('sfile_id').get()['sfile_id']
-        # FIXME add config_commit
+        nfconfigver = am.NfConfigVersion.objects.filter(nfpipe=nfwf_ver,
+                nfservercfg__serverprofile_id=req['analysisprofile_id']).values('config_commit',
+                'nfservercfg__configincluder__sfile_id').get()
+        jobinputs['singlefiles']['-c'] = nfconfigver['nfservercfg__configincluder__sfile_id']
+        jobparams['--config_commit'] = [nfconfigver['config_commit']]
     # Re-create multifiles, they cannot be updated since all files map to analysis/param_id
     # resulting in only a single row in DB
     for pid, sfids in req['multifiles'].items():

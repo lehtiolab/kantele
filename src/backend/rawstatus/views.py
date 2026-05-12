@@ -29,7 +29,7 @@ from rawstatus.models import (RawFile, Producer, StoredFile, FileServer, ServerS
 from rawstatus import jobs as rsjobs
 from rawstatus.tasks import search_raws_downloaded
 from analysis.models import (Analysis, LibraryFile, AnalysisResultFile, UniProtFasta, EnsemblFasta,
-        UserWorkflow)
+        UserWorkflow, NfConfigVersion)
 from datasets import views as dsviews
 from datasets import models as dsmodels
 from dashboard import models as dashmodels
@@ -992,11 +992,13 @@ def run_singlefile_qc(sfloc_q, user_op, acqtype):
     trackpeps = [[x['peptide__pk'], x['peptide__sequence'], x['peptide__charge']] for x in
             dashmodels.PeptideInSet.objects.filter(peptideset=tps).values('peptide__pk',
             'peptide__sequence', 'peptide__charge')]
-    nfconfig = LibraryFile.objects.filter(nfreposerverconfig__serverprofile__server_id=server_id,
-            nfreposerverconfig__nfconfigversion__nfpipe_id=nfwfvid).values('sfile_id').get()['sfile_id']
+    nfconfigver = NfConfigVersion.objects.filter(nfpipe_id=nfwfvid,
+            nfservercfg__serverprofile__server_id=server_id).values('pk',
+            'nfservercfg__configincluder__sfile_id').get()
     create_job('run_longit_qc_workflow', sfloc_id=sfloc.id, analysis_id=analysis.id, wf_id=wf.pk,
             nfwfvid=nfwfvid, fserver_id=server_id, anaserverprofile_id=anaprofile_id,
-            nfconfig_id=nfconfig, qcrun_id=qcrun.pk, params=params, trackpeptides=trackpeps)
+            nfconfig_sfid=nfconfigver['nfservercfg__configincluder__sfile_id'], qcrun_id=qcrun.pk,
+            nfconfigver_id=nfconfigver['pk'], params=params, trackpeptides=trackpeps)
     return False
 
 

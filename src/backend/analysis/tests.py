@@ -880,7 +880,8 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
     def test_existing_analysis(self):
         am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwf, config_commit='123jkl')
         nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf, repolocation=self.nfw.repo)
-        am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwf, config_commit='123jkl')
+        nfcv = am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwf,
+                config_commit='123jkl')
         quant = self.ds.quantdataset.quanttype
         remotedss = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.analocalstor,
                 storage_loc_ui=self.storloc, storage_loc=self.storloc, startdate=timezone.now())
@@ -976,6 +977,7 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
                   self.param1.nfparam, # flag so no value
                   self.param3.nfparam, '42',
                   self.param4.nfparam, self.popt4.value,
+                  '--config_commit', nfcv.config_commit,
                   ],
               'singlefiles': {f'{self.pfn2.nfparam}': self.sflib.pk, '-c': self.sfnfc.pk}},
               'platenames': {}, 'wfv_id': self.nfwf.pk}

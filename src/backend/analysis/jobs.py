@@ -68,7 +68,7 @@ class RefineMzmls(DatasetJob):
         return {'dstsfloc_ids': dst_sfls, 'srcsharepath': anasrcshareonserver['path']}
 
     def _get_extrafiles_to_rsync(self, **kwargs):
-        return [kwargs['dbfn_id'], kwargs['nfconfig_id']]
+        return [kwargs['dbfn_id'], kwargs['nfconfig_sfid']]
 
     def process(self, **kwargs):
         """Return all a dset mzMLs but not those that have a refined mzML associated, to not do extra work."""
@@ -76,6 +76,7 @@ class RefineMzmls(DatasetJob):
         # or do we not know which share output will be put on?? NF RUNDIR should be in db
         # otherwise we cannot register!
 
+        nfwf = models.NextflowWfVersionParamset.objects.get(pk=kwargs['wfv_id'])
         try:
             dss = dm.DatasetServer.objects.values('storage_loc').get(pk=kwargs['dss_id'],
                     storageshare__active=True)
@@ -84,14 +85,16 @@ class RefineMzmls(DatasetJob):
         try:
             anaserver = rm.AnalysisServerProfile.objects.get(pk=kwargs['anaserverprofile_id'],
                     server__active=True)
-        except rm.AnalysisServerProfile.DoesNotExist:
+            nfcv = models.NfConfigVersion.objects.filter(pk=kwargs['nfconfigver_id']).values(
+                    'nfservercfg__repolocation', 'config_commit').get()
+        except (rm.AnalysisServerProfile.DoesNotExist, models.NfConfigVersion.DoesNotExist):
             raise RuntimeError('Server chosen to run refine workflow is not existing/active')
         self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_NXF)
         sharemap = {fss['share_id']: fss['path'] for fss in rm.FileserverShare.objects.filter(
             server__active=True, share__active=True, server=anaserver.server
             ).values('share_id', 'path')}
 
-        if nfcloc_q := rm.StoredFileLoc.objects.filter(sfile_id=kwargs['nfconfig_id'], active=True,
+        if nfcloc_q := rm.StoredFileLoc.objects.filter(sfile_id=kwargs['nfconfig_sfid'], active=True,
                 servershare__fileservershare__server_id=kwargs['server_id'], servershare__active=True
                 ).values('servershare_id', 'path', 'sfile__filename'):
             nfcl = nfcloc_q.first()
@@ -101,7 +104,6 @@ class RefineMzmls(DatasetJob):
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
         analysis.nextflowsearch.token = f'nf-{uuid4()}'
         analysis.nextflowsearch.save()
-        nfwf = models.NextflowWfVersionParamset.objects.get(pk=kwargs['wfv_id'])
 
         dbfn = rm.StoredFileLoc.objects.filter(sfile_id=kwargs['dbfn_id'],
                 servershare__active=True, servershare__fileservershare__server_id=kwargs['server_id']
@@ -125,7 +127,7 @@ class RefineMzmls(DatasetJob):
             return
         if not (outsharepath := sharemap.get(ref_sfl['servershare_id'], False)):
             return RuntimeError('Analysis server seems to not have the output share connected')
-        params = ['--instrument', kwargs['instrument']]
+        params = ['--instrument', kwargs['instrument'], '--config_commit', nfcv['config_commit']]
         if kwargs['qtype'] != 'labelfree':
             params.extend(['--isobaric', kwargs['qtype']])
         params.extend(anaserver.nfparams)
@@ -133,7 +135,7 @@ class RefineMzmls(DatasetJob):
                'token': analysis.nextflowsearch.token,
                'wf_commit': nfwf.commit,
                'nxf_wf_fn': nfwf.filename,
-               'repo': nfwf.nfworkflow.repo,
+               'repo': nfcv['nfservercfg__repolocation'],
                'runname':  analysis.get_run_base_dir(),
                'outsharepath': outsharepath,
                'dsspath': dss['storage_loc'],
@@ -151,23 +153,26 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
     can_be_canceled = True
 
     def _get_extrafiles_to_rsync(self, **kwargs):
-        return [kwargs['nfconfig_id']]
+        return [kwargs['nfconfig_sfid']]
 
     def process(self, **kwargs):
         """Assumes one file, one analysis"""
         analysis = models.Analysis.objects.get(pk=kwargs['analysis_id'])
         sfl = rm.StoredFileLoc.objects.values('servershare_id', 'path', 'sfile__filename',
                 'sfile__rawfile_id', 'sfile__rawfile__producer__name').get(pk=kwargs['sfloc_id'])
+        nfwf = models.NextflowWfVersionParamset.objects.get(pk=kwargs['nfwfvid'])
         try:
             anaserver = rm.AnalysisServerProfile.objects.get(pk=kwargs['anaserverprofile_id'],
                     server__active=True)
-        except rm.AnalysisServerProfile.DoesNotExist:
+            nfcv = models.NfConfigVersion.objects.filter(pk=kwargs['nfconfigver_id'],
+                    ).values('nfservercfg__repolocation', 'config_commit').get()
+        except (rm.AnalysisServerProfile.DoesNotExist, models.NfConfigVersion.DoesNotExist):
             raise RuntimeError('Processing server requested does not exist or is not active or is '
                     'not capable of analysis')
         self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_QC_NXF)
 
-        nfwf = models.NextflowWfVersionParamset.objects.get(pk=kwargs['nfwfvid'])
-        if nfcloc_q := rm.StoredFileLoc.objects.filter(sfile_id=kwargs['nfconfig_id'], active=True,
+        # FIXME can go through nfconfigversion?
+        if nfcloc_q := rm.StoredFileLoc.objects.filter(sfile_id=kwargs['nfconfig_sfid'], active=True,
                 servershare__fileservershare__server_id=kwargs['fserver_id'],
                 servershare__active=True).values('servershare_id', 'path', 'sfile__filename'):
             nfcl = nfcloc_q.first()
@@ -192,14 +197,14 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
                'token': analysis.nextflowsearch.token,
                'wf_commit': nfwf.commit,
                'nxf_wf_fn': nfwf.filename,
-               'repo': nfwf.nfworkflow.repo,
+               'repo': nfcv['nfservercfg__repolocation'],
                'runname': f'{analysis.id}_longqc_{sfl["sfile__rawfile__producer__name"]}_rawfile{sfl["sfile__rawfile_id"]}_{timestamp}',
                }
         if kwargs['trackpeptides']:
             params.extend(['--trackedpeptides', ';'.join([f'{pep}_{ch}'
                 for _, pep, ch in kwargs['trackpeptides']])])
 
-        params.extend(anaserver.nfparams)
+        params.extend([*anaserver.nfparams, '--config_commit', nfcv['config_commit']])
         self.run_tasks.append((run, params, stagefiles, nfwf.nfversion, anaserver.scratchdir))
         analysis.log.append('[{}] Job queued'.format(datetime.strftime(timezone.now(), '%Y-%m-%d %H:%M:%S')))
         analysis.save()
@@ -296,7 +301,9 @@ class RunNextflowWorkflow(MultiDatasetJob):
         try:
             anaserver = rm.AnalysisServerProfile.objects.get(pk=kwargs['anaserverprofile_id'],
                     server__active=True)
-        except rm.AnalysisServerProfile.DoesNotExist:
+            nfcv = models.NfConfigVersion.objects.filter(nfservercfg__serverprofile=anaserver,
+                    nfpipe=nfwf).values('nfservercfg__repolocation').get()
+        except (rm.AnalysisServerProfile.DoesNotExist, models.NfConfigVersion.DoesNotExist):
             raise RuntimeError('Processing server requested does not exist or is not active or is '
                     'not capable of analysis')
         self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_NXF)
@@ -379,7 +386,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
                'token': analysis.nextflowsearch.token,
                'wf_commit': nfwf.commit,
                'nxf_wf_fn': nfwf.filename,
-               'repo': nfwf.nfworkflow.repo,
+               'repo': nfcv['nfservercfg__repolocation'],
                'runname': analysis.base_rundir,
                'outsharepath': sharemap[outshare['share_id']],
                'infiles': [],

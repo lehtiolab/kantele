@@ -1155,15 +1155,18 @@ def create_mzmls(request):
     dss_id = dsmodels.DatasetServer.objects.filter(dataset=dset,
             storageshare_id=source_ssid).values('pk').get()['pk']
 
+    # Config commit will be resolved in job for restarts in case of failure, but 
+    # includer file needs to be here for the pre-job rsync
+    nfconfigver = anmodels.NfConfigVersion.objects.filter(nfpipe=nfwf,
+            nfservercfg__serverprofile_id=anaprofile['pk']).values('pk',
+            'nfservercfg__configincluder__sfile_id').get()
+
     # we dont do error checking earlier, before deleting old mzML, because deleting those is fine
     mzjob = create_job('convert_dataset_mzml', options=pwiz_options, filters=pwiz_filters, dss_id=dss_id,
             pwiz_id=pwiz.pk, timestamp=datetime.strftime(datetime.now(), '%Y%m%d_%H.%M'),
             server_id=anaprofile['server_id'], anaserverprofile_id=anaprofile['pk'],
-            sfloc_ids=srcsfl_pk,
-            nfconfig_id=anmodels.LibraryFile.objects.filter(
-                nfreposerverconfig__nfconfigversion__nfpipe=nfwf,
-                nfreposerverconfig__serverprofile=anaprofile['pk']
-                ).values('sfile_id').get()['sfile_id'])
+            sfloc_ids=srcsfl_pk, nfconfigver_id=nfconfigver['pk'],
+            nfconfig_sfid=nfconfigver['nfservercfg__configincluder__sfile_id'])
     if mzjob['error']:
         pass
     elif mzjob['kwargs'].get('dstsfloc_ids', False):
@@ -1278,13 +1281,14 @@ def refine_mzmls(request):
     dss_id, source_ssid = srcdss['pk'], srcdss['storageshare_id']
     srcsfl_pk = [x['pk'] for x in mzmlsfl.filter(servershare_id=source_ssid).exclude(
         sfile__rawfile__in=[x['rawfile'] for x in existing_refined.values('rawfile')]).values('pk')]
-    nfconfig_id = anmodels.LibraryFile.objects.filter(
-            nfreposerverconfig__nfconfigversion__nfpipe_id=data['wfid'],
-            nfreposerverconfig__serverprofile_id=anaprofile['pk']).values('sfile_id').get()['sfile_id']
+    nfconfigver = anmodels.NfConfigVersion.objects.filter(nfpipe_id=data['wfid'],
+            nfservercfg__serverprofile_id=anaprofile['pk']).values('pk',
+            'nfservercfg__configincluder__sfile_id').get()
     job = create_job('refine_mzmls', dss_id=dss_id, analysis_id=analysis.id, wfv_id=data['wfid'],
             sfloc_ids=srcsfl_pk, dbfn_id=dbid, qtype=dset.quantdataset.quanttype.shortname,
             instrument=instrument, anaserverprofile_id=anaprofile['pk'],
-            server_id=anaprofile['server_id'], nfconfig_id=nfconfig_id)
+            server_id=anaprofile['server_id'], nfconfigver_id=nfconfigver['pk'],
+            nfconfig_sfid=nfconfigver['nfservercfg__configincluder__sfile_id'])
     if job['error']:
         analysis.delete()
         return JsonResponse({'error': 'Error trying to create a refine dataset job: {job["error"]}'},
