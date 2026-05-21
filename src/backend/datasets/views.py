@@ -718,6 +718,7 @@ def save_new_project(request):
     except KeyError:
         return JsonResponse({'error': 'Please fill in the fields'}, status=400)
 
+    newpiname = False
     if is_invalid_proj_exp_runnames(data['name']):
         return JsonResponse({'error': f'Project name cannot contain characters except {settings.ALLOWED_PROJEXPRUN_CHARS}'}, status=403)
     elif data['ptype_id'] == settings.LOCAL_PTYPE_ID:
