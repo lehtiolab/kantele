@@ -1,7 +1,6 @@
 from django.db import models
-
 from datasets import models as dm
-
+import re
 
 class PrepOptionProtocol(models.Model):
     doi = models.TextField(unique=True)
@@ -9,7 +8,21 @@ class PrepOptionProtocol(models.Model):
     version = models.TextField()
     paramopt = models.ForeignKey(dm.SampleprepParameterOption, on_delete=models.CASCADE)
     active = models.BooleanField(default=True)
-
+    # Using full URL approach so it is easier to just copy paste and view for the core
+    def protocol_version(self):
+        if re.search(r'doi\.org/', self.doi):
+            # Already a published DOI, leave it alone
+            pass
+        elif re.search(r'protocols\.io/', self.doi):
+            # Already a full protocols.io URL, leave it alone
+            pass
+        else:
+            # protocols.io hash - not a DOI yet but referenced for future use
+            self.doi = f"protocols.io/view/{self.doi}"
+    # overwrite save to ensure that protcol urls are updated. 
+    def save(self, *args, **kwargs):
+        self.protocol_version()
+        super().save(*args, **kwargs)
 
 class SamplePipeline(models.Model):
     name = models.TextField(unique=True)

@@ -1,0 +1,398 @@
+2026-05-22 12:44:41,012 - INFO - .producer.main - Token OK, expires on 2026-06-21, 12:44
+2026-05-22 12:44:41,137 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:44:41,149 - INFO - .producer.worker - File raw3.raw has ID 632, instruction: transfer
+2026-05-22 12:44:41,150 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:44:41,164 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 12:44:44,182 - INFO - .producer.worker - File raw3.raw has ID 632, instruction: wait
+2026-05-22 12:44:45,832 - INFO - .producer.main - Token OK, expires on 2026-06-21, 12:44
+2026-05-22 12:44:45,962 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:44:45,971 - INFO - .producer.worker - File raw3.raw has ID 640, instruction: transfer
+2026-05-22 12:44:45,971 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:44:45,984 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 12:44:47,196 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 12:44:49,016 - INFO - .producer.worker - File raw3.raw has ID 640, instruction: wait
+2026-05-22 12:44:50,783 - INFO - .producer.main - Token OK, expires on 2026-05-30, 12:44
+2026-05-22 12:44:50,921 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmp9tlvbbsn/testoutbox
+2026-05-22 12:44:50,921 - INFO - .producer.inboxcollect - Will wait until acquisition status ready, currently: File /tmp/tmp9tlvbbsn/testoutbox/raw3.raw is opened by flock
+2026-05-22 12:44:52,035 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 12:44:55,923 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmp9tlvbbsn/testoutbox
+2026-05-22 12:45:00,925 - INFO - .producer.inboxcollect - Found new file: /tmp/tmp9tlvbbsn/testoutbox/raw3.raw produced 1779453890.575516
+2026-05-22 12:45:02,963 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:45:02,974 - INFO - .producer.worker - File raw3.raw has ID 648, instruction: transfer
+2026-05-22 12:45:02,974 - INFO - root - Uploading /tmp/tmp9tlvbbsn/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:45:02,991 - INFO - .producer.worker - Succesful transfer of file /tmp/tmp9tlvbbsn/zipbox/raw3.raw.zip
+2026-05-22 12:45:05,927 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmp9tlvbbsn/testoutbox
+2026-05-22 12:45:06,009 - INFO - .producer.worker - File raw3.raw has ID 648, instruction: wait
+2026-05-22 12:45:07,561 - INFO - .producer.main - Token OK, expires on 2026-06-21, 12:45
+2026-05-22 12:45:07,696 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:45:07,705 - INFO - .producer.worker - File raw3.raw has ID 656, instruction: transfer
+2026-05-22 12:45:07,706 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:45:07,720 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 12:45:09,022 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 12:45:10,737 - INFO - .producer.worker - File raw3.raw has ID 656, instruction: wait
+2026-05-22 12:45:12,454 - INFO - .producer.main - Token OK, expires on 2026-06-21, 12:45
+2026-05-22 12:45:12,624 - INFO - .producer.worker - File raw3.raw has ID 657, instruction: wait
+2026-05-22 12:45:13,750 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 12:45:15,650 - INFO - .producer.worker - File raw3.raw has ID 657, instruction: done
+2026-05-22 12:45:17,584 - INFO - .producer.main - Token OK, expires on 2026-06-21, 12:45
+2026-05-22 12:45:17,708 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:45:17,726 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: transfer
+2026-05-22 12:45:17,726 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:45:17,742 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 12:45:20,764 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 12:45:23,779 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 12:45:26,794 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 12:45:29,814 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 12:45:32,834 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 12:45:35,355 - INFO - .producer.main - Token OK, expires on 2026-05-30, 12:45
+2026-05-22 12:45:35,475 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpzgwqjfa4/testoutbox
+2026-05-22 12:45:35,479 - INFO - .producer.inboxcollect - Found new file: /tmp/tmpzgwqjfa4/testoutbox/raw3.raw produced 1779453935.188399
+2026-05-22 12:45:35,481 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:45:35,495 - INFO - .producer.worker - File raw3.raw has ID 678, instruction: transfer
+2026-05-22 12:45:35,495 - INFO - root - Uploading /tmp/tmpzgwqjfa4/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:45:35,519 - INFO - .producer.worker - Succesful transfer of file /tmp/tmpzgwqjfa4/zipbox/raw3.raw.zip
+2026-05-22 12:45:38,539 - INFO - .producer.worker - File raw3.raw has ID 678, instruction: wait
+2026-05-22 12:45:40,481 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpzgwqjfa4/testoutbox
+2026-05-22 12:45:41,557 - INFO - .producer.worker - File raw3.raw has ID 678, instruction: wait
+2026-05-22 12:45:44,574 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 12:45:45,251 - INFO - .producer.main - Token OK, expires on 2026-05-30, 12:45
+2026-05-22 12:45:45,372 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpt40374gh/testoutbox
+2026-05-22 12:45:45,373 - INFO - .producer.inboxcollect - Found new file: /tmp/tmpt40374gh/testoutbox/raw3.raw produced 1779453945.083137
+2026-05-22 12:45:45,386 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:45:45,397 - INFO - .producer.worker - File raw3.raw has ID 686, instruction: transfer
+2026-05-22 12:45:45,397 - INFO - root - Uploading /tmp/tmpt40374gh/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:45:45,412 - INFO - .producer.worker - Succesful transfer of file /tmp/tmpt40374gh/zipbox/raw3.raw.zip
+2026-05-22 12:45:48,428 - INFO - .producer.worker - File raw3.raw has ID 686, instruction: wait
+2026-05-22 12:45:50,376 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpt40374gh/testoutbox
+2026-05-22 12:45:51,447 - INFO - .producer.worker - File raw3.raw has ID 686, instruction: wait
+2026-05-22 12:45:54,463 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 12:45:55,126 - INFO - .producer.main - Token OK, expires on 2026-06-21, 12:45
+2026-05-22 12:45:55,266 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:45:55,293 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: transfer
+2026-05-22 12:45:55,293 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:45:55,321 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 12:45:58,342 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 12:46:01,359 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 12:46:04,375 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 12:46:07,391 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 12:46:10,408 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 12:46:13,007 - INFO - .producer.main - Token OK, expires on 2026-05-30, 12:46
+2026-05-22 12:46:13,127 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpd75kmh2r/testoutbox
+2026-05-22 12:46:13,128 - INFO - .producer.inboxcollect - Found new file: /tmp/tmpd75kmh2r/testoutbox/raw3.raw produced 1779453972.837856
+2026-05-22 12:46:13,130 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:46:13,145 - INFO - .producer.worker - File raw3.raw has ID 702, instruction: transfer
+2026-05-22 12:46:13,145 - INFO - root - Uploading /tmp/tmpd75kmh2r/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:46:13,160 - INFO - .producer.worker - Succesful transfer of file /tmp/tmpd75kmh2r/zipbox/raw3.raw.zip
+2026-05-22 12:46:16,190 - INFO - .producer.worker - File raw3.raw has ID 702, instruction: wait
+2026-05-22 12:46:18,135 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpd75kmh2r/testoutbox
+2026-05-22 12:46:19,210 - INFO - .producer.worker - File raw3.raw has ID 702, instruction: wait
+2026-05-22 12:46:20,928 - INFO - .producer.main - Token OK, expires on 2026-05-30, 12:46
+2026-05-22 12:46:21,071 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmp2ehqov52/testoutbox
+2026-05-22 12:46:21,072 - INFO - .producer.inboxcollect - Found new file: /tmp/tmp2ehqov52/testoutbox/raw3.raw produced 1779453980.750856
+2026-05-22 12:46:21,093 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:46:21,114 - INFO - .producer.worker - File raw3.raw has ID 710, instruction: transfer
+2026-05-22 12:46:21,114 - INFO - root - Uploading /tmp/tmp2ehqov52/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:46:21,127 - INFO - .producer.worker - Moving file raw3.raw to skipbox
+2026-05-22 12:46:21,127 - WARNING - .producer.worker - Another file in the system has the same name and is stored in the same path (/raw3.raw). Please investigate, possibly change the file name or location of this or the other file to enable transfer without overwriting.
+2026-05-22 12:46:22,224 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 12:46:25,737 - INFO - .producer.main - Token OK, expires on 2026-05-30, 12:46
+2026-05-22 12:46:25,868 - INFO - .producer.worker - File raw3.raw has ID 711, instruction: done
+2026-05-22 12:46:28,682 - INFO - .producer.main - Token OK, expires on 2026-05-30, 12:46
+2026-05-22 12:46:28,799 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:46:28,815 - INFO - .producer.worker - File analysis.tdf has ID 725, instruction: transfer
+2026-05-22 12:46:28,817 - INFO - root - Uploading /storage/newstorage/p1/e1/dtype1/run1/raw3.raw/analysis.tdf to http://0.0.0.0:80
+2026-05-22 12:46:28,834 - INFO - .producer.worker - Succesful transfer of file /storage/newstorage/p1/e1/dtype1/run1/raw3.raw/analysis.tdf
+2026-05-22 12:46:31,860 - INFO - .producer.worker - File analysis.tdf has ID 725, instruction: wait
+2026-05-22 12:46:34,876 - INFO - .producer.worker - File analysis.tdf has ID 725, instruction: wait
+2026-05-22 12:46:37,892 - INFO - .producer.worker - File analysis.tdf has ID 725, instruction: wait
+2026-05-22 12:46:40,915 - INFO - .producer.worker - File analysis.tdf has ID 725, instruction: wait
+2026-05-22 12:55:49,034 - INFO - .producer.main - Token OK, expires on 2026-06-21, 12:55
+2026-05-22 12:55:49,165 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:55:49,175 - INFO - .producer.worker - File raw3.raw has ID 632, instruction: transfer
+2026-05-22 12:55:49,175 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:55:49,190 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 12:55:52,214 - INFO - .producer.worker - File raw3.raw has ID 632, instruction: wait
+2026-05-22 12:55:53,911 - INFO - .producer.main - Token OK, expires on 2026-06-21, 12:55
+2026-05-22 12:55:54,038 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:55:54,051 - INFO - .producer.worker - File raw3.raw has ID 640, instruction: transfer
+2026-05-22 12:55:54,051 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:55:54,066 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 12:55:55,228 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 12:55:57,085 - INFO - .producer.worker - File raw3.raw has ID 640, instruction: wait
+2026-05-22 12:55:58,788 - INFO - .producer.main - Token OK, expires on 2026-05-30, 12:55
+2026-05-22 12:55:58,907 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpicxzue_8/testoutbox
+2026-05-22 12:55:58,908 - INFO - .producer.inboxcollect - Will wait until acquisition status ready, currently: File /tmp/tmpicxzue_8/testoutbox/raw3.raw is opened by flock
+2026-05-22 12:56:00,097 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 12:56:03,912 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpicxzue_8/testoutbox
+2026-05-22 12:56:08,915 - INFO - .producer.inboxcollect - Found new file: /tmp/tmpicxzue_8/testoutbox/raw3.raw produced 1779454558.612798
+2026-05-22 12:56:10,953 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:56:10,964 - INFO - .producer.worker - File raw3.raw has ID 648, instruction: transfer
+2026-05-22 12:56:10,964 - INFO - root - Uploading /tmp/tmpicxzue_8/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:56:10,978 - INFO - .producer.worker - Succesful transfer of file /tmp/tmpicxzue_8/zipbox/raw3.raw.zip
+2026-05-22 12:56:13,917 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpicxzue_8/testoutbox
+2026-05-22 12:56:13,995 - INFO - .producer.worker - File raw3.raw has ID 648, instruction: wait
+2026-05-22 12:56:15,663 - INFO - .producer.main - Token OK, expires on 2026-06-21, 12:56
+2026-05-22 12:56:15,804 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:56:15,813 - INFO - .producer.worker - File raw3.raw has ID 656, instruction: transfer
+2026-05-22 12:56:15,814 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:56:15,832 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 12:56:17,011 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 12:56:18,850 - INFO - .producer.worker - File raw3.raw has ID 656, instruction: wait
+2026-05-22 12:56:20,563 - INFO - .producer.main - Token OK, expires on 2026-06-21, 12:56
+2026-05-22 12:56:20,710 - INFO - .producer.worker - File raw3.raw has ID 657, instruction: wait
+2026-05-22 12:56:21,865 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 12:56:23,732 - INFO - .producer.worker - File raw3.raw has ID 657, instruction: done
+2026-05-22 12:56:25,570 - INFO - .producer.main - Token OK, expires on 2026-06-21, 12:56
+2026-05-22 12:56:25,697 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:56:25,713 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: transfer
+2026-05-22 12:56:25,713 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:56:25,729 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 12:56:28,762 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 12:56:31,780 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 12:56:34,801 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 12:56:37,822 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 12:56:40,842 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 12:56:43,413 - INFO - .producer.main - Token OK, expires on 2026-05-30, 12:56
+2026-05-22 12:56:43,532 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmptoa4v60m/testoutbox
+2026-05-22 12:56:43,532 - INFO - .producer.inboxcollect - Found new file: /tmp/tmptoa4v60m/testoutbox/raw3.raw produced 1779454603.251332
+2026-05-22 12:56:46,538 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:56:46,549 - INFO - .producer.worker - File raw3.raw has ID 678, instruction: transfer
+2026-05-22 12:56:46,550 - INFO - root - Uploading /tmp/tmptoa4v60m/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:56:46,567 - INFO - .producer.worker - Succesful transfer of file /tmp/tmptoa4v60m/zipbox/raw3.raw.zip
+2026-05-22 12:56:48,534 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmptoa4v60m/testoutbox
+2026-05-22 12:56:49,590 - INFO - .producer.worker - File raw3.raw has ID 678, instruction: wait
+2026-05-22 12:56:52,606 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 12:56:53,405 - INFO - .producer.main - Token OK, expires on 2026-05-30, 12:56
+2026-05-22 12:56:53,530 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmph8borbou/testoutbox
+2026-05-22 12:56:53,531 - INFO - .producer.inboxcollect - Found new file: /tmp/tmph8borbou/testoutbox/raw3.raw produced 1779454613.233332
+2026-05-22 12:56:53,537 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:56:53,548 - INFO - .producer.worker - File raw3.raw has ID 686, instruction: transfer
+2026-05-22 12:56:53,548 - INFO - root - Uploading /tmp/tmph8borbou/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:56:53,567 - INFO - .producer.worker - Succesful transfer of file /tmp/tmph8borbou/zipbox/raw3.raw.zip
+2026-05-22 12:56:56,589 - INFO - .producer.worker - File raw3.raw has ID 686, instruction: wait
+2026-05-22 12:56:58,537 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmph8borbou/testoutbox
+2026-05-22 12:56:59,606 - INFO - .producer.worker - File raw3.raw has ID 686, instruction: wait
+2026-05-22 12:57:02,621 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 12:57:03,301 - INFO - .producer.main - Token OK, expires on 2026-06-21, 12:57
+2026-05-22 12:57:03,436 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:57:03,450 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: transfer
+2026-05-22 12:57:03,450 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:57:03,467 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 12:57:06,492 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 12:57:09,514 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 12:57:12,533 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 12:57:15,554 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 12:57:18,579 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 12:57:21,150 - INFO - .producer.main - Token OK, expires on 2026-05-30, 12:57
+2026-05-22 12:57:21,272 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpv00e54qo/testoutbox
+2026-05-22 12:57:21,273 - INFO - .producer.inboxcollect - Found new file: /tmp/tmpv00e54qo/testoutbox/raw3.raw produced 1779454640.988423
+2026-05-22 12:57:21,279 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:57:21,289 - INFO - .producer.worker - File raw3.raw has ID 702, instruction: transfer
+2026-05-22 12:57:21,289 - INFO - root - Uploading /tmp/tmpv00e54qo/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:57:21,307 - INFO - .producer.worker - Succesful transfer of file /tmp/tmpv00e54qo/zipbox/raw3.raw.zip
+2026-05-22 12:57:24,329 - INFO - .producer.worker - File raw3.raw has ID 702, instruction: wait
+2026-05-22 12:57:26,276 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpv00e54qo/testoutbox
+2026-05-22 12:57:27,348 - INFO - .producer.worker - File raw3.raw has ID 702, instruction: wait
+2026-05-22 12:57:29,108 - INFO - .producer.main - Token OK, expires on 2026-05-30, 12:57
+2026-05-22 12:57:29,251 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpcsuem1rn/testoutbox
+2026-05-22 12:57:29,252 - INFO - .producer.inboxcollect - Found new file: /tmp/tmpcsuem1rn/testoutbox/raw3.raw produced 1779454648.932423
+2026-05-22 12:57:29,265 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:57:29,276 - INFO - .producer.worker - File raw3.raw has ID 710, instruction: transfer
+2026-05-22 12:57:29,277 - INFO - root - Uploading /tmp/tmpcsuem1rn/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 12:57:29,287 - INFO - .producer.worker - Moving file raw3.raw to skipbox
+2026-05-22 12:57:29,287 - WARNING - .producer.worker - Another file in the system has the same name and is stored in the same path (/raw3.raw). Please investigate, possibly change the file name or location of this or the other file to enable transfer without overwriting.
+2026-05-22 12:57:30,361 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 12:57:33,953 - INFO - .producer.main - Token OK, expires on 2026-05-30, 12:57
+2026-05-22 12:57:34,097 - INFO - .producer.worker - File raw3.raw has ID 711, instruction: done
+2026-05-22 12:57:36,949 - INFO - .producer.main - Token OK, expires on 2026-05-30, 12:57
+2026-05-22 12:57:37,073 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 12:57:37,087 - INFO - .producer.worker - File analysis.tdf has ID 725, instruction: transfer
+2026-05-22 12:57:37,087 - INFO - root - Uploading /storage/newstorage/p1/e1/dtype1/run1/raw3.raw/analysis.tdf to http://0.0.0.0:80
+2026-05-22 12:57:37,108 - INFO - .producer.worker - Succesful transfer of file /storage/newstorage/p1/e1/dtype1/run1/raw3.raw/analysis.tdf
+2026-05-22 12:57:40,133 - INFO - .producer.worker - File analysis.tdf has ID 725, instruction: wait
+2026-05-22 12:57:43,155 - INFO - .producer.worker - File analysis.tdf has ID 725, instruction: wait
+2026-05-22 12:57:46,178 - INFO - .producer.worker - File analysis.tdf has ID 725, instruction: wait
+2026-05-22 12:57:49,200 - INFO - .producer.worker - File analysis.tdf has ID 725, instruction: wait
+2026-05-22 13:40:07,604 - INFO - .producer.main - Token OK, expires on 2026-06-21, 13:40
+2026-05-22 13:40:07,744 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 13:40:07,764 - INFO - .producer.worker - File raw3.raw has ID 632, instruction: transfer
+2026-05-22 13:40:07,764 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 13:40:07,785 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 13:40:10,810 - INFO - .producer.worker - File raw3.raw has ID 632, instruction: wait
+2026-05-22 13:40:12,624 - INFO - .producer.main - Token OK, expires on 2026-06-21, 13:40
+2026-05-22 13:40:12,797 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 13:40:12,808 - INFO - .producer.worker - File raw3.raw has ID 640, instruction: transfer
+2026-05-22 13:40:12,809 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 13:40:12,838 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 13:40:13,823 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 13:40:15,857 - INFO - .producer.worker - File raw3.raw has ID 640, instruction: wait
+2026-05-22 13:40:17,456 - INFO - .producer.main - Token OK, expires on 2026-05-30, 13:40
+2026-05-22 13:40:17,578 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmp43nsui8a/testoutbox
+2026-05-22 13:40:17,579 - INFO - .producer.inboxcollect - Will wait until acquisition status ready, currently: File /tmp/tmp43nsui8a/testoutbox/raw3.raw is opened by flock
+2026-05-22 13:40:18,876 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 13:40:22,585 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmp43nsui8a/testoutbox
+2026-05-22 13:40:27,591 - INFO - .producer.inboxcollect - Found new file: /tmp/tmp43nsui8a/testoutbox/raw3.raw produced 1779457217.289513
+2026-05-22 13:40:29,643 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 13:40:29,655 - INFO - .producer.worker - File raw3.raw has ID 648, instruction: transfer
+2026-05-22 13:40:29,655 - INFO - root - Uploading /tmp/tmp43nsui8a/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 13:40:29,672 - INFO - .producer.worker - Succesful transfer of file /tmp/tmp43nsui8a/zipbox/raw3.raw.zip
+2026-05-22 13:40:32,598 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmp43nsui8a/testoutbox
+2026-05-22 13:40:32,695 - INFO - .producer.worker - File raw3.raw has ID 648, instruction: wait
+2026-05-22 13:40:34,347 - INFO - .producer.main - Token OK, expires on 2026-06-21, 13:40
+2026-05-22 13:40:34,509 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 13:40:34,526 - INFO - .producer.worker - File raw3.raw has ID 656, instruction: transfer
+2026-05-22 13:40:34,526 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 13:40:34,544 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 13:40:35,712 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 13:40:37,567 - INFO - .producer.worker - File raw3.raw has ID 656, instruction: wait
+2026-05-22 13:40:39,249 - INFO - .producer.main - Token OK, expires on 2026-06-21, 13:40
+2026-05-22 13:40:39,416 - INFO - .producer.worker - File raw3.raw has ID 657, instruction: wait
+2026-05-22 13:40:40,586 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 13:40:42,438 - INFO - .producer.worker - File raw3.raw has ID 657, instruction: done
+2026-05-22 13:40:44,185 - INFO - .producer.main - Token OK, expires on 2026-06-21, 13:40
+2026-05-22 13:40:44,314 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 13:40:44,331 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: transfer
+2026-05-22 13:40:44,331 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 13:40:44,348 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 13:40:47,370 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 13:40:50,389 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 13:40:53,408 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 13:40:56,428 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 13:40:59,444 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 13:41:02,072 - INFO - .producer.main - Token OK, expires on 2026-05-30, 13:41
+2026-05-22 13:41:02,214 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpzg8fgkzf/testoutbox
+2026-05-22 13:41:02,215 - INFO - .producer.inboxcollect - Found new file: /tmp/tmpzg8fgkzf/testoutbox/raw3.raw produced 1779457261.857918
+2026-05-22 13:41:02,235 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 13:41:02,250 - INFO - .producer.worker - File raw3.raw has ID 678, instruction: transfer
+2026-05-22 13:41:02,250 - INFO - root - Uploading /tmp/tmpzg8fgkzf/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 13:41:02,273 - INFO - .producer.worker - Succesful transfer of file /tmp/tmpzg8fgkzf/zipbox/raw3.raw.zip
+2026-05-22 13:41:05,306 - INFO - .producer.worker - File raw3.raw has ID 678, instruction: wait
+2026-05-22 13:41:07,222 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpzg8fgkzf/testoutbox
+2026-05-22 13:41:08,328 - INFO - .producer.worker - File raw3.raw has ID 678, instruction: wait
+2026-05-22 13:41:11,345 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 13:41:12,103 - INFO - .producer.main - Token OK, expires on 2026-05-30, 13:41
+2026-05-22 13:41:12,257 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpp5o2dgit/testoutbox
+2026-05-22 13:41:12,259 - INFO - .producer.inboxcollect - Found new file: /tmp/tmpp5o2dgit/testoutbox/raw3.raw produced 1779457271.852918
+2026-05-22 13:41:15,271 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 13:41:15,283 - INFO - .producer.worker - File raw3.raw has ID 686, instruction: transfer
+2026-05-22 13:41:15,283 - INFO - root - Uploading /tmp/tmpp5o2dgit/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 13:41:15,297 - INFO - .producer.worker - Succesful transfer of file /tmp/tmpp5o2dgit/zipbox/raw3.raw.zip
+2026-05-22 13:41:17,260 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpp5o2dgit/testoutbox
+2026-05-22 13:41:18,330 - INFO - .producer.worker - File raw3.raw has ID 686, instruction: wait
+2026-05-22 13:41:21,349 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 13:41:22,188 - INFO - .producer.main - Token OK, expires on 2026-06-21, 13:41
+2026-05-22 13:41:22,337 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 13:41:22,351 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: transfer
+2026-05-22 13:41:22,351 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 13:41:22,375 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 13:41:25,394 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 13:41:28,415 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 13:41:31,436 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 13:41:34,454 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 13:41:37,471 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 15:27:40,537 - INFO - .producer.main - Token OK, expires on 2026-06-21, 15:27
+2026-05-22 15:27:40,693 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 15:27:40,712 - INFO - .producer.worker - File raw3.raw has ID 632, instruction: transfer
+2026-05-22 15:27:40,712 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 15:27:40,736 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 15:27:43,763 - INFO - .producer.worker - File raw3.raw has ID 632, instruction: wait
+2026-05-22 15:27:45,422 - INFO - .producer.main - Token OK, expires on 2026-06-21, 15:27
+2026-05-22 15:27:45,564 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 15:27:45,576 - INFO - .producer.worker - File raw3.raw has ID 640, instruction: transfer
+2026-05-22 15:27:45,576 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 15:27:45,599 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 15:27:46,779 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 15:27:48,625 - INFO - .producer.worker - File raw3.raw has ID 640, instruction: wait
+2026-05-22 15:27:50,391 - INFO - .producer.main - Token OK, expires on 2026-05-30, 15:27
+2026-05-22 15:27:50,546 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpblwy3poo/testoutbox
+2026-05-22 15:27:50,546 - INFO - .producer.inboxcollect - Will wait until acquisition status ready, currently: File /tmp/tmpblwy3poo/testoutbox/raw3.raw is opened by flock
+2026-05-22 15:27:51,644 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 15:27:55,548 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpblwy3poo/testoutbox
+2026-05-22 15:28:00,554 - INFO - .producer.inboxcollect - Found new file: /tmp/tmpblwy3poo/testoutbox/raw3.raw produced 1779463670.207948
+2026-05-22 15:28:02,585 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 15:28:02,604 - INFO - .producer.worker - File raw3.raw has ID 648, instruction: transfer
+2026-05-22 15:28:02,604 - INFO - root - Uploading /tmp/tmpblwy3poo/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 15:28:02,633 - INFO - .producer.worker - Succesful transfer of file /tmp/tmpblwy3poo/zipbox/raw3.raw.zip
+2026-05-22 15:28:05,556 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpblwy3poo/testoutbox
+2026-05-22 15:28:05,658 - INFO - .producer.worker - File raw3.raw has ID 648, instruction: wait
+2026-05-22 15:28:07,324 - INFO - .producer.main - Token OK, expires on 2026-06-21, 15:28
+2026-05-22 15:28:07,483 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 15:28:07,498 - INFO - .producer.worker - File raw3.raw has ID 656, instruction: transfer
+2026-05-22 15:28:07,498 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 15:28:07,523 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 15:28:08,677 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 15:28:10,544 - INFO - .producer.worker - File raw3.raw has ID 656, instruction: wait
+2026-05-22 15:28:12,264 - INFO - .producer.main - Token OK, expires on 2026-06-21, 15:28
+2026-05-22 15:28:12,447 - INFO - .producer.worker - File raw3.raw has ID 657, instruction: wait
+2026-05-22 15:28:13,558 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 15:28:15,473 - INFO - .producer.worker - File raw3.raw has ID 657, instruction: done
+2026-05-22 15:28:17,349 - INFO - .producer.main - Token OK, expires on 2026-06-21, 15:28
+2026-05-22 15:28:17,490 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 15:28:17,513 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: transfer
+2026-05-22 15:28:17,513 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 15:28:17,534 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 15:28:20,562 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 15:28:23,580 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 15:28:26,600 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 15:28:29,617 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 15:28:32,637 - INFO - .producer.worker - File raw3.raw has ID 664, instruction: wait
+2026-05-22 15:28:35,307 - INFO - .producer.main - Token OK, expires on 2026-05-30, 15:28
+2026-05-22 15:28:35,451 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpyfs9f20e/testoutbox
+2026-05-22 15:28:35,452 - INFO - .producer.inboxcollect - Found new file: /tmp/tmpyfs9f20e/testoutbox/raw3.raw produced 1779463715.094822
+2026-05-22 15:28:35,465 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 15:28:35,485 - INFO - .producer.worker - File raw3.raw has ID 678, instruction: transfer
+2026-05-22 15:28:35,486 - INFO - root - Uploading /tmp/tmpyfs9f20e/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 15:28:35,507 - INFO - .producer.worker - Succesful transfer of file /tmp/tmpyfs9f20e/zipbox/raw3.raw.zip
+2026-05-22 15:28:38,533 - INFO - .producer.worker - File raw3.raw has ID 678, instruction: wait
+2026-05-22 15:28:40,455 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpyfs9f20e/testoutbox
+2026-05-22 15:28:41,554 - INFO - .producer.worker - File raw3.raw has ID 678, instruction: wait
+2026-05-22 15:28:44,567 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 15:28:45,314 - INFO - .producer.main - Token OK, expires on 2026-05-30, 15:28
+2026-05-22 15:28:45,467 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpeizrv9rz/testoutbox
+2026-05-22 15:28:45,468 - INFO - .producer.inboxcollect - Found new file: /tmp/tmpeizrv9rz/testoutbox/raw3.raw produced 1779463725.128667
+2026-05-22 15:28:48,476 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 15:28:48,487 - INFO - .producer.worker - File raw3.raw has ID 686, instruction: transfer
+2026-05-22 15:28:48,488 - INFO - root - Uploading /tmp/tmpeizrv9rz/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 15:28:48,505 - INFO - .producer.worker - Succesful transfer of file /tmp/tmpeizrv9rz/zipbox/raw3.raw.zip
+2026-05-22 15:28:50,474 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpeizrv9rz/testoutbox
+2026-05-22 15:28:51,527 - INFO - .producer.worker - File raw3.raw has ID 686, instruction: wait
+2026-05-22 15:28:54,723 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 15:28:55,496 - INFO - .producer.main - Token OK, expires on 2026-06-21, 15:28
+2026-05-22 15:28:55,622 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 15:28:55,632 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: transfer
+2026-05-22 15:28:55,633 - INFO - root - Uploading /kantele/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 15:28:55,648 - INFO - .producer.worker - Succesful transfer of file /kantele/zipbox/raw3.raw.zip
+2026-05-22 15:28:58,664 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 15:29:01,689 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 15:29:04,708 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 15:29:07,732 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 15:29:10,752 - INFO - .producer.worker - File raw3.raw has ID 694, instruction: wait
+2026-05-22 15:29:13,417 - INFO - .producer.main - Token OK, expires on 2026-05-30, 15:29
+2026-05-22 15:29:13,582 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpvlxet63m/testoutbox
+2026-05-22 15:29:13,584 - INFO - .producer.inboxcollect - Found new file: /tmp/tmpvlxet63m/testoutbox/raw3.raw produced 1779463753.231667
+2026-05-22 15:29:16,593 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 15:29:16,604 - INFO - .producer.worker - File raw3.raw has ID 702, instruction: transfer
+2026-05-22 15:29:16,605 - INFO - root - Uploading /tmp/tmpvlxet63m/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 15:29:16,621 - INFO - .producer.worker - Succesful transfer of file /tmp/tmpvlxet63m/zipbox/raw3.raw.zip
+2026-05-22 15:29:18,588 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpvlxet63m/testoutbox
+2026-05-22 15:29:19,647 - INFO - .producer.worker - File raw3.raw has ID 702, instruction: wait
+2026-05-22 15:29:21,276 - INFO - .producer.main - Token OK, expires on 2026-05-30, 15:29
+2026-05-22 15:29:21,432 - INFO - .producer.inboxcollect - Checking for new files in /tmp/tmpmiwv2vp7/testoutbox
+2026-05-22 15:29:21,433 - INFO - .producer.inboxcollect - Found new file: /tmp/tmpmiwv2vp7/testoutbox/raw3.raw produced 1779463761.077528
+2026-05-22 15:29:21,456 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 15:29:21,477 - INFO - .producer.worker - File raw3.raw has ID 710, instruction: transfer
+2026-05-22 15:29:21,477 - INFO - root - Uploading /tmp/tmpmiwv2vp7/zipbox/raw3.raw.zip to http://0.0.0.0:80
+2026-05-22 15:29:21,497 - INFO - .producer.worker - Moving file raw3.raw to skipbox
+2026-05-22 15:29:21,498 - WARNING - .producer.worker - Another file in the system has the same name and is stored in the same path (/raw3.raw). Please investigate, possibly change the file name or location of this or the other file to enable transfer without overwriting.
+2026-05-22 15:29:22,668 - ERROR - .producer.worker - Permission denied querying server for file, server replied  with Token invalid or expired
+2026-05-22 15:29:26,033 - INFO - .producer.main - Token OK, expires on 2026-05-30, 15:29
+2026-05-22 15:29:26,206 - INFO - .producer.worker - File raw3.raw has ID 711, instruction: done
+2026-05-22 15:29:29,001 - INFO - .producer.main - Token OK, expires on 2026-05-30, 15:29
+2026-05-22 15:29:29,122 - INFO - .producer.worker - Registering 1 new file(s)
+2026-05-22 15:29:29,138 - INFO - .producer.worker - File analysis.tdf has ID 725, instruction: transfer
+2026-05-22 15:29:29,139 - INFO - root - Uploading /storage/newstorage/p1/e1/dtype1/run1/raw3.raw/analysis.tdf to http://0.0.0.0:80
+2026-05-22 15:29:29,153 - INFO - .producer.worker - Succesful transfer of file /storage/newstorage/p1/e1/dtype1/run1/raw3.raw/analysis.tdf
+2026-05-22 15:29:32,175 - INFO - .producer.worker - File analysis.tdf has ID 725, instruction: wait
+2026-05-22 15:29:35,200 - INFO - .producer.worker - File analysis.tdf has ID 725, instruction: wait
+2026-05-22 15:29:38,231 - INFO - .producer.worker - File analysis.tdf has ID 725, instruction: wait
+2026-05-22 15:29:41,252 - INFO - .producer.worker - File analysis.tdf has ID 725, instruction: wait
