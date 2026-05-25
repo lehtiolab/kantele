@@ -7,6 +7,10 @@ echo Cleaning up
 git clean -xf data/teststorage
 git checkout -- data/teststorage
 
+# Make sure that clean containers are being used
+# No other containers running.
+$DOCKERCMD down --remove-orphans
+
 if [ "$(uname)" = "Darwin" ]; then
   export USER_ID=1000
   export GROUP_ID=1000
@@ -29,12 +33,11 @@ $DOCKERCMD run -T web pylint -E --disable E1101,E0307 --ignore-paths '.*\/migrat
 echo Linting OK
 
 echo Prebuilding DB and MQ containers
-# Get DB container ready so web doesnt try to connect before it has init'ed
-$DOCKERCMD up --detach db mq
-echo Created db container and started it
-sleep 5
+$DOCKERCMD up --detach --wait db mq
+echo db and mq ready
 
-echo Init fixture repo
+
+echo Init fixture repos
 if [ ! -e data/test/nfrepo/.git ]
 then
 	cd data/test/nfrepo

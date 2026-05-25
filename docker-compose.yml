@@ -6,6 +6,8 @@ services:
         depends_on:
             db:
                 condition: service_healthy
+            mq:
+                condition: service_healthy
         extends:
             file: ./src/docker/docker-compose-base.yml
             service: web
@@ -25,7 +27,8 @@ services:
     nginx:
         image: "nginx:1.21"
         depends_on:
-            - web
+            web:
+                condition: service_healthy
         ports:
             - 80:80
         volumes:
@@ -47,21 +50,15 @@ services:
             - "./src/docker/create_kantele_db.sh:/docker-entrypoint-initdb.d/create_kantele_db.sh"
             - "${PG_DATA_PATH:-./false_pg_data}:/var/lib/postgresql/data"
             - "${BACKUP_PATH}:/pgbackups"
-        healthcheck:
-            test: ["CMD-SHELL", "pg_isready -U ${PG_KANTELE_USER} -d ${KANTELE_DB_NAME}"]
-            interval: 5s
-            timeout: 5s
-            retries: 5
-            start_period: 10s
 
     mq:
         extends:
             file: ./src/docker/docker-compose-base.yml
             service: mq
-
     jobrunner:
         depends_on:
-            - web 
+            web:
+                condition: service_healthy
         extends:
             file: ./src/docker/docker-compose-base.yml
             service: jobrunner
@@ -76,7 +73,8 @@ services:
 
     storage_mvfiles:
         depends_on:
-            - mq
+            mq:
+                condition: service_healthy
         env_file:
             - ./src/docker/${APP_ENV:-develop}.env
         extends:
@@ -87,7 +85,8 @@ services:
 
     storage_downloads:
         depends_on:
-            - mq
+            mq:
+                condition: service_healthy
         env_file:
             - ./src/docker/${APP_ENV:-develop}.env
         extends:
@@ -105,7 +104,8 @@ services:
 
     tulos_ingester:
       depends_on:
-        - mq
+            mq:
+                condition: service_healthy
       env_file:
         - ./src/docker/${APP_ENV:-develop}.env
       extends:
@@ -117,7 +117,8 @@ services:
     upload_bay_rsync:
         image: rsync_stor
         depends_on:
-            - mq
+            mq:
+                condition: service_healthy
         build:
             context: ./src
             dockerfile: ./docker/Dockerfile

@@ -10,6 +10,11 @@ services:
             args:
                 USER_ID: "${USER_ID:-You must run export USER_ID}"
                 GROUP_ID: "${GROUP_ID:-You must run export GROUP_ID}"
+        depends_on:
+            db:
+                condition: service_healthy
+            mq:
+                condition: service_healthy
         environment:
             DB_PASS: "${PG_KANTELE_PASSWORD}"
             DB_USER: "${PG_KANTELE_USER}"
@@ -21,6 +26,12 @@ services:
             TMP_UPLOADPATH: "${CONTAINER_UPLOADPATH}"
             HOST_UPLOADDIR: "${HOST_UPLOADPATH}"
             SERVABLE_FILE_PATH: "${CONTAINER_ANALYSISPATH}"
+        healthcheck:
+            test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 20s
     
     db:
         image: postgres:17.5
@@ -28,6 +39,12 @@ services:
         user: "${DBUID:-0}:${DBGID:-0}"
         environment:
             POSTGRES_PASSWORD: "${PG_SUPERUSER_PASSWORD}"
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U ${PG_KANTELE_USER} -d ${KANTELE_DB_NAME}"]
+            interval: 5s
+            timeout: 5s
+            retries: 5
+            start_period: 10s
 
     mq:
         image: rabbitmq:3.13.7
@@ -35,10 +52,22 @@ services:
             RABBITMQ_DEFAULT_USER: "${RABBITUSER:-guest}"
             RABBITMQ_DEFAULT_PASS: "${RABBITPASS:-guest}"
             RABBITMQ_DEFAULT_VHOST: "${RABBIT_VHOST}"
+        healthcheck:
+            test: ["CMD", "rabbitmq-diagnostics", "ping"]
+            interval: 5s
+            timeout: 10s
+            retries: 10
+            start_period: 15s
+
 
     jobrunner:
         image: kantele_web
         command: python manage.py runjobs
+        depends_on:
+            db:
+                condition: service_healthy
+            mq:
+                condition: service_healthy
         environment:
             DB_PASS: "${PG_KANTELE_PASSWORD}"
             DB_USER: "${PG_KANTELE_USER}"
@@ -49,3 +78,9 @@ services:
             RABBITPASS: "${RABBITPASS:-guest}"
             TMP_UPLOADPATH: "${CONTAINER_UPLOADPATH}"
             HOST_UPLOADDIR: "${HOST_UPLOADPATH}"
+        healthcheck:
+            test: ["CMD-SHELL", "pgrep -f 'manage.py runjobs' || exit 1"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 15s
