@@ -27,7 +27,7 @@ services:
             HOST_UPLOADDIR: "${HOST_UPLOADPATH}"
             SERVABLE_FILE_PATH: "${CONTAINER_ANALYSISPATH}"
         healthcheck:
-            test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
+            test: ["CMD-SHELL", "pgrep -f 'uwsgi' || exit 1"]
             interval: 10s
             timeout: 5s
             retries: 5

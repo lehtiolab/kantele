@@ -59,5 +59,8 @@ then
 else
     $DOCKERCMD run --use-aliases web $TESTCMD $1
 fi
-echo Remove Git nfrepo
+echo Clean Up
+# FIXME: update this so those files are removed
+rm -rf src/backend/zipbox/
+rm -rf src/backend/filetransfer.log
 rm -rf data/test/nfrepo/.git

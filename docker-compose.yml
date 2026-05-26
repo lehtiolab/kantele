@@ -99,7 +99,7 @@ services:
         environment:
             RSYNC_HOST: upload_bay_rsync
             RSYNC_SSHUSER: kantele
-            RSYNC_SSHPORT: 22
+            RSYNC_SSHPORT: "${RSYNC_SSHPORT}"
             RSYNC_SSHKEY: "/kantelessh/rsync_key"
 
     tulos_ingester:
