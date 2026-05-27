@@ -114,6 +114,8 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertEqual(self.f3sss.path, self.dss.storage_loc)
         self.f3raw.refresh_from_db()
         self.assertFalse(self.f3raw.claimed)
+        self.assertFalse(self.f3mzsss.purged)
+        self.assertTrue(self.f3mzsss.active)
         self.assertFalse(dm.DatasetRawFile.objects.filter(rawfile=self.f3raw).exists())
         # execute dataset move on disk, should also move the removed files and update their DB
         # the move job should be in waiting state still
@@ -136,6 +138,9 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertFalse(os.path.exists(f3sf_path))
         self.f3sss.refresh_from_db()
         self.assertTrue(self.f3sss.purged)
+        self.f3mzsss.refresh_from_db()
+        self.assertTrue(self.f3mzsss.purged)
+        self.assertFalse(self.f3mzsss.active)
 
     def test_add_files_wait_for_rename(self):
         '''Another job is running on dataset that changed the storage_loc,

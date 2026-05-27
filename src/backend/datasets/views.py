@@ -1789,8 +1789,10 @@ def save_or_update_files(data, user_id):
     addsfl = filemodels.StoredFileLoc.objects.filter(sfile_id__in=added_fnids, sfile__checked=True,
             servershare__function=filemodels.ShareFunction.INBOX)
     pre_addsfl = addsfl.filter(sfile__rawfile__claimed=False)
-    rmsfl = filemodels.StoredFileLoc.objects.filter(sfile_id__in=removed_ids, sfile__checked=True,
-            sfile__rawfile__claimed=True)
+    # Sfile for raw are passed for removal, if mzML files exist, we will resolve via raw files
+    rmraw = filemodels.RawFile.objects.filter(storedfile__id__in=removed_ids,
+            storedfile__checked=True, claimed=True)
+    rmsfl = filemodels.StoredFileLoc.objects.filter(sfile__rawfile__in=rmraw, sfile__checked=True)
     if added_fnids:
         # First error check: we can only add files if they are only on one servershare (primary)
         # so not from another dataset/analysis etc.
@@ -1815,7 +1817,7 @@ def save_or_update_files(data, user_id):
 
     if removed_ids:
         if len(removed_ids) > filemodels.StoredFile.objects.filter(pk__in=removed_ids,
-                rawfile__datasetrawfile__dataset_id=dset_id).count():
+                rawfile__datasetrawfile__dataset_id=dset_id, mzmlfile__isnull=True).count():
             return {'error': 'Some of the files you specified to remove from the dataset do not '
                     'belong to this dataset. Maybe you are working in an old browser tab?' }, 403
         elif len(removed_ids) > rmsfl.distinct('sfile_id').count():
