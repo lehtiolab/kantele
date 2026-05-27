@@ -1117,11 +1117,15 @@ def create_mzmls(request):
             active=True, sfile__mzmlfile__isnull=True,
             servershare__fileservershare__server__analysisserverprofile__isnull=False,
             servershare__active=True, servershare__fileservershare__server__active=True)
-    if rawsfl.count() != num_rawfns:
+    source_ssid = False
+    for servershare_test in rawsfl.values('servershare').annotate(nrsf=Count('servershare')):
+        if servershare_test['nrsf'] == num_rawfns:
+            source_ssid = servershare_test['servershare']
+            break
+    if not source_ssid:
         return JsonResponse({'error': 'This dataset does not have (all) its raw files on a server '
             'with analysis capability, please make sure it is correctly stored'}, status=403)
     # Select possible servers
-    source_ssid = rawsfl.values('servershare_id').first()['servershare_id']
     nfwf = anmodels.NextflowWfVersionParamset.objects.select_related('nfworkflow').get(
             pk=pwiz.nf_version_id)
     if anaprof_q := filemodels.AnalysisServerProfile.objects.filter(server__active=True,
