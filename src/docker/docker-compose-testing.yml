@@ -1,23 +1,40 @@
 services:
     web:
         depends_on:
-            - db
-            - mq
-            - analysis1
-            - analysis_ssh_1
-            - analysis_storage_1
-            - analysis_fastqueue_1
-            - storage_queue_1
-            - storage_fastqueue_1
-            - analysis2
-            - analysis_storage_2
-            - analysis_fastqueue_2
-            - storage_ssh_1
-            - analysis_ssh_2
-            - storage_downloads
-            - storage_web_rsync
-            - tulos_ingester
-            - upload_bay_rsync
+            db:
+                condition: service_healthy
+            mq:
+                condition: service_healthy
+            analysis1:
+                condition: service_started
+            analysis_ssh_1:
+                condition: service_started
+            analysis_storage_1:
+                condition: service_started
+            analysis_fastqueue_1:
+                condition: service_started
+            storage_queue_1:
+                condition: service_started
+            storage_fastqueue_1:
+                condition: service_started
+            analysis2:
+                condition: service_started
+            analysis_storage_2:
+                condition: service_started
+            analysis_fastqueue_2:
+                condition: service_started
+            storage_ssh_1:
+                condition: service_started
+            analysis_ssh_2:
+                condition: service_started
+            storage_downloads:
+                condition: service_started
+            storage_web_rsync:
+                condition: service_started
+            tulos_ingester:
+                condition: service_started
+            upload_bay_rsync:
+                condition: service_started
         extends:
             file: docker-compose-base.yml
             service: web
@@ -55,8 +72,11 @@ services:
             HOST_UPLOADDIR: /storage/uploads
     
     db: 
-        image: postgres:14.3
+        image: postgres:17.5
         #user: "${DBUID:-0}:${DBGID:-0}"
+        extends:
+            file: docker-compose-base.yml
+            service: db
         environment:
             POSTGRES_PASSWORD: "${PG_SUPERUSER_PASSWORD}"
             KANTELE_PASSWORD: "${PG_KANTELE_PASSWORD}"

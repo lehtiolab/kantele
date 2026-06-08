@@ -57,6 +57,9 @@ you do the frontend building yourself, so you can quickly rebuild a frontend app
 To change a single app (datasets, home, analysis, etc), go to the folder and build:
 ```
 cd src/frontend/datasets
+# If you have never run npm on your machine first run
+npm install
+# Then you can build
 npm run build
 
 # You can run continuous frontend rebuilding with live reload like this:
