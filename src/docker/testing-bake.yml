@@ -20,7 +20,7 @@ services:
                 GROUP_ID: "${GROUP_ID:-You must run export GROUP_ID}"
 
     db:
-        image: postgres:14.3
+        image: postgres:17.5
 
     mq:
-        image: rabbitmq:3.10
+        image: rabbitmq:3.13.7

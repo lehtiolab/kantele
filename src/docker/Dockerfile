@@ -25,7 +25,7 @@ CMD uwsgi --socket :8009 --processes 3 --module kantele.wsgi
 # For storage container (use in testing)
 FROM django AS django_test
 USER root
-RUN apt-get install -y rsync
+RUN apt-get update && apt-get install -y rsync
 RUN pip install pylint
 RUN mkdir /kantelessh
 COPY docker/test_rsync_sshkey /kantelessh/rsync_key
