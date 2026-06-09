@@ -29,7 +29,7 @@ jobs:
                 username: ${{ github.actor }}
                 password: ${{ secrets.GITHUB_TOKEN }}
 
-            - run: docker buildx bake --file src/docker/testing-bake.yml
+            - run: docker buildx bake --file src/docker/testing-bake.yml --file src/docker/docker-compose-gha-cache.json
             - run: |
                 docker compose --env-file src/docker/.compose.testing.env \
                 -f src/docker/docker-compose-testing.yml run web pylint \
