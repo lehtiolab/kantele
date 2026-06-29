@@ -86,9 +86,12 @@ class AnalysisPageTest(BaseIntegrationTest):
                 purged=False, active=True)
 
         c_ch = am.PsetComponent.ComponentChoices
-        self.inputdef = am.PsetComponent.objects.create(pset=self.pset, component=c_ch.INPUTDEF, value=['file_path', 'plate', 'setname', 'instrument', 'fake'])
+        self.inputdef = am.PsetComponent.objects.create(pset=self.pset, component=c_ch.INPUTDEF,
+                value=['file_path', 'plate', 'setname', 'instrument', 'fake'])
         am.PsetComponent.objects.create(pset=self.pset, component=c_ch.ISOQUANT)
         am.PsetComponent.objects.create(pset=self.pset, component=c_ch.ISOQUANT_SAMPLETABLE)
+        self.complement_c = am.PsetComponent.objects.create(pset=self.pset,
+                component=c_ch.COMPLEMENT_ANALYSIS, value={'param': '--oldmzml'})
         am.PsetComponent.objects.create(pset=self.pset, component=c_ch.PREFRAC, value='.*fr([0-9]+).*mzML$')
         am.PsetParam.objects.create(pset=self.pset, param=self.param1)
         am.PsetParam.objects.create(pset=self.pset, param=self.param2)
@@ -131,13 +134,26 @@ class AnalysisPageTest(BaseIntegrationTest):
         self.resultfn = am.AnalysisResultFile.objects.create(analysis=self.ana,
                 sfile=self.anasfile)
 
+        # Create base ana for LF, no params, only files
+        self.baseanalf = am.Analysis.objects.create(user=self.user, name='testana_lf',
+                base_rundir='testdirlf', securityclass=rm.DataSecurityClass.NOSECURITY)
+        am.DatasetAnalysis.objects.create(analysis=self.baseanalf, dataset=self.ds)
+        baseanajoblf = jm.Job.objects.create(funcname='testjob', kwargs={}, state=jj.Jobstates.WAITING,
+                timestamp=timezone.now())
+        am.NextflowSearch.objects.create(analysis=self.baseanalf, nfwfversionparamset=self.nfwf,
+                workflow=self.wf, token='tok12344', job=baseanajoblf)
+        self.baseafv1 = am.AnalysisFileValue.objects.create(analysis=self.baseanalf,
+                sfile=self.f3sfmz, field='fake', value='basehej')
+        self.baseafv2 = am.AnalysisFileValue.objects.create(analysis=self.baseanalf,
+                sfile=self.f3sfmz, field='fakeagain', value='basehejhej')
+
         # Create analysis for LF
         self.analf = am.Analysis.objects.create(user=self.user, name='testana_lf',
                 base_rundir='testdirlf', securityclass=rm.DataSecurityClass.NOSECURITY)
         self.dsalf = am.DatasetAnalysis.objects.create(analysis=self.analf, dataset=self.oldds)
         self.anajoblf = jm.Job.objects.create(funcname='testjob', kwargs={}, state=jj.Jobstates.WAITING,
                 timestamp=timezone.now())
-        self.nfslf = am.NextflowSearch.objects.create(analysis=self.analf, nfwfversionparamset=self.nfwf,
+        am.NextflowSearch.objects.create(analysis=self.analf, nfwfversionparamset=self.nfwf,
                 workflow=self.wf, token='tok12344', job=self.anajoblf)
 
         am.AnalysisParam.objects.create(analysis=self.analf, param=self.param1, value=True)
@@ -157,6 +173,8 @@ class AnalysisPageTest(BaseIntegrationTest):
         self.anaset = am.AnalysisSetname.objects.create(analysis=self.ana, setname='set1')
         self.ads1 = am.AnalysisDatasetSetValue.objects.create(analysis=self.ana,
                 dataset=self.ds, setname=self.anaset, field='__regex', value='hej')
+        self.ads2 = am.AnalysisDatasetSetValue.objects.create(analysis=self.ana,
+                dataset=self.ds, setname=self.anaset, field='fake', value='hejhej')
         self.adsif = am.AnalysisDSInputFile.objects.create(sfile=self.f3sfmz, analysisset=self.anaset,
                 dsanalysis=self.dsa)
         self.isoqvals = {'denoms': {self.qch.pk: True}, 'sweep': False, 'report_intensity': False, 'remove': {}}
@@ -171,8 +189,8 @@ class AnalysisLabelfreeSamples(AnalysisPageTest):
 
     def setUp(self):
         super().setUp()
-        self.afs2, _ = am.AnalysisFileValue.objects.get_or_create(analysis=self.analf,
-                value='newname2', field='__sample', sfile=self.oldsf)
+        self.afs2 = am.AnalysisFileValue.objects.create(analysis=self.analf, value='newname2',
+                field='__sample', sfile=self.oldsf)
 
 
 class TestNewAnalysis(BaseTest):
@@ -241,7 +259,10 @@ class LoadBaseAnaTestIso(AnalysisPageTest):
                 'resultfiles': [{'id': self.resultfn.sfile.pk, 'fn': self.resultfn.sfile.filename,
                     'ana': f'{self.wftype.name}_{self.ana.name}',
                     'date': datetime.strftime(self.ana.date, '%Y-%m-%d')}],
-                'datasets': {f'{self.ds.pk}': {'fields': {'__regex': f'{self.ads1.value}'},
+                'datasets': {f'{self.ds.pk}': {'fields': {
+                    self.ads1.field: self.ads1.value, # __regex: hej
+                    self.ads2.field: self.ads2.value, # fake: hejhej
+                    },
                     'setname': f'{self.ads1.setname.setname}', 'allfilessamesample': True,
                     'files': {}, 'picked_ftype': f'mzML (pwiz {self.f3sfmz.mzmlfile.pwiz.version_description})'}},
                 }
@@ -276,7 +297,10 @@ class LoadBaseAnaTestIso(AnalysisPageTest):
                     },
                 },
                 'resultfiles': [],
-                'datasets': {f'{self.ds.pk}': {'fields': {'__regex': f'{self.ads1.value}'},
+                'datasets': {f'{self.ds.pk}': {'fields': {
+                    self.ads1.field: self.ads1.value, # __regex: hej
+                    self.ads2.field: self.ads2.value, # fake: hejhej
+                    },
                     'setname': f'{self.ads1.setname.setname}',
                     'picked_ftype': f'mzML (pwiz {self.f3sfmz.mzmlfile.pwiz.version_description})',
                     'allfilessamesample': True, 'files': {}},
@@ -490,7 +514,10 @@ class TestGetDatasetsIso(AnalysisPageTest):
                     'setname': self.ads1.setname.setname,
                     'locked': self.ds.locked,
                     'storage': f'{self.p1.name} - {self.exp1.name} - {self.dtype.name} - {self.run1.name}',
-                    'fields': {'fake': '', '__regex': self.ads1.value},
+                    'fields': {
+                        self.ads1.field: self.ads1.value, # __regex: hej
+                        self.ads2.field: self.ads2.value, # fake: hejhej
+                        },
                     'instruments': [self.prod.name],
                     'instrument_types': [self.prod.shortname],
                     'qtype': {'name': self.ds.quantdataset.quanttype.name,
@@ -498,8 +525,16 @@ class TestGetDatasetsIso(AnalysisPageTest):
                         'is_isobaric': True},
                     'nrstoredfiles': [1, self.ft.name],
                     'channels': {self.qch.name: [self.projsam1.sample, self.qch.pk]},
-                    'ft_files': {mztype: [{'ft_name': mztype, 'id': self.f3sfmz.pk, 'name': self.f3sfmz.filename, 'fr': '', 'dsetsample': '', 'fields': {'__sample': '', 'fake': ''}}],
-                        self.ft.name: [{'ft_name': self.ft.name, 'id': self.f3sf.pk, 'name': self.f3sf.filename, 'fr': '', 'dsetsample': '', 'fields': {'__sample': '', 'fake': ''}}],
+                    'ft_files': {mztype: [{'ft_name': mztype, 'id': self.f3sfmz.pk,
+                        'name': self.f3sfmz.filename, 'fr': '', 'dsetsample': '', 'fields': {
+                            '__sample': '',
+                            self.ads2.field: self.ads2.value, # fake: hejhej
+                            }}],
+                        self.ft.name: [{'ft_name': self.ft.name, 'id': self.f3sf.pk,
+                            'name': self.f3sf.filename, 'fr': '', 'dsetsample': '', 'fields': {
+                            '__sample': '',
+                            self.ads2.field: self.ads2.value, # fake: hejhej
+                            }}],
                         },
                     'incomplete_files': [],
                     'picked_ftype': mztype,
@@ -740,11 +775,13 @@ class TestStoreAnalysis(AnalysisPageTest):
             'upload_external': False,
             'analysis_id': False,
             'infiles': {self.f3sfmz.pk: 1},
+            'old_infiles': ['a', 'b', 'c', 'd'],
             'picked_ftypes': {self.ds.pk: f'mzML (pwiz {self.f3sfmz.mzmlfile.pwiz.version_description})'},
             'nfwfvid': self.nfwf.pk,
             'dssetnames': {self.ds.pk: 'setA'},
-            'components': {'ISOQUANT_SAMPLETABLE': {'hello': 'yes'},
+            'components': {'ISOQUANT_SAMPLETABLE': [[self.qch.name, 'setA', 'samplename', 'groupname']],
                 'INPUTDEF': 'a',
+                'COMPLEMENT_ANALYSIS': {'param': '--oldmzml'},
                 'ISOQUANT': {'setA': {'chemistry': quant.shortname,
                     'denoms': {quant.quanttypechannel_set.first().channel.name: True,
                         quant.quanttypechannel_set.last().channel.name: False},
@@ -762,10 +799,10 @@ class TestStoreAnalysis(AnalysisPageTest):
             'params': params,
             'singlefiles': {self.pfn2.pk: self.sflib.pk},
             'multifiles': {self.pfn1.pk: [self.sfusr.pk]},
-            # FIXME use self.ana here
-            'base_analysis': {'isComplement': False,
+            'base_analysis': {'isComplement': True,
+                'runFromPSM': False,
                 'dsets_identical': False,
-                'selected': False,
+                'selected': self.ana.pk,
                 'typedname': '',
                 'fetched': {},
                 'resultfiles': [],
@@ -776,7 +813,7 @@ class TestStoreAnalysis(AnalysisPageTest):
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 200)
         ana = am.Analysis.objects.last()
-        self.assertEqual(ana.analysissampletable.samples, {'hello': 'yes'})
+        self.assertEqual(ana.analysissampletable.samples,  [['126', 'setA', 'samplename', 'groupname']]) #{'hello': 'yes'})
         regexes = {x.dataset_id: x.value for x in am.AnalysisDatasetSetValue.objects.filter(
             analysis=ana, field='__regex')}
         fakevals = {x.dataset_id: x.value for x in am.AnalysisDatasetSetValue.objects.filter(
@@ -786,6 +823,18 @@ class TestStoreAnalysis(AnalysisPageTest):
             self.assertEqual(adsif.analysisset.setname, postdata['dssetnames'][self.ds.pk])
             self.assertEqual(regexes[adsif.dsanalysis.dataset_id], postdata['dsetfields'][f'{self.ds.pk}']['__regex'])
             self.assertEqual(fakevals[adsif.dsanalysis.dataset_id], postdata['dsetfields'][f'{self.ds.pk}']['fake'])
+
+        # Check base analysis
+        ba = am.AnalysisBaseanalysis.objects.get(analysis=ana)
+        self.assertEqual(ba.base_analysis, self.ana)
+        self.assertTrue(ba.is_complement)
+        self.assertFalse(ba.rerun_from_psms)
+        self.assertJSONEqual(json.dumps(ba.shadow_isoquants), json.dumps({self.anaset.setname: {
+            **self.isoqvals,
+            'chemistry': self.ds.quantdataset.quanttype.shortname,
+            'channels': {self.qch.name: [self.projsam1.sample, self.qch.pk]},
+            'samplegroups': {self.samples.samples[0][0]: self.samples.samples[0][3]},
+            }}))
 
         PT = am.Param.PTypes
         for ap in ana.analysisparam_set.all():
@@ -830,10 +879,12 @@ class TestStoreAnalysis(AnalysisPageTest):
         with open(nfrunfn) as fp:
             header = next(fp).strip().split('\t')
             self.assertEqual(header, self.inputdef.value)
-            for line in fp:
-                lines.append(line.strip().split('\t'))
-            self.assertEqual(len(lines), 1)
-            self.assertEqual(lines[0], [fnpath, '', 'setA', self.msit.name, 'yes'])
+            line = next(fp).strip().split('\t')
+            self.assertEqual(line, [fnpath, '', 'setA', self.msit.name, 'yes'])
+            oldheader = next(fp).strip().split('\t')
+            self.assertEqual(oldheader, self.inputdef.value)
+            oldline = next(fp).strip().split('\t')
+            self.assertEqual(oldline, [self.f3sfmz.filename, '', 'set1', self.msit.name, self.ads2.value])
 
         anasfl = reports.filter(servershare=self.ssana, path=ana.get_public_output_dir()).get()
         anadir = os.path.join(self.anashare.path, anasfl.path)
@@ -968,6 +1019,7 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
           'dss_ids': [remotedss.pk],
           'sfloc_ids': [remotemzml.pk],
           'inputs': {'components': {c_ch.INPUTDEF.name: self.inputdef.value,
+              c_ch.COMPLEMENT_ANALYSIS.name: self.complement_c.value,
               c_ch.PREFRAC.name: '.*fr([0-9]+).*mzML$', c_ch.ISOQUANT.name: {},
               c_ch.ISOQUANT_SAMPLETABLE.name: [[self.qch.name, 'setA', 'samplename', 'groupname']],
               },
@@ -1028,7 +1080,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
             'base_analysis': {'isComplement': True,
                 'runFromPSM': False,
                 'dsets_identical': False,
-                'selected': self.ana.pk,
+                'selected': self.baseanalf.pk,
                 'typedname': '',
                 'fetched': {},
                 'resultfiles': [],
@@ -1077,7 +1129,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
             'base_analysis': {'isComplement': True,
                 'runFromPSM': False,
                 'dsets_identical': False,
-                'selected': self.ana.pk,
+                'selected': self.baseanalf.pk,
                 'typedname': '',
                 'fetched': {},
                 'resultfiles': [],
@@ -1109,17 +1161,21 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         checkjson = {'errmsg': False, 'multierror': [], 'analysis_id': self.analf.pk, 'token': False}
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
         ba = am.AnalysisBaseanalysis.objects.get(analysis=self.analf)
-        self.assertEqual(ba.base_analysis_id, self.ana.pk)
+        self.assertEqual(ba.base_analysis, self.baseanalf)
         self.assertTrue(ba.is_complement)
         self.assertFalse(ba.rerun_from_psms)
-        self.assertJSONEqual(json.dumps(ba.shadow_isoquants), json.dumps({self.anaset.setname: {
-            **self.isoqvals,
-            'chemistry': self.ds.quantdataset.quanttype.shortname,
-            'channels': {self.qch.name: [self.projsam1.sample, self.qch.pk]},
-            'samplegroups': {self.samples.samples[0][0]: self.samples.samples[0][3]},
-            }}))
-        self.assertJSONEqual(json.dumps(ba.shadow_dssetnames), json.dumps({
-            self.ds.pk: {'setname': self.ads1.setname.setname, 'fields': {'__regex': self.ads1.value}}}))
+        self.assertJSONEqual(json.dumps(ba.shadow_isoquants), {})
+
+# FIXME this to the StoreAna with isoquants:
+                #                json.dumps({self.anaset.setname: {
+                #            **self.isoqvals,
+                #            'chemistry': self.ds.quantdataset.quanttype.shortname,
+                #            'channels': {self.qch.name: [self.projsam1.sample, self.qch.pk]},
+                #            'samplegroups': {self.samples.samples[0][0]: self.samples.samples[0][3]},
+                #            }}))
+        self.assertJSONEqual(json.dumps(ba.shadow_dssetnames), {})
+       #j json.dumps({
+        #    self.ds.pk: {'setname': self.ads1.setname.setname, 'fields': {'__regex': self.ads1.value}}}))
 
     def test_failing(self):
         # no sample annotations

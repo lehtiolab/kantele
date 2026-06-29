@@ -12,6 +12,7 @@ p.add_argument('--fp2')
 
 p.add_argument('--isobaric')
 p.add_argument('--input')
+p.add_argument('--oldmzml')
 p.add_argument('--sampletable')
 p.add_argument('--runid')
 p.add_argument('-output-dir')
@@ -34,9 +35,21 @@ with open(args.input) as fp:
     for line in fp:
         lines.append(line.strip().split('\t'))
 
+oldlines = []
+if os.path.exists(args.oldmzml):
+    with open(args.oldmzml) as fp:
+        oldheader = next(fp).strip().split('\t')
+        for line in fp:
+            oldlines.append(line.strip().split('\t'))
+
 with open(os.path.join(args.outdir, 'report.html'), 'w') as fp:
     fp.write(f'{"\t".join(header)}')
     for line in lines:
+        fp.write('\n')
+        fp.write('\t'.join(line))
+    fp.write('\n')
+    fp.write(f'{"\t".join(oldheader)}')
+    for line in oldlines:
         fp.write('\n')
         fp.write('\t'.join(line))
 

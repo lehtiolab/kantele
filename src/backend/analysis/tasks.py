@@ -166,12 +166,12 @@ def run_nextflow_workflow(self, run, params, stagefiles, nf_version, scratchbase
                 fp.write(f'\n{fnpath}\t{fn_metadata}')
         params.extend(['--input', os.path.join(stagedir, 'inputdef.txt')])
 
-    if 'COMPLEMENT_ANALYSIS' in run['components'] and run['old_infiles']:
+    if (comp_json := run['components'].get('COMPLEMENT_ANALYSIS')) and run['old_infiles']:
         with open(os.path.join(stagedir, 'oldinputdef.txt'), 'w') as fp:
             fp.write('\t'.join(run['components']['INPUTDEF']))
             for fn in run['old_infiles']:
                 fp.write(f'\n{fn}')
-        params.extend(['--oldmzmldef', os.path.join(stagedir, 'oldinputdef.txt')])
+        params.extend([comp_json['param'], os.path.join(stagedir, 'oldinputdef.txt')])
     outfiles = execute_normal_nf(run, params, os.path.basename(rundir), gitwfdir, self.request.id,
             nf_version, scratchdir)
 

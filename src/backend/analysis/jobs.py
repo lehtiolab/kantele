@@ -1,4 +1,5 @@
 from datetime import datetime
+from collections import defaultdict
 import re
 import os
 from uuid import uuid4
@@ -211,8 +212,8 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
 
 
 def recurse_nrdsets_baseanalysis(aba):
-    """Recursively get all old mzmls from what is possibly a chain of growing analyses,
-    each e.g. adding a single set fresh of the MS"""
+    """Recursively get all old input files from what is possibly a 
+    chain of growing analyses, each e.g. adding a single set fresh of the MS"""
     try:
         # if this base ana has its base ana, run the recursive func
         older_aba = models.AnalysisBaseanalysis.objects.get(
@@ -224,16 +225,23 @@ def recurse_nrdsets_baseanalysis(aba):
     else:
         # get older analysis' old mzmls
         old_mzmls, old_dsets = recurse_nrdsets_baseanalysis(older_aba)
-    # First get stripnames of old ds
+    ## 1. First do dataset-based inputs (fractionated, possibly multiplexed)
+    # First get stripnames of old ds, if any strips used
     strips = {}
-    for oldads in aba.base_analysis.analysisdatasetsetvalue_set.select_related('dataset__prefractionationdataset__hiriefdataset'):
-        if hasattr(oldads.dataset, 'prefractionationdataset'):
-            pfd = oldads.dataset.prefractionationdataset
-            if hasattr(pfd, 'hiriefdataset'):
-                hirief = pfd.hiriefdataset.hirief
-                strips[oldads.dataset_id] = '-'.join([re.sub('.0$', '', str(float(x.strip()))) for x in str(hirief).split('-')])
-            else:
-                strips[oldads.dataset_id] = pfd.prefractionation.name
+    dataset_values = defaultdict(dict)
+    for oldads in aba.base_analysis.analysisdatasetsetvalue_set.all().values('dataset_id', 'setname', 'field', 'value'):
+        dataset_values[oldads['dataset_id']][oldads['field']] = oldads['value']
+        
+    for pfds in dm.PrefractionationDataset.objects.filter(dataset_id__in=dataset_values.keys()
+            ).values('dataset_id', 'hiriefdataset__hirief__start', 'hiriefdataset__hirief__end',
+            'prefractionation__name'):
+        if pfds['hiriefdataset__hirief__start'] is not None:
+            start = re.sub('0$', '', str(float(pfds["hiriefdataset__hirief__start"])))
+            end = re.sub('0$', '', str(float(pfds["hiriefdataset__hirief__end"])))
+            strips[pfds['dataset_id']] = f'{start}-{end}'
+        else:
+            strips[pfds['dataset_id']] = pfds['prefractionation__name']
+
     # Put old files fields into the run dict, group them by set so we dont get duplicates in case an analysis chain is:
     # 1. setA + setB
     # 2. setB rerun based on 1.
@@ -241,30 +249,32 @@ def recurse_nrdsets_baseanalysis(aba):
     # This would in 3. give us all oldmzmls from 1. and 2., so setB would be double
     single_ana_oldmzml = {}
     single_ana_oldds = {}
-    regexes = {x.dataset_id: x.value for x in models.AnalysisDatasetSetValue.objects.filter(
-        analysis=aba.base_analysis, field='__regex')}
     for asf in models.AnalysisDSInputFile.objects.filter(
-            analysisset__analysis=aba.base_analysis).select_related(
-                    'sfile__rawfile__producer', 'analysisset'):
-        if asf.dsanalysis.dataset_id in regexes:
-            frnr = re.match(regexes[asf.dsanalysis.dataset_id], asf.sfile.filename) or False
+            analysisset__analysis=aba.base_analysis).values(
+            'dsanalysis__dataset_id', 'sfile__filename', 'analysisset__setname',
+            'sfile__rawfile__producer__msinstrument__instrumenttype__name'):
+        dsvals = dataset_values.get(asf['dsanalysis__dataset_id'], {})
+        if asf_re := dsvals.get('__regex'):
+            frnr = re.match(asf_re, asf['sfile__filename']) or False
             frnr = frnr.group(1) if frnr else 'NA'
         else:
             frnr = 'NA'
-        oldasf = {'fn': asf.sfile.filename,
-                'instrument': asf.sfile.rawfile.producer.name,
-                'setname': asf.analysisset.setname,
-                'plate': strips[asf.dsanalysis.dataset_id],
+        oldasf = {'fn': asf['sfile__filename'],
+                'instrument': asf['sfile__rawfile__producer__msinstrument__instrumenttype__name'],
+                'setname': asf['analysisset__setname'],
+                'plate': strips.get(asf['dsanalysis__dataset_id'], ''),
                 'fraction': frnr,
+                **dsvals,
                 }
         try:
-            single_ana_oldmzml[asf.analysisset.setname].append(oldasf)
-            single_ana_oldds[asf.analysisset.setname].add(asf.dsanalysis.dataset_id)
+            single_ana_oldmzml[asf['analysisset__setname']].append(oldasf)
+            single_ana_oldds[asf['analysisset__setname']].add(asf['dsanalysis__dataset_id'])
         except KeyError:
-            single_ana_oldmzml[asf.analysisset.setname] = [oldasf]
-            single_ana_oldds[asf.analysisset.setname] = {asf.dsanalysis.dataset_id}
+            single_ana_oldmzml[asf['analysisset__setname']] = [oldasf]
+            single_ana_oldds[asf['analysisset__setname']] = {asf['dsanalysis__dataset_id']}
     old_mzmls.update(single_ana_oldmzml)
     old_dsets.update(single_ana_oldds)
+    # FIXME also need to get data from diff sample per file in dataset
     return old_mzmls, old_dsets
 
 
@@ -395,7 +405,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
                'components': kwargs['inputs']['components'],
                }
         
-        # Gather input files
+        # Gather input files, parse inputdef from JSON and store header in components
         infiles = []
         # INPUTDEF is either False or [fn, set, fraction, etc]
         if inputdef_fields := run['components'].get('INPUTDEF', []):
@@ -433,7 +443,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
             run['components']['INPUTDEF'] = [pathfield, *inputdef_fields_nofn]
 
         # COMPLEMENT/RERUN component:
-        # Add base analysis stuff if it is complement and fractionated (if not it has only been used
+        # Add base analysis stuff if it is complement (if not it has only been used
         # for fetching parameter values and can be ignored in the job)
         ana_baserec = models.AnalysisBaseanalysis.objects.select_related('base_analysis').filter(analysis_id=analysis.id)
         try:
@@ -443,11 +453,11 @@ class RunNextflowWorkflow(MultiDatasetJob):
             run['infiles'] = infiles
         else:
             # SELECT prefrac with fraction regex to get fractionated datasets in old analysis
-            if ana_baserec.base_analysis.analysisdatasetsetvalue_set.filter(field='__regex').count():
-                # rerun/complement runs with fractionated base analysis need --oldmzmldef parameter
-                old_infiles, old_dsets = recurse_nrdsets_baseanalysis(ana_baserec)
-                run['old_infiles'] = [f'{x["fn"]}\t{"\t".join([x[key] for key in inputdef_fields_nofn])}'
-                        for setmzmls in old_infiles.values() for x in setmzmls]
+            # rerun/complement runs with fractionated base analysis, will get passed with param
+            # defined in that component value JSON (e.g. {'param': '--oldfiles'})
+            old_infiles, old_dsets = recurse_nrdsets_baseanalysis(ana_baserec)
+            run['old_infiles'] = [f'{x["fn"]}\t{"\t".join([x[key] for key in inputdef_fields_nofn])}'
+                    for setmzmls in old_infiles.values() for x in setmzmls]
             if not ana_baserec.rerun_from_psms:
                 # Only mzmldef input if not doing a rerun
                 run['infiles'] = infiles

@@ -239,6 +239,7 @@ def load_base_analysis(request, wfversion_id, baseanid):
         'ana': ana.get_fullname(),
         'date': datetime.strftime(ana.date, '%Y-%m-%d')}
         for x in ana.analysisresultfile_set.exclude(sfile__pk__in=already_loaded_files)]
+    # FIXME load shadow filevalues
     return JsonResponse({'base_analysis': analysis, 'datasets': dsets, 'resultfiles': base_resfiles})
 
 

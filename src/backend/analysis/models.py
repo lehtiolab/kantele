@@ -288,7 +288,8 @@ class PsetComponent(models.Model):
     pset = models.ForeignKey(ParameterSet, on_delete=models.CASCADE)
     component = models.IntegerField(choices=ComponentChoices.choices)
     value = models.JSONField(default=dict, help_text='''JSON, e.g. [path, instrument, set, plate] (path must be first),
-            {rawfile: __path, field_w_default: 1, file_type: "**function"}, empty_field: False}''')
+            {rawfile: __path, field_w_default: 1, file_type: "**function"}, empty_field: False},
+            {param: --oldmzmldef}, etc ''')
     # else {}
     # FIXME future also setnames, sampletables, fractions, etc which is not a param
     # to be included in parameterset
@@ -546,6 +547,15 @@ class AnalysisFileParam(models.Model):
 
 
 class AnalysisBaseanalysis(models.Model):
+    '''Linking another analysis (base_analysis) to the current one. When used as only
+    getting parameter values etc (is_complement=False), we dont run the old analysis files
+    in the new analysis. But, when is_complement=True, old input files can be passed to
+    the workflow, so that it has that information. That is invoked using the COMPLEMENT_ANALYSIS
+    component.
+    In shadow_isoquants we save the isobaric quants for this base analysis, and all its
+    base analysis (chain), since a base analysis can have a base analysis itself.
+    shadow_dssetnames
+    '''
     analysis = models.OneToOneField(Analysis, on_delete=models.CASCADE, related_name='analysis')
     base_analysis = models.ForeignKey(Analysis, on_delete=models.CASCADE, related_name='base_analysis')
     is_complement = models.BooleanField(default=False)
