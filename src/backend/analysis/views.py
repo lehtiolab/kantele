@@ -607,11 +607,12 @@ def get_datasets(request, wfversion_id):
             # Labelfree or other data type, add file/sample mapping
             channels = False
             for ft_name, dsfiles in usefiles.items():
-                for fn in dsfiles.filter(rawfile__datasetrawfile__quantsamplefile__isnull=False).select_related(
-                        'rawfile__datasetrawfile__quantsamplefile__projsample'):
-                    resp_files[fn.id]['dsetsample'] = fn.rawfile.datasetrawfile.quantsamplefile.projsample.sample
-                    if fn.id in has_filesamples:
-                        resp_files[fn.id]['fields'].update(has_filesamples[fn.id])
+                for fn in dsfiles.filter(rawfile__datasetrawfile__quantsamplefile__isnull=False
+                        ).values('rawfile__datasetrawfile__quantsamplefile__projsample__sample'):
+                    resp_files[fn.id]['dsetsample'] = fn['rawfile__datasetrawfile__quantsamplefile__projsample__sample']
+                for fn in dsfiles.values('pk'):
+                    if fn['pk'] in has_filesamples:
+                        resp_files[fn['pk']]['fields'].update(has_filesamples[fn['pk']])
 
         # Files with samples (non-MS, IP, non-isobaric, etc)
         if anid and is_msdata:
