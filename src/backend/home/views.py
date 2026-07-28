@@ -796,12 +796,12 @@ def get_analysis_info(request, anid):
             }
     if anmodels.AnalysisBaseanalysis.objects.filter(analysis=ana, is_complement=True).count():
         baseana = anmodels.AnalysisBaseanalysis.objects.select_related('base_analysis').get(analysis=ana)
-        old_mzml, old_dsets = aj.recurse_nrdsets_baseanalysis(baseana)
+        old_files, old_dsets = aj.recurse_nrdsets_baseanalysis(baseana, inputdef_fields_nofn=[])
         resp['base_analysis'] = {
                 'nfsid': baseana.base_analysis.nextflowsearch.pk,
                 'name': baseana.base_analysis.name,
-                'nrdsets': len([dset for setdsets in old_dsets.values() for dset in setdsets]),
-                'nrfiles': len([fn for setfns in old_mzml.values() for fn in setfns]),
+                'nrdsets': len(old_dsets),
+                'nrfiles': len(old_files)
                 }
     # FIXME dsets, files are already counted in the non-detailed view, so maybe frontend can reuse those
     try:

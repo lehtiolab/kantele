@@ -211,7 +211,7 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
         analysis.save()
 
 
-def recurse_nrdsets_baseanalysis(aba):
+def recurse_nrdsets_baseanalysis(aba, inputdef_fields_nofn):
     """Recursively get all old input files from what is possibly a 
     chain of growing analyses, each e.g. adding a single set fresh of the MS"""
     try:
@@ -220,62 +220,74 @@ def recurse_nrdsets_baseanalysis(aba):
                 analysis=aba.base_analysis, is_complement=True)
     except models.AnalysisBaseanalysis.DoesNotExist:
         # youve found the last base ana, dont call deeper
-        old_mzmls = {}
-        old_dsets = {}
+        old_files = {}
+        old_dsets = set()
     else:
         # get older analysis' old mzmls
-        old_mzmls, old_dsets = recurse_nrdsets_baseanalysis(older_aba)
+        old_files, old_dsets = recurse_nrdsets_baseanalysis(older_aba, inputdef_fields_nofn)
     ## 1. First do dataset-based inputs (fractionated, possibly multiplexed)
     # First get stripnames of old ds, if any strips used
     strips = {}
-    dataset_values = defaultdict(dict)
-    for oldads in aba.base_analysis.analysisdatasetsetvalue_set.all().values('dataset_id', 'setname', 'field', 'value'):
-        dataset_values[oldads['dataset_id']][oldads['field']] = oldads['value']
-        
-    for pfds in dm.PrefractionationDataset.objects.filter(dataset_id__in=dataset_values.keys()
-            ).values('dataset_id', 'hiriefdataset__hirief__start', 'hiriefdataset__hirief__end',
-            'prefractionation__name'):
+    for pfds in dm.PrefractionationDataset.objects.filter(
+            dataset__datasetanalysis__analysis=aba.base_analysis).values('dataset_id',
+            'hiriefdataset__hirief__start', 'hiriefdataset__hirief__end', 'prefractionation__name'):
         if pfds['hiriefdataset__hirief__start'] is not None:
-            start = re.sub('0$', '', str(float(pfds["hiriefdataset__hirief__start"])))
-            end = re.sub('0$', '', str(float(pfds["hiriefdataset__hirief__end"])))
-            strips[pfds['dataset_id']] = f'{start}-{end}'
+            start = re.sub('[0]+$', '', str(float(pfds["hiriefdataset__hirief__start"])))
+            end = re.sub('[0]+$', '', str(float(pfds["hiriefdataset__hirief__end"])))
+            start = re.sub('\.$', '', start)
+            end = re.sub('\.$', '', end)
+            strips[str(pfds['dataset_id'])] = f'{start}-{end}'
         else:
-            strips[pfds['dataset_id']] = pfds['prefractionation__name']
+            strips[str(pfds['dataset_id'])] = pfds['prefractionation__name']
 
     # Put old files fields into the run dict, group them by set so we dont get duplicates in case an analysis chain is:
     # 1. setA + setB
     # 2. setB rerun based on 1.
     # 3. setC addition based on 2
     # This would in 3. give us all oldmzmls from 1. and 2., so setB would be double
-    single_ana_oldmzml = {}
-    single_ana_oldds = {}
-    for asf in models.AnalysisDSInputFile.objects.filter(
-            analysisset__analysis=aba.base_analysis).values(
-            'dsanalysis__dataset_id', 'sfile__filename', 'analysisset__setname',
-            'sfile__rawfile__producer__msinstrument__instrumenttype__name'):
-        dsvals = dataset_values.get(asf['dsanalysis__dataset_id'], {})
-        if asf_re := dsvals.get('__regex'):
-            frnr = re.match(asf_re, asf['sfile__filename']) or False
-            frnr = frnr.group(1) if frnr else 'NA'
+    single_ana_oldfiles = defaultdict(dict)
+    old_sflocs = rm.StoredFileLoc.objects.filter(
+            sfile__analysisdsinputfile__dsanalysis__analysis=aba.base_analysis).values(
+            'sfile__filename', 'sfile_id', 'sfile__rawfile__datasetrawfile__dataset_id',
+            'sfile__rawfile__producer__msinstrument__instrumenttype__name',
+            'sfile__rawfile__datasetrawfile__quantfilechannel__channel__channel__name')
+
+    # Update recursed objects
+    for oldfn in populate_inputfiles(aba.base_analysis, old_sflocs, inputdef_fields_nofn, {'platenames': strips},
+            sharemap=False):
+        old_files[oldfn['id']] = oldfn
+    old_dsets.update({x['dataset_id'] for x in models.DatasetAnalysis.objects.filter(
+        analysis=aba.base_analysis).values('dataset_id')})
+    return old_files, old_dsets
+
+
+def populate_inputfiles(analysis, sflocs_values, inputdef_fields_nofn, dsetfields, sharemap):
+    '''For both old files (in complementing workflows) and normal --input'''
+    filevals = defaultdict(dict)
+    for afv in models.AnalysisFileValue.objects.filter(
+            adsfile__dsanalysis__analysis=analysis).values('field', 'value',
+            'adsfile__dsanalysis__analysis', 'adsfile__sfile_id'):
+        filevals[afv['adsfile__sfile_id']][afv['field']] = afv['value']
+    # Field values can be looked up in DB for these fields:
+    infiles = []
+    for fn in sflocs_values:
+        if sharemap:
+            infile = {'path': os.path.join(sharemap[fn['servershare_id']], fn['path']),
+                    'fn': fn['sfile__filename'], 'id': fn['sfile_id']}
         else:
-            frnr = 'NA'
-        oldasf = {'fn': asf['sfile__filename'],
-                'instrument': asf['sfile__rawfile__producer__msinstrument__instrumenttype__name'],
-                'setname': asf['analysisset__setname'],
-                'plate': strips.get(asf['dsanalysis__dataset_id'], ''),
-                'fraction': frnr,
-                **dsvals,
-                }
-        try:
-            single_ana_oldmzml[asf['analysisset__setname']].append(oldasf)
-            single_ana_oldds[asf['analysisset__setname']].add(asf['dsanalysis__dataset_id'])
-        except KeyError:
-            single_ana_oldmzml[asf['analysisset__setname']] = [oldasf]
-            single_ana_oldds[asf['analysisset__setname']] = {asf['dsanalysis__dataset_id']}
-    old_mzmls.update(single_ana_oldmzml)
-    old_dsets.update(single_ana_oldds)
-    # FIXME also need to get data from diff sample per file in dataset
-    return old_mzmls, old_dsets
+            infile = {'fn': fn['sfile__filename'], 'id': fn['sfile_id']}
+        for field in inputdef_fields_nofn:
+            if dbfield := models.INPUTDEF_DBFIELDS.get(field):
+                infile[field] = fn[dbfield]
+            elif dsfield_dsidkey := models.INPUTDEF_DSETFIELDS.get(field):
+                dsfield, dsidkey = dsfield_dsidkey
+                infile[field] = dsetfields[dsfield][str(fn[dsidkey])]
+            elif translatedfield := models.INPUTDEF_LOOKUPS.get(field):
+                infile[field] = filevals[fn['sfile_id']][translatedfield]
+            else:
+                infile[field] = filevals[fn['sfile_id']][field]
+        infiles.append(infile)
+    return infiles
 
 
 class RunNextflowWorkflow(MultiDatasetJob):
@@ -357,38 +369,6 @@ class RunNextflowWorkflow(MultiDatasetJob):
         dsa = analysis.datasetanalysis_set.all()
         if dsa.filter(dataset__locked=False).exists():
             raise RuntimeError('Cannot run analysis as one or more datasets are in unlocked state')
-        # First new files included:
-        dsfiles_not_in_job = rm.StoredFile.objects.filter(deleted=False,
-            rawfile__datasetrawfile__dataset__datasetanalysis__in=dsa).select_related(
-                    'rawfile').exclude(pk__in=kwargs['infiles'].keys())
-        if is_msdata:
-            # Pick mzML files if the data is Mass Spec
-            dsfiles_not_in_job = dsfiles_not_in_job.filter(mzmlfile__isnull=False)
-        for fn_notjob in dsfiles_not_in_job:
-            # check if a newer version of this file exists (e.g. mzml/refined)
-            # which is instead specified in the job:
-            # if fn_notjob is newer than its corresponding other file in infiles
-            if fn_notjob.rawfile.storedfile_set.filter(deleted=False, pk__in=kwargs['infiles'].keys(),
-                    regdate__lt=fn_notjob.regdate).count():
-                # Including new files leads to problems with e.g. fraction regex
-                # if they are somehow not matching 
-                raise RuntimeError('Could not rerun job, there are files added to '
-                    'a dataset, please edit the analysis so it is still correct, '
-                    'save, and re-queue the job')
-
-        # Now remove obsolete deleted-from-dataset files from job (e.g. corrupt, empty, etc)
-        obsolete = sflocs_passed.exclude(sfile__rawfile__datasetrawfile__dataset__datasetanalysis__in=dsa).values('sfile_id')
-        models.AnalysisDSInputFile.objects.filter(analysisset__analysis=analysis, sfile__in=obsolete).delete()
-        analysis.analysisfilevalue_set.filter(sfile__in=obsolete).delete()
-        rm.FileJob.objects.filter(job_id=job.pk, rawfile__storedfile__id__in=obsolete).delete()
-        for del_sf in obsolete:
-            # FIXME setnames/frac is specific
-            kwargs['setnames'].pop(str(del_sf['sfile_id']))
-            kwargs['infiles'].pop(str(del_sf['sfile_id']))
-        if obsolete.exists():
-            job.kwargs = kwargs
-            job = job.save()
-
         # token is unique per job run:
         analysis.nextflowsearch.token = f'nf-{uuid4()}'
         analysis.nextflowsearch.save()
@@ -409,31 +389,6 @@ class RunNextflowWorkflow(MultiDatasetJob):
         infiles = []
         # INPUTDEF is either False or [fn, set, fraction, etc]
         if inputdef_fields := run['components'].get('INPUTDEF', []):
-            lookupfields = set(models.INPUTDEF_LOOKUPS).intersection(inputdef_fields)
-            # Examples of querying lookupfields:
-            # infile['setname'] = kwargs['filesamples'].get(str(fn['sfile_id']), '')
-            # infile['channel'] = fn['sfile__rawfile__datasetrawfile__quantfilechannel__channel__channel__name']
-            for fn in sflocs_passed:
-                infile = {'path': os.path.join(sharemap[fn['servershare_id']], fn['path']),
-                        'fn': fn['sfile__filename']}
-                for specf in lookupfields:
-                    keys = models.INPUTDEF_LOOKUPS[specf]
-                    if keys[0]:
-                        val = kwargs[keys[0]]
-                        if keys[2] is not False:
-                            val = val.get(str(fn[keys[1]]), keys[2])
-                        else:
-                            # Fail on unspecified key in input
-                            # when inputdef stipulates no fallback
-                            val = val[str(fn[keys[1]])]
-                    else:
-                        val = fn[keys[1]]
-                    if keys[3]:
-                        val = val.get(keys[3])
-                    infile[specf] = val
-                # Dynamic fields
-                infile.update(kwargs['filefields'].get(str(fn['sfile_id']), {}))
-                infiles.append(infile)
             if type(inputdef_fields) == dict:
                 inputdef_fields_nofn = [k for k,v in inputdef_fields.items() if v != '__path']
                 pathfield = [k for k,v in inputdef_fields.items() if v == '__path'][0]
@@ -441,6 +396,8 @@ class RunNextflowWorkflow(MultiDatasetJob):
                 inputdef_fields_nofn = inputdef_fields[1:]
                 pathfield = inputdef_fields[0]
             run['components']['INPUTDEF'] = [pathfield, *inputdef_fields_nofn]
+            infiles = populate_inputfiles(analysis, sflocs_passed, inputdef_fields_nofn,
+                    {'platenames': kwargs['platenames']}, sharemap)
 
         # COMPLEMENT/RERUN component:
         # Add base analysis stuff if it is complement (if not it has only been used
@@ -455,9 +412,9 @@ class RunNextflowWorkflow(MultiDatasetJob):
             # SELECT prefrac with fraction regex to get fractionated datasets in old analysis
             # rerun/complement runs with fractionated base analysis, will get passed with param
             # defined in that component value JSON (e.g. {'param': '--oldfiles'})
-            old_infiles, old_dsets = recurse_nrdsets_baseanalysis(ana_baserec)
+            old_infiles, _ = recurse_nrdsets_baseanalysis(ana_baserec, inputdef_fields_nofn)
             run['old_infiles'] = [f'{x["fn"]}\t{"\t".join([x[key] for key in inputdef_fields_nofn])}'
-                    for setmzmls in old_infiles.values() for x in setmzmls]
+                    for x in old_infiles.values()]
             if not ana_baserec.rerun_from_psms:
                 # Only mzmldef input if not doing a rerun
                 run['infiles'] = infiles

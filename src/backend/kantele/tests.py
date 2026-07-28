@@ -120,6 +120,8 @@ class BaseTest(TestCase):
         qdt, _ = dm.Datatype.objects.get_or_create(name='Quantitative proteomics')
         self.ptype = dm.ProjectTypeName.objects.create(name='testpt')
         self.pi = dm.PrincipalInvestigator.objects.create(name='testpi')
+        self.prefrac = dm.Prefractionation.objects.create(name='prefractest')
+        self.hirief = dm.HiriefRange.objects.create(start=3, end=10)
 
         # File prep, producers etc
         self.ft = rm.StoredFileType.objects.create(name='testft_bruker', filetype='tst',
@@ -170,6 +172,11 @@ class BaseTest(TestCase):
                 projsample=self.projsam1)
         dm.QuantDataset.objects.create(dataset=self.ds, quanttype=self.qt)
         dm.DatasetSample.objects.create(dataset=self.ds, projsample=self.projsam1)
+
+        self.pfd = dm.PrefractionationDataset.objects.create(dataset=self.ds,
+                prefractionation=self.prefrac)
+        dm.HiriefDataset.objects.create(pfdataset=self.pfd, hirief=self.hirief)
+
 
         # Pwiz/mzml
         self.pset = am.ParameterSet.objects.create(name='pset_base')

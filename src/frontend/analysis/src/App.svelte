@@ -191,6 +191,7 @@ async function storeAnalysis() {
     dssetnames: Object.fromEntries(Object.entries(dsets)
       .filter(([x,ds]) => ds.allfilessamesample)
       .map(([dsid, ds]) => [dsid, ds.setname])),
+    // infiles contain fractions, or ''
     infiles: Object.fromEntries(Object.values(dsets)
       .flatMap(ds => ds.ft_files[ds.picked_ftype]
         .map(fn => [fn.id, {fr: fn.fr}]))),
@@ -201,6 +202,8 @@ async function storeAnalysis() {
       .flat()),
     picked_ftypes: Object.fromEntries(Object.entries(dsets)
       .map(([dsid, ds]) => [dsid, ds.picked_ftype])),
+    // Not passing this through fnfields, since this is more compact
+    // and we need to save dset fields for UI anyway:
     dsetfields: Object.fromEntries(Object.entries(dsets)
       .map(([dsid, ds]) => [dsid, ds.fields])),
     singlefiles: fns,
@@ -963,10 +966,10 @@ onMount(async() => {
         {/if}
         {#if wf && ds.prefrac && 'PREFRAC' in wf.components}
         <div class="field">
-					<label class="label">Regex for fraction detection</label>
+          <label class="label">Regex for fraction detection</label>
           <input type="text" class="input" on:change={e => matchFractions(ds)} bind:value={ds.fields.__regex}>
-				</div>
-				<span>{matchedFr[ds.id]} fractions matched</span>
+        </div>
+        <span>{matchedFr[ds.id]} fractions matched</span>
         {/if}
 
         {#if ds.allfilessamesample && field_order.filter(x => !x.startsWith('__')).length}
@@ -976,10 +979,10 @@ onMount(async() => {
         <div class="field">
           <label class="label"><code>{field}</code></label>
           <input type="text" class="input" bind:value={ds.fields[field]}>
-				</div>
+        </div>
         {/each}
         {/if}
-			</div>
+      </div>
 
 			<div class="column">
         <div class="field">
@@ -1025,7 +1028,7 @@ onMount(async() => {
           <td>
             <div class="field">
               <input type="text" class="input" bind:value={fn.fields[field]}>
-				    </div>
+            </div>
           </td>
           {/each}
         </tr>
