@@ -488,16 +488,12 @@ class AnalysisDatasetSetname(models.Model):
     dsanalysis = models.ForeignKey(DatasetAnalysis, on_delete=models.CASCADE)
     setname = models.ForeignKey(AnalysisSetname, on_delete=models.CASCADE, null=True)
 
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['setname', 'dsanalysis'], name='uni_dsana_setname')]
 
-class AnalysisDatasetSetValue(models.Model):
-    '''Values and setnames mapping to datasets for the UI, connect to dsanalysis and setname in case
-    either a dataset or a full set gets deleted from the analysis'''
-    # Note that datasets can be deleted (in theory), or have their file contents changed
-    # That means you cant go through "here -> ds -> files" for future bookkeeping of what 
-    # was in the analysis infiles. For that, you should combine it with using the below
-    # AnalysisFileValue model and AnalysisDSInputFile.
-    # This model is for the UI values storing
-    dsanalysis = models.ForeignKey(DatasetAnalysis, on_delete=models.CASCADE)
+
+class AnalysisSetValue(models.Model):
+    '''Values and setnames mapping for the UI'''
     setname = models.ForeignKey(AnalysisSetname, on_delete=models.CASCADE, null=True)
     field = models.TextField()
     value = models.TextField()

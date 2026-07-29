@@ -174,12 +174,12 @@ class AnalysisPageTest(BaseIntegrationTest):
                 sfile=self.anasfile2)
 
         self.anaset = am.AnalysisSetname.objects.create(analysis=self.ana, setname='set1')
-        am.AnalysisDatasetSetname.objects.create(dsanalysis=self.dsa, setname=self.anaset)
+        self.testds = am.AnalysisDatasetSetname.objects.create(dsanalysis=self.dsa, setname=self.anaset)
         self.adsif = am.AnalysisDSInputFile.objects.create(sfile=self.f3sfmz, dsanalysis=self.dsa)
-        self.ads1 = am.AnalysisDatasetSetValue.objects.create(dsanalysis=self.dsa,
-                setname=self.anaset, field='__regex', value='hej')
-        self.ads2 = am.AnalysisDatasetSetValue.objects.create(dsanalysis=self.dsa,
-                setname=self.anaset, field='fakeds', value='hejhejdssv')
+        self.ads1 = am.AnalysisDatasetSetValue.objects.create(setname=self.anaset,
+                field='__regex', value='hej')
+        self.ads2 = am.AnalysisDatasetSetValue.objects.create(setname=self.anaset, 
+                field='fakeds', value='hejhejdssv')
         # cannot have file values AND dsfield values, base analysis loading will kick dsfields out
         self.isoqvals = {'denoms': {self.qch.pk: True}, 'sweep': False, 'report_intensity': False, 'remove': {}}
         am.AnalysisIsoquant.objects.create(analysis=self.ana, setname=self.anaset,
@@ -833,10 +833,10 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.assertEqual(resp.status_code, 200)
         ana = am.Analysis.objects.last()
         self.assertEqual(ana.analysissampletable.samples,  [['126', 'setA', 'samplename', 'groupname']])
-        regexes = {x.dsanalysis.dataset_id: x.value for x in am.AnalysisDatasetSetValue.objects.filter(
-            dsanalysis__analysis=ana, field='__regex')}
-        fakevals = {x.dsanalysis.dataset_id: x.value for x in am.AnalysisDatasetSetValue.objects.filter(
-            dsanalysis__analysis=ana, field='fakeds')}
+        regexes = {x['setname__analysisdatasetsetname__dsanalysis__dataset_id']: x['value'] for x in am.AnalysisDatasetSetValue.objects.filter(
+            setname__analysis=ana, field='__regex').values('setname__analysisdatasetsetname__dsanalysis__dataset_id', 'value')}
+        fakevals = {x['setname__analysisdatasetsetname__dsanalysis__dataset_id']: x['value'] for x in am.AnalysisDatasetSetValue.objects.filter(
+            setname__analysis=ana, field='fakeds').values('setname__analysisdatasetsetname__dsanalysis__dataset_id', 'value')}
         for adsif in am.AnalysisDSInputFile.objects.filter(dsanalysis__analysis=ana):
             self.assertEqual(adsif.dsanalysis.dataset_id, self.ds.pk)
             self.assertEqual(regexes[adsif.dsanalysis.dataset_id], postdata['dsetfields'][f'{self.ds.pk}']['__regex'])
@@ -1010,8 +1010,8 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
         self.ana.refresh_from_db()
         self.assertEqual(self.ana.analysissampletable.samples, 
                 [[self.qch.name, 'setA', 'samplename', 'groupname']])
-        regexes = {x.dsanalysis.dataset_id: x.value for x in am.AnalysisDatasetSetValue.objects.filter(
-            dsanalysis__analysis=self.ana, field='__regex')}
+        regexes = {x['setname__analysisdatasetsetname__dsanalysis__dataset_id']: x['value'] for x in am.AnalysisDatasetSetValue.objects.filter(
+            setname__analysis=self.ana, field='__regex').values('setname__analysisdatasetsetname__dsanalysis__dataset_id', 'value')}
         for adsif in am.AnalysisDSInputFile.objects.filter(dsanalysis__analysis=self.ana):
             self.assertEqual(adsif.dsanalysis.dataset_id, self.ds.pk)
             self.assertEqual(regexes[adsif.dsanalysis.dataset_id], postdata['dsetfields'][self.ds.pk]['__regex'])
