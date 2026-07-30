@@ -1119,8 +1119,8 @@ def store_analysis(request):
     sfid_dsid_map, adsinfiles = {}, {}
     for dsid in dsets.keys():
         for sf in dsfiles[dsid]:
-            adsinf, _ = am.AnalysisDSInputFile.objects.get_or_create(sfile=sf,
-                    dsanalysis_id=dsa_map[dsid])
+            adsinf, _ = am.AnalysisDSInputFile.objects.filter(dsanalysis__analysis=analysis
+                    ).update_or_create(sfile=sf, defaults={'dsanalysis_id': dsa_map[dsid]})
             sfid_dsid_map[sf.pk] = dsid
             adsinfiles[sf.pk] = adsinf.pk
     
