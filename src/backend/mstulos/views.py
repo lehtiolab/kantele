@@ -162,7 +162,7 @@ def init_store_experiment(request):
         c_setn = m.Condition.objects.create(name=asn.setname,
                 cond_type=m.Condition.Condtype['SAMPLESET'], experiment=exp)
         sampleset = {'set_id': c_setn.pk, 'files': {}}
-        regex_db = asn.analysisdatasetsetvalue_set.filter(field='__regex')
+        regex_db = asn.analysissetvalue_set.filter(field='__regex')
         regex = regex_db.get().value if regex_db.exists() else False
         for dsf in asn.analysisdsinputfile_set.all():
             c_fn = m.Condition.objects.create(name=dsf.sfile.filename,

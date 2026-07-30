@@ -170,7 +170,7 @@ def load_base_analysis(request, wfversion_id, baseanid):
     # Only overlapping datasets are fetched here (empty dsets are popped at the end)
     dsets = {x: defaultdict(dict) for x in new_ana_dsids}
     analysis_dsfiles = defaultdict(set)
-    for ads in am.AnalysisDatasetSetValue.objects.filter(setname__analysis=ana,
+    for ads in am.AnalysisSetValue.objects.filter(setname__analysis=ana,
             setname__analysisdatasetsetname__dsanalysis__dataset_id__in=new_ana_dsids,
             ).values('field', 'value', 'setname__analysisdatasetsetname__dsanalysis__dataset_id',
             'setname__setname'):
@@ -527,12 +527,12 @@ def get_datasets(request, wfversion_id):
             analysis_dsfiles.update({x.sfile_id for x in am.AnalysisDSInputFile.objects.filter(
                 dsanalysis__analysis_id=anid, dsanalysis__dataset=dset)})
             # PREFRAC component:
-            if adsvs := am.AnalysisDatasetSetValue.objects.filter(setname__analysis_id=anid,
+            if adsvs := am.AnalysisSetValue.objects.filter(setname__analysis_id=anid,
                     setname__analysisdatasetsetname__dsanalysis__dataset=dset, field='__regex'):
                 frregex = adsvs.values('value').get()['value']
             # Fill any dataset-wide fields from DB where records existing
             fields.update({x.field: x.value for x in
-                am.AnalysisDatasetSetValue.objects.filter(setname__analysis_id=anid,
+                am.AnalysisSetValue.objects.filter(setname__analysis_id=anid,
                     setname__analysisdatasetsetname__dsanalysis__dataset=dset)})
 
         # Get dataset files, dsrawfiles can include duplicates as it joins on storedfileloc
@@ -1098,7 +1098,7 @@ def store_analysis(request):
         am.AnalysisDatasetSetname.objects.create(dsanalysis_id=dsa_map[dsid],
                 setname_id=setname_ids[setname])
         for fieldname, value in req['dsetfields'][str_dsid].items():
-            ads, created = am.AnalysisDatasetSetValue.objects.update_or_create(
+            ads, created = am.AnalysisSetValue.objects.update_or_create(
                     defaults={'setname_id': setname_ids[setname], 'value': value},
                     field=fieldname)
             new_ads[ads.pk] = created
@@ -1112,7 +1112,7 @@ def store_analysis(request):
                 data_args['platenames'][dsid] = strip
             else:
                 data_args['platenames'][dsid] = pfd.prefractionation.name
-    am.AnalysisDatasetSetValue.objects.filter(setname__analysis=analysis).exclude(pk__in=new_ads).delete()
+    am.AnalysisSetValue.objects.filter(setname__analysis=analysis).exclude(pk__in=new_ads).delete()
 
     # Map all files in analysis
     am.AnalysisDSInputFile.objects.filter(dsanalysis__analysis=analysis).exclude(sfile_id__in=req['infiles']).delete()
@@ -1203,7 +1203,7 @@ def store_analysis(request):
         else:
             sampletables = {}
         shadow_dss = {}
-        for x in am.AnalysisDatasetSetValue.objects.filter(setname__analysis=base_ana).values(
+        for x in am.AnalysisSetValue.objects.filter(setname__analysis=base_ana).values(
                 'setname__analysisdatasetsetname__dsanalysis__dataset_id', 'field', 'value', 'setname__setname'):
             try:
                 shadow_dss[x['setname__analysisdatasetsetname__dsanalysis__dataset_id']]['fields'][x['field']] = x['value']
