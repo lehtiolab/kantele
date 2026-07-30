@@ -280,7 +280,6 @@ def populate_files(dbfns):
             'rawfile__datasetrawfile__dataset'):
         currentjobs = filemodels.FileJob.objects.filter(rawfile=fn['rawfile_id']).exclude(
                 job__state__in=jj.JOBSTATES_DONE).values('job_id', 'job__state')
-        ana_afv = anmodels.Analysis.objects.filter(analysisfilevalue__sfile_id=fn['pk'])
         ana_adsi = anmodels.Analysis.objects.filter(
                 datasetanalysis__analysisdsinputfile__sfile_id=fn['pk'])
         it = {'id': fn['pk'],
@@ -288,7 +287,7 @@ def populate_files(dbfns):
               'date': datetime.strftime(fn['rawfile__date'], '%Y-%m-%d %H:%M'),
               'size': getxbytes(fn['rawfile__size']) if fn['mzmlfile'] is None else '-',
               'ftype': fn['filetype__name'],
-              'analyses': [x['pk'] for x in ana_afv.union(ana_adsi).values('pk')],
+              'analyses': [x['pk'] for x in ana_adsi.values('pk')],
               'dataset': [],
               'jobstate': [x['job__state'] for x in currentjobs],
               'job_ids': [x['job_id'] for x in currentjobs],
@@ -504,11 +503,10 @@ def populate_analysis(analyses, user):
         nfsearch = Throwaway({'workflow': wf})
         ananame = Throwaway({'name': ana['name'], 'nextflowsearch': nfsearch})
         if ana['nextflowsearch__job_id']:
-            adsi = filemodels.StoredFile.objects.filter(analysisdsinputfile__dsanalysis__analysis_id=ana['pk'])
-            afv = filemodels.StoredFile.objects.filter(analysisfilevalue__analysis_id=ana['pk'])
-            infns = afv.union(adsi).values('pk', 'rawfile_id')
-            infn_ds = dsmodels.Dataset.objects.filter(datasetrawfile__rawfile__in=[x['rawfile_id']
-                for x in infns]).distinct('pk').values('pk')
+            infns = filemodels.StoredFile.objects.filter(
+                    analysisdsinputfile__dsanalysis__analysis_id=ana['pk']).values('pk')
+            inds = dsmodels.Dataset.objects.filter(datasetanalysis__analysis_id=ana['pk']
+                    ).values('pk')
             outfns = filemodels.StoredFile.objects.filter(analysisresultfile__analysis_id=ana['pk']
                     ).values('pk')
             nfs = {'name': anmodels.Analysis.get_fullname(ananame),
@@ -519,7 +517,7 @@ def populate_analysis(analyses, user):
                     }
         else:
             nfs = {'jobid': False, 'fn_ids': False, 'dset_ids': False, 'wflink': False}
-            infn_ds, infns, outfns = [], [], []
+            inds, infns, outfns = [], [], []
         tulosq = mm.Experiment.objects.filter(analysis_id=ana['pk'])
         if tulosq.exists():
             tulos_empty = {f'{x}': [] for x in tulos_keys}
@@ -540,7 +538,7 @@ def populate_analysis(analyses, user):
             'date': datetime.strftime(ana['date'], '%Y-%m-%d'),
             'deleted': ana['deleted'],
             'purged': ana['purged'],
-            'dset_ids': [x['pk'] for x in infn_ds],
+            'dset_ids': [x['pk'] for x in inds],
             'fn_ids':  [x['pk'] for x in infns],
             'outfiles': [x['pk'] for x in outfns],
             'mstulosq': tulos_filt,
@@ -724,8 +722,9 @@ def get_analysis_invocation(ana):
 
     iqparams = []
     for aiq in anmodels.AnalysisIsoquant.objects.select_related('setname').filter(analysis=ana):
-        set_dsas = aiq.setname.analysisdsinputfile_set.distinct('dsanalysis').values('dsanalysis')
-        qtypename = set_dsas.values('dsanalysis__dataset__quantdataset__quanttype__shortname').distinct().get()['dsanalysis__dataset__quantdataset__quanttype__shortname']
+        set_dsas = aiq.setname.analysisdatasetsetname_set.distinct('dsanalysis')
+        qtypename = set_dsas.values('dsanalysis__dataset__quantdataset__quanttype__shortname'
+                ).distinct().get()['dsanalysis__dataset__quantdataset__quanttype__shortname']
         if aiq.value['sweep']:
             calc_psm = 'sweep'
         elif aiq.value['report_intensity']:
@@ -778,14 +777,13 @@ def get_analysis_info(request, anid):
             }
     else:
         nfs_info = {'name': ana.name, 'addToResults': False, 'wf': False}
-    dsicount = anmodels.AnalysisDSInputFile.objects.filter(analysisset__analysis=ana).count()
-    afscount = ana.analysisfilevalue_set.count()
+    dsicount = anmodels.AnalysisDSInputFile.objects.filter(dsanalysis__analysis=ana).count()
     storeloc = filemodels.StoredFileLoc.objects.filter(sfile__analysisresultfile__analysis=ana
             ).values('servershare__name', 'path')
     linkedfiles = [(x.id, x.sfile.filename) for x in av.get_servable_files(
         ana.analysisresultfile_set.select_related('sfile'))]
     resp = {'nrdsets': len(dsets),
-            'nrfiles': dsicount + afscount,
+            'nrfiles': dsicount,
             'storage_locs': [{'share': x['servershare__name'], 'path': x['path']} for x in storeloc],
             'log': logentry, 
             'base_analysis': {'nfsid': False, 'name': False},
