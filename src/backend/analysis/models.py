@@ -486,7 +486,7 @@ class DatasetAnalysis(models.Model):
 
 class AnalysisDatasetSetname(models.Model):
     dsanalysis = models.ForeignKey(DatasetAnalysis, on_delete=models.CASCADE)
-    setname = models.ForeignKey(AnalysisSetname, on_delete=models.CASCADE, null=True)
+    setname = models.ForeignKey(AnalysisSetname, on_delete=models.CASCADE)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['setname', 'dsanalysis'], name='uni_dsana_setname')]
@@ -494,7 +494,7 @@ class AnalysisDatasetSetname(models.Model):
 
 class AnalysisSetValue(models.Model):
     '''Values and setnames mapping for the UI'''
-    setname = models.ForeignKey(AnalysisSetname, on_delete=models.CASCADE, null=True)
+    setname = models.ForeignKey(AnalysisSetname, on_delete=models.CASCADE)
     field = models.TextField()
     value = models.TextField()
 
