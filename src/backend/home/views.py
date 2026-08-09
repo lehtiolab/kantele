@@ -496,6 +496,7 @@ def populate_analysis(analyses, user):
     tulos_keys = ['peptides', 'proteins', 'genes', 'experiments']
     for ana in analyses.values('pk', 'name', 'user_id', 'user__username', 'date',
             'deleted', 'purged', 'editable', 'nextflowsearch__job_id', 'nextflowsearch__job__state',
+            'nextflowsearch__job__kwargs__anaserverprofile_id',
             'nextflowsearch__workflow__wftype', 'nextflowsearch__workflow__name',
             'nextflowsearch__nfwfversionparamset__nfworkflow__repo',
             'nextflowsearch__nfwfversionparamset__update'):
@@ -529,11 +530,18 @@ def populate_analysis(analyses, user):
                 ).encode('utf-8')).decode('utf-8')]
         else:
             tulos_filt = False
+
+        if ana['nextflowsearch__job__kwargs__anaserverprofile_id']:
+            server = filemodels.AnalysisServerProfile.objects.values('name').filter(
+                    pk=ana['nextflowsearch__job__kwargs__anaserverprofile_id'])
+        else:
+            server = False
             
         ana_out[ana['pk']] = {
             'id': ana['pk'],
             'own': ana['user_id'] == user.id,
             'usr': ana['user__username'],
+            'server': server.get()['name'] if server else '',
             'name': nfs.get('name', ana['name']),
             'date': datetime.strftime(ana['date'], '%Y-%m-%d'),
             'deleted': ana['deleted'],

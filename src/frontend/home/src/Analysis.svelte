@@ -23,6 +23,7 @@ const tablefields = [
   {id: 'wf', name: 'Workflow', type: 'str', multi: false, links: 'wflink', linkroute: false},
   {id: 'usr', name: 'Users', type: 'str', multi: false},
   {id: 'date', name: 'Date', type: 'str', multi: false},
+  {id: 'server', name: 'Server', type: 'str', multi: false},
   {id: 'actions', name: 'Actions', type: 'button', multi: true},
 ];
 
