@@ -1289,14 +1289,21 @@ def store_analysis(request):
         jobinputs['params'] = [x for nf, vals in jobparams.items() for x in [nf, ';'.join([str(v) for v in vals])] if x]
         kwargs = {'analysis_id': analysis.id, 'wfv_id': req['nfwfvid'], 'inputs': jobinputs,
                 **data_args}
-        if req['analysis_id'] and hasattr(analysis, 'nextflowsearch'):
+        if existing_job := jm.Job.objects.filter(nextflowsearch__analysis=analysis):
+            # Job already exists, check if we need to recreate it or 
+            # only update it 
             jwrap = jobmap[fname](False)
-            for extrajob in jwrap.on_create_prep_rsync_jobs(**kwargs):
-                create_job(extrajob['name'], **extrajob['kwargs'])
-            jobq = jm.Job.objects.filter(nextflowsearch__analysis=analysis)
-            jobq.update(kwargs=kwargs, state=jj.Jobstates.WAITING)
-            jobid = jobq.values('pk').get()['pk']
+            if len(jwrap.on_create_prep_rsync_jobs(**kwargs)):
+                # new rsync jobs will be made, so we should recreate 
+                # this job, so those will be queued before the analysis job
+                # which would error otherwise
+                existing_job.delete()
+                jobid = create_job(fname, state=jj.Jobstates.WAITING, **kwargs)['id']
+            else:
+                existing_job.update(kwargs=kwargs, state=jj.Jobstates.WAITING)
+                jobid = existing_job.values('pk').get()['pk']
         else:
+            # no old job
             jobid = create_job(fname, state=jj.Jobstates.WAITING, **kwargs)['id']
         am.NextflowSearch.objects.update_or_create(defaults={'nfwfversionparamset_id': req['nfwfvid'], 'job_id': jobid, 'workflow_id': req['wfid'], 'token': ''}, analysis=analysis)
     analysis.base_rundir = analysis.get_run_base_dir()

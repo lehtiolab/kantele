@@ -1029,7 +1029,8 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
         fullname = f'{self.ana.pk}_{self.wftype.name}_{self.ana.name}_{timestamp}'
         # This test flakes if executed right at midnight due to timestamp in assert string
         self.assertEqual(self.ana.base_rundir, fullname.replace(' ', '_'))
-        self.anajob.refresh_from_db()
+        self.anajob = jm.Job.objects.filter(funcname='run_nf_search_workflow',
+                kwargs__anaserverprofile_id=self.anaprofile2.pk).get()
         c_ch = am.PsetComponent.ComponentChoices
         self.maxDiff = 50000
         job_check_kwargs = {'analysis_id': self.ana.pk,
