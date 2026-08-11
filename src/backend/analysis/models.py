@@ -241,32 +241,31 @@ class PipelineVersionOutput(models.Model):
     output = models.ForeignKey(WfOutput, on_delete=models.CASCADE)
 
 
-# TODO not sure if this is correct place (jobs maybe), but it is certainly not settings/config
-# Inputdef special field lookup, used in analysis.jobs, these fields will not show in UI
+# Not sure if this is correct place (jobs maybe), but it is certainly not settings/config
+# Three inputdef special field lookups, used in analysis.jobs, these fields will not show in UI
+
 # Also first in list of [inputdef_fields] is assumed the path to the file, and if the spec is
 # as a dict, any field with a value '__...' will be excluded from the UI too. Those need
 # to be handled, e.g. __file_path.
-# This is here to exclude from analysis UI (and not in jobs) to handle list-type inputdef 
-# in psetcomponent. Dict-type could be handled by just removing values with 2xunderscore,e.g
-# setname: __setname, instrument: __instrument, or something like that
-# Lookup works like this, for each field key, a tuple:
-# (kwargskey, fnkey or sfile-for-kwargs-values-key, fallback, third get (fractions)
+# INPUTDEF_LOOKUPS is here to handle values saved under a different name, e.g. setname: __sample
 INPUTDEF_LOOKUPS = {
-        # dda, pgt id, etc
-        'setname': ('filesamples', 'sfile_id', '', False),
-        'instrument': (False, 'sfile__rawfile__producer__msinstrument__instrumenttype__name', False, False),
-        'plate': ('platenames', 'sfile__rawfile__datasetrawfile__dataset_id', '', False),
-        'fraction': ('infiles', 'sfile_id', {}, 'fr'),
-        # pgt dbgen
-        'sampleID': ('filesamples', 'sfile_id', False, False),
-        # spectronaut
-        'condition': ('filesamples', 'sfile_id', False, False),
-        # labelcheck non-pooled
-        'channel': (False, 'sfile__rawfile__datasetrawfile__quantfilechannel__channel__channel__name', False, False),
+        'condition': '__sample',
+        'sampleID': '__sample',
+        'setname': '__sample',
+        'fraction': '__fraction',
+}
+
+# INPUTDEF_DSETFIELDS is for stuff passed per dataset
+INPUTDEF_DSETFIELDS = {
+        'plate': ('platenames', 'sfile__rawfile__datasetrawfile__dataset_id')
         }
 
-# TODO think about if inputdef should be own model. Currently only it and prefrac have
-# a value (regex for prefrac)
+# INPUTDEF_DBFIELDS is for a per-file DB lookup
+INPUTDEF_DBFIELDS = {
+            'instrument': 'sfile__rawfile__producer__msinstrument__instrumenttype__name',
+            'channel': 'sfile__rawfile__datasetrawfile__quantfilechannel__channel__channel__name',
+            }
+
 
 class PsetComponent(models.Model):
     '''Special components for a parameter set. Components are such elements for a workflow
@@ -288,7 +287,8 @@ class PsetComponent(models.Model):
     pset = models.ForeignKey(ParameterSet, on_delete=models.CASCADE)
     component = models.IntegerField(choices=ComponentChoices.choices)
     value = models.JSONField(default=dict, help_text='''JSON, e.g. [path, instrument, set, plate] (path must be first),
-            {rawfile: __path, field_w_default: 1, file_type: "**function"}, empty_field: False}''')
+            {rawfile: __path, field_w_default: 1, file_type: "**function"}, empty_field: False},
+            {param: --oldmzmldef}, etc ''')
     # else {}
     # FIXME future also setnames, sampletables, fractions, etc which is not a param
     # to be included in parameterset
@@ -470,9 +470,12 @@ class AnalysisSetname(models.Model):
 
 
 class DatasetAnalysis(models.Model):
+    '''Mapping datasets to analysis. When re-saving the obsolete rows of datasets (if removed from analysis)
+    are deleted. This cascades to their linked models ana-ds-set, ana-ds-value, ana-ds-infile,
+    ana-file-value, '''
     analysis = models.ForeignKey(Analysis, on_delete=models.CASCADE)
     dataset = models.ForeignKey(dsmodels.Dataset, on_delete=models.CASCADE)
-    # cannot put setname here because of searches without dset/setname
+    # (cannot put setname here because of searches without dset/setname)
     # model used in reporting, and also for finding datasets for base analysis etc
     # and in mstulos for coupling dset/analysis, and for external analyses ("just dataset", 
     # no input files etc are stored)
@@ -481,47 +484,47 @@ class DatasetAnalysis(models.Model):
         constraints = [models.UniqueConstraint(fields=['analysis', 'dataset'], name='uni_dsa_anadsets')]
 
 
-class AnalysisDatasetSetValue(models.Model):
-    '''Dataset mapping to setnames (multiple dataset can have the same setname)'''
-    # Note that datasets can be deleted, or have their file contents changed
-    # That means this is not to be trusted for future bookkeeping of what was in the analysis
-    # For that, you should combine it with using the below AnalysisDSInputFile model
-    analysis = models.ForeignKey(Analysis, on_delete=models.CASCADE)
-    dataset = models.ForeignKey(dsmodels.Dataset, on_delete=models.CASCADE)
-    setname = models.ForeignKey(AnalysisSetname, on_delete=models.CASCADE, null=True)
+class AnalysisDatasetSetname(models.Model):
+    dsanalysis = models.ForeignKey(DatasetAnalysis, on_delete=models.CASCADE)
+    setname = models.ForeignKey(AnalysisSetname, on_delete=models.CASCADE)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['setname', 'dsanalysis'], name='uni_dsana_setname')]
+
+
+class AnalysisSetValue(models.Model):
+    '''Values and setnames mapping for the UI'''
+    setname = models.ForeignKey(AnalysisSetname, on_delete=models.CASCADE)
     field = models.TextField()
     value = models.TextField()
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=['analysis', 'dataset', 'field'], name='uni_anadsetsfields')]
+        constraints = [models.UniqueConstraint(fields=['setname', 'field'], name='uni_anasetfields')]
 
 
 class AnalysisDSInputFile(models.Model):
+    # Mapping files to dataset/analysis, to make sure they are displayed correctly
+    # Cannot solely rely on AnalysisFileValue in case there are no values
     '''Input files for set-based analysis (isobaric and prefraction-datasets)'''
     dsanalysis = models.ForeignKey(DatasetAnalysis, on_delete=models.CASCADE)
     sfile = models.ForeignKey(filemodels.StoredFile, on_delete=models.CASCADE)
-    analysisset = models.ForeignKey(AnalysisSetname, on_delete=models.CASCADE)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=['analysisset', 'sfile'], name='uni_anaset_infile')]
+        constraints = [models.UniqueConstraint(fields=['dsanalysis', 'sfile'], name='uni_dsana_infile')]
 
 
 class AnalysisFileValue(models.Model):
     '''If one sample per file is used in labelfree analyses, the samples are stored
     here'''
-    # this assumes at least one entry of this model per file/analysis
-    # (for non-set data), so samplename is a field. This is the only mapping of
-    # file/analysis we have currently for non-set data. If there's ever need
-    # of mapping files WITHOUT field/value for an analysis, we can break out
-    # to an extra model, alternatively null the fields
-
-    analysis = models.ForeignKey(Analysis, on_delete=models.CASCADE)
+    # We dont strictly need to map file/dataset? Dataset content can change, so in that
+    # case there would be a record of why this file was included. But that should be in
+    # another model.
     field = models.TextField()
     value = models.TextField()
-    sfile = models.ForeignKey(filemodels.StoredFile, on_delete=models.CASCADE)
+    adsfile = models.ForeignKey(AnalysisDSInputFile, on_delete=models.CASCADE)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=['analysis', 'sfile', 'field'], name='uni_anassamplefile')]
+        constraints = [models.UniqueConstraint(fields=['adsfile', 'field'], name='uni_adsfile_fieldval')]
 
 
 class AnalysisIsoquant(models.Model):
@@ -546,6 +549,15 @@ class AnalysisFileParam(models.Model):
 
 
 class AnalysisBaseanalysis(models.Model):
+    '''Linking another analysis (base_analysis) to the current one. When used as only
+    getting parameter values etc (is_complement=False), we dont run the old analysis files
+    in the new analysis. But, when is_complement=True, old input files can be passed to
+    the workflow, so that it has that information. That is invoked using the COMPLEMENT_ANALYSIS
+    component.
+    In shadow_isoquants we save the isobaric quants for this base analysis, and all its
+    base analysis (chain), since a base analysis can have a base analysis itself.
+    shadow_dssetnames
+    '''
     analysis = models.OneToOneField(Analysis, on_delete=models.CASCADE, related_name='analysis')
     base_analysis = models.ForeignKey(Analysis, on_delete=models.CASCADE, related_name='base_analysis')
     is_complement = models.BooleanField(default=False)
@@ -554,3 +566,4 @@ class AnalysisBaseanalysis(models.Model):
     # then we have to get the base analysis' base analysis isoquant. Instead accumulate here in JSON
     shadow_isoquants = models.JSONField() # {setname: {ch: [sample, chid]} ...}
     shadow_dssetnames = models.JSONField() # {dsid: {setname: abc, regex: .*fr01} ...}
+    #shadow_filevalues = models.JSONField() # {fnid: {sample: abc, create_lib: 0, ...}, ... }

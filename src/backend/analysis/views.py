@@ -170,23 +170,28 @@ def load_base_analysis(request, wfversion_id, baseanid):
     # Only overlapping datasets are fetched here (empty dsets are popped at the end)
     dsets = {x: defaultdict(dict) for x in new_ana_dsids}
     analysis_dsfiles = defaultdict(set)
-    for ads in ana.analysisdatasetsetvalue_set.filter(dataset_id__in=new_ana_dsids):
-        dsets[ads.dataset_id]['fields'][ads.field] = ads.value
-        dsets[ads.dataset_id]['setname'] = ads.setname.setname
-        dsets[ads.dataset_id]['files'] = {}
-        analysis_dsfiles[ads.dataset_id] = {x.sfile_id for x in
-                am.AnalysisDSInputFile.objects.filter(analysisset=ads.setname,
-                    dsanalysis__dataset_id=ads.dataset_id)}
+    for ads in am.AnalysisSetValue.objects.filter(setname__analysis=ana,
+            setname__analysisdatasetsetname__dsanalysis__dataset_id__in=new_ana_dsids,
+            ).values('field', 'value', 'setname__analysisdatasetsetname__dsanalysis__dataset_id',
+            'setname__setname'):
+        dsets[ads['setname__analysisdatasetsetname__dsanalysis__dataset_id']]['fields'][ads['field']] = ads['value']
+        dsets[ads['setname__analysisdatasetsetname__dsanalysis__dataset_id']]['setname'] = ads['setname__setname']
+        dsets[ads['setname__analysisdatasetsetname__dsanalysis__dataset_id']]['files'] = {}
+        analysis_dsfiles[ads['setname__analysisdatasetsetname__dsanalysis__dataset_id']] = {
+                x['sfile_id'] for x in am.AnalysisDSInputFile.objects.filter(
+                dsanalysis__dataset_id=ads['setname__analysisdatasetsetname__dsanalysis__dataset_id']).values('sfile_id')
+                }
 
     for dsid in new_ana_dsids:
-        for fn in am.AnalysisFileValue.objects.filter(analysis=ana,
-                sfile__rawfile__datasetrawfile__dataset_id=dsid):
-            analysis_dsfiles[dsid].add(fn.sfile_id)
+        for fn in am.AnalysisFileValue.objects.filter(adsfile__dsanalysis__analysis_id=ana,
+                adsfile__dsanalysis__dataset_id=dsid).values('adsfile__sfile_id', 'value', 'field'):
+            analysis_dsfiles[dsid].add(fn['adsfile__sfile_id'])
             # FIXME files should maybe be called filesamples -> less confusion
             try:
-                dsets[dsid]['files'][fn.sfile_id]['fields'][fn.field] = fn.value
+                dsets[dsid]['files'][fn['adsfile__sfile_id']]['fields'][fn['field']] = fn['value']
             except KeyError:
-                dsets[dsid]['files'][fn.sfile_id] = {'id': fn.sfile_id, 'fields': {fn.field: fn.value}}
+                dsets[dsid]['files'][fn['adsfile__sfile_id']] = {'id': fn['adsfile__sfile_id'],
+                        'fields': {fn['field']: fn['value']}}
                 dsets[dsid]['fields'] = {}
         if 'files' in dsets[dsid]:
             # Must check if dset is actually in the overlap before setting allfilessamesample, else it errors
@@ -239,6 +244,7 @@ def load_base_analysis(request, wfversion_id, baseanid):
         'ana': ana.get_fullname(),
         'date': datetime.strftime(ana.date, '%Y-%m-%d')}
         for x in ana.analysisresultfile_set.exclude(sfile__pk__in=already_loaded_files)]
+    # FIXME load shadow filevalues
     return JsonResponse({'base_analysis': analysis, 'datasets': dsets, 'resultfiles': base_resfiles})
 
 
@@ -481,14 +487,18 @@ def get_datasets(request, wfversion_id):
         fields = {x: '' for x in inputcomps[1:]}
     # Not have special fields from lookup, e.g. fraction cannot be speced for a dataset
     # and they are not store in analysisfilevalue
-    fields = {k: v for k,v in fields.items() if not k in am.INPUTDEF_LOOKUPS}
+    not_ui_fields = [*am.INPUTDEF_LOOKUPS.keys(), *am.INPUTDEF_DBFIELDS.keys(), *am.INPUTDEF_DSETFIELDS.keys()]
+    fields = {k: v for k,v in fields.items() if not k in not_ui_fields}
     field_order = [x for x in fields.keys()]
 
     # Get analysis filesamples for later use
     has_filesamples, analysis_dsfiles = defaultdict(dict), set()
     if anid:
-        for afv in am.AnalysisFileValue.objects.filter(analysis_id=anid):
-            has_filesamples[afv.sfile_id][afv.field] = afv.value
+        for afv in am.AnalysisFileValue.objects.filter(adsfile__dsanalysis__analysis_id=anid
+                ).values('adsfile__sfile_id', 'field', 'value'):
+            if afv['field'] == '__sample' or not afv['field'].startswith('__'):
+                # Take all fields, except __, but include __sample
+                has_filesamples[afv['adsfile__sfile_id']][afv['field']] = afv['value']
         analysis_dsfiles = {x for x in has_filesamples}
     
     # FIXME accumulate errors across data sets and show all, but do not report other stuff if error
@@ -502,8 +512,8 @@ def get_datasets(request, wfversion_id):
         prefrac, hrrange_id = get_dset_prefrac_hiriefrange(dset)
         if 'PREFRAC' in wfcomponents and prefrac:
             prefracname = str(prefrac.name)
-            if 'hirief' in prefrac.name.lower():
-                hr = f'HiRIEF {str(dset.prefractionationdataset.hiriefdataset.hirief)}'
+            if hrrange_id:
+                hr = f'HiRIEF {dset.prefractionationdataset.hiriefdataset.hirief}'
             frregex = wfcomponents['PREFRAC']
         tag = format_dset_tag(qpid, dset.runname.experiment.project, dset.runname.experiment,
                 dset, dset.datatype, prefrac, hrrange_id)
@@ -511,20 +521,19 @@ def get_datasets(request, wfversion_id):
         # Sample(set) names, adsv fields and previously used files
         setname = ''
         if anid:
-            if adsis := am.AnalysisDSInputFile.objects.filter(dsanalysis__analysis_id=anid,
-                    dsanalysis__dataset=dset):
-                anasetname = adsis.select_related('analysisset').first().analysisset
-                setname = anasetname.setname
-                analysis_dsfiles.update({x.sfile_id for x in adsis})
+            if ads := am.AnalysisDatasetSetname.objects.filter(dsanalysis__dataset=dset,
+                    dsanalysis__analysis_id=anid):
+                setname = ads.values('setname__setname').get()['setname__setname']
+            analysis_dsfiles.update({x.sfile_id for x in am.AnalysisDSInputFile.objects.filter(
+                dsanalysis__analysis_id=anid, dsanalysis__dataset=dset)})
             # PREFRAC component:
-            if adsvs := am.AnalysisDatasetSetValue.objects.filter(analysis_id=anid,
-                    dataset=dset, field='__regex'):
-                frregex = adsvs.get().value
-            # Fill any fields from DB where records existing
+            if adsvs := am.AnalysisSetValue.objects.filter(setname__analysis_id=anid,
+                    setname__analysisdatasetsetname__dsanalysis__dataset=dset, field='__regex'):
+                frregex = adsvs.values('value').get()['value']
+            # Fill any dataset-wide fields from DB where records existing
             fields.update({x.field: x.value for x in
-                am.AnalysisDatasetSetValue.objects.filter(analysis_id=anid,
-                    dataset=dset).exclude(field__startswith='__')})
-
+                am.AnalysisSetValue.objects.filter(setname__analysis_id=anid,
+                    setname__analysisdatasetsetname__dsanalysis__dataset=dset)})
 
         # Get dataset files, dsrawfiles can include duplicates as it joins on storedfileloc
         # table!
@@ -590,8 +599,9 @@ def get_datasets(request, wfversion_id):
                 else:
                     incomplete_files.append(ft)
 
+        files_fields = {k: v for k,v in fields.items() if k == '__sample' or not k.startswith('__')}
         resp_files = {x.id: {'ft_name': ft_name, 'id': x.id, 'name': x.filename, 'fr': '',
-            'dsetsample': '', 'fields': {'__sample': '', **fields}}
+            'dsetsample': '', 'fields': {'__sample': '', **files_fields}}
             for ft_name, dsf in usefiles.items() for x in dsf}
 
         # Fill channels with quant data
@@ -606,15 +616,16 @@ def get_datasets(request, wfversion_id):
             # Labelfree or other data type, add file/sample mapping
             channels = False
             for ft_name, dsfiles in usefiles.items():
-                for fn in dsfiles.filter(rawfile__datasetrawfile__quantsamplefile__isnull=False).select_related(
-                        'rawfile__datasetrawfile__quantsamplefile__projsample'):
-                    resp_files[fn.id]['dsetsample'] = fn.rawfile.datasetrawfile.quantsamplefile.projsample.sample
-                    if fn.id in has_filesamples:
-                        resp_files[fn.id]['fields'].update(has_filesamples[fn.id])
+                for fn in dsfiles.filter(rawfile__datasetrawfile__quantsamplefile__isnull=False
+                        ).values('rawfile__datasetrawfile__quantsamplefile__projsample__sample', 'pk'):
+                    resp_files[fn['pk']]['dsetsample'] = fn['rawfile__datasetrawfile__quantsamplefile__projsample__sample']
+                for fn in dsfiles.values('pk'):
+                    if fn['pk'] in has_filesamples:
+                        resp_files[fn['pk']]['fields'].update(has_filesamples[fn['pk']])
 
         # Files with samples (non-MS, IP, non-isobaric, etc)
         if anid and is_msdata:
-            allfilessamesample  = all((x['fields']['__sample'] == '' for x in resp_files.values()))
+            allfilessamesample = all((x['fields']['__sample'] == '' for x in resp_files.values()))
             [x['fields'].update({'__sample': x['dsetsample']}) for x in resp_files.values()
                     if not x['fields']['__sample']]
 
@@ -622,7 +633,7 @@ def get_datasets(request, wfversion_id):
             # sequencing data etcetera, always have sample-per-file since we dont
             # expect multiplexing or fractionation here
             # Add possible already stored analysis file samplenames
-            allfilessamesample= False
+            allfilessamesample = False
 
         else:
             # New analysis, set names for files can be there quantsamplefile values
@@ -876,9 +887,9 @@ def store_analysis(request):
             dsfiles[dsid] = {dsrawfiles.values('filetype__name').distinct().get()['filetype__name']: dsrawfiles}
         except rm.StoredFile.MultipleObjectsReturned:
             response_errors.append(f'Files of multiple datatypes exist in dataset {dsname}')
-            dsfiles[dsid] = {ds_pick_ftype:  dsrawfiles}
+            dsfiles[dsid] = {ds_pick_ftype: dsrawfiles}
         except rm.StoredFile.DoesNotExist:
-            dsfiles[dsid] = {ds_pick_ftype:  dsrawfiles}
+            dsfiles[dsid] = {ds_pick_ftype: dsrawfiles}
             response_errors.append(f'No stored files exist for dataset {dsname}')
         # MS data get mzML files 
         if dsrawfiles.filter(rawfile__producer__msinstrument__isnull=False).count():
@@ -1058,8 +1069,7 @@ def store_analysis(request):
         api_token = False
 
     in_components = {k: v for k, v in req['components'].items() if v}
-    data_args = {'filesamples': {}, 'platenames': {}, 'filefields': defaultdict(dict),
-            **server_dss_args}
+    data_args = {'platenames': {}, **server_dss_args}
     jobinputs = {'components': wf_components, 'singlefiles': {}, 'multifiles': {}, 'params': {}}
     # FIXME this and dss can in theory be duplicates, if the analysis server has multiple
     # storage mounts (not counting the ANALYSISRESULTS mount for e.g. fresh mzML)
@@ -1067,8 +1077,7 @@ def store_analysis(request):
         sflocs = rm.StoredFileLoc.objects.filter(sfile_id__in=[int(x) for x in req['infiles'].keys()],
                 servershare__function=rm.ShareFunction.RAWDATA, servershare__active=True,
                 servershare__fileservershare__server__analysisserverprofile__id=server_dss_args['anaserverprofile_id'])
-        data_args.update({'infiles': req['infiles'],
-            'sfloc_ids': [x['pk'] for x in sflocs.values('pk')]})
+        data_args['sfloc_ids'] = [x['pk'] for x in sflocs.values('pk')]
 
     # Input file definition
     if 'INPUTDEF' in wf_components:
@@ -1076,7 +1085,7 @@ def store_analysis(request):
     else:
         jobinputs['components']['INPUTDEF'] = False
 
-    # Store setnames
+    # Store setnames (cascades)
     setname_ids = {}
     am.AnalysisSetname.objects.filter(analysis=analysis).exclude(setname__in=req['dssetnames'].values()).delete()
     for setname in set(req['dssetnames'].values()):
@@ -1084,19 +1093,17 @@ def store_analysis(request):
         setname_ids[setname] = anaset.pk
     # setnames for datasets, optionally fractions and strips
     new_ads = {}
-    am.AnalysisDSInputFile.objects.filter(analysisset__analysis=analysis).exclude(sfile_id__in=req['infiles']).delete()
     for str_dsid, setname in req['dssetnames'].items():
         dsid = int(str_dsid)
+        am.AnalysisDatasetSetname.objects.create(dsanalysis_id=dsa_map[dsid],
+                setname_id=setname_ids[setname])
         for fieldname, value in req['dsetfields'][str_dsid].items():
-            ads, created = am.AnalysisDatasetSetValue.objects.update_or_create(
+            ads, created = am.AnalysisSetValue.objects.update_or_create(
                     defaults={'setname_id': setname_ids[setname], 'value': value},
-                    analysis=analysis, field=fieldname, dataset_id=dsid) 
+                    field=fieldname)
             new_ads[ads.pk] = created
-        for sf in dsfiles[dsid]:
-            am.AnalysisDSInputFile.objects.get_or_create(sfile=sf, analysisset_id=setname_ids[setname],
-                    dsanalysis_id=dsa_map[dsid])
-            data_args['filesamples'][sf.pk] = setname
         dset = dsets[dsid]
+        
         if 'PREFRAC' in wf_components and hasattr(dset, 'prefractionationdataset'):
             # get platenames
             pfd = dset.prefractionationdataset
@@ -1105,19 +1112,37 @@ def store_analysis(request):
                 data_args['platenames'][dsid] = strip
             else:
                 data_args['platenames'][dsid] = pfd.prefractionation.name
-    am.AnalysisDatasetSetValue.objects.filter(analysis=analysis).exclude(pk__in=new_ads).delete()
+    am.AnalysisSetValue.objects.filter(setname__analysis=analysis).exclude(pk__in=new_ads).delete()
 
-    # store samples if non-prefrac labelfree files are sets
-    am.AnalysisFileValue.objects.filter(analysis=analysis).exclude(sfile_id__in=req['fnfields']).delete()
-    for sfid, sample in req['fnfields'].items():
+    # Map all files in analysis
+    am.AnalysisDSInputFile.objects.filter(dsanalysis__analysis=analysis).exclude(sfile_id__in=req['infiles']).delete()
+    sfid_dsid_map, adsinfiles = {}, {}
+    for dsid in dsets.keys():
+        for sf in dsfiles[dsid]:
+            adsinf, _ = am.AnalysisDSInputFile.objects.filter(dsanalysis__analysis=analysis
+                    ).update_or_create(sfile=sf, defaults={'dsanalysis_id': dsa_map[dsid]})
+            sfid_dsid_map[sf.pk] = dsid
+            adsinfiles[sf.pk] = adsinf.pk
+    
+    # Store all values of files or datasets to files (for the inputfile list)
+    # No need to delete first since we already deleted linked AnalysisDSInputFile
+    dset_and_filevalues = defaultdict(dict)
+    for str_dsid, fields in req['dsetfields'].items():
+        for field, val in fields.items():
+            if field == '__sample' or not field.startswith('__'):
+                # __regex, does not go to AnaFileVal
+                for sf in dsfiles[int(str_dsid)]:
+                    dset_and_filevalues[sf.pk][field] = val
+    [dset_and_filevalues[int(sfid)].update(sample) for sfid, sample in req['fnfields'].items()]
+    for sfid, sample in dset_and_filevalues.items():
         for fieldname, value in sample.items():
             am.AnalysisFileValue.objects.update_or_create(defaults={'value': value},
-                    field=fieldname, analysis=analysis, sfile_id=sfid) 
-            # __sample etc is stored in filesamples, filefields is for dynamic only
-            if not fieldname.startswith('__'):
-                data_args['filefields'][sfid][fieldname] = value
-            elif fieldname == '__sample':
-                data_args['filesamples'][sfid] = value
+                    field=fieldname, adsfile_id=adsinfiles[sfid])
+        # Special save for fractions
+        if data_args['platenames'].get(sfid_dsid_map[sfid]):
+            am.AnalysisFileValue.objects.update_or_create(
+                    defaults={'value': req['infiles'][str(sfid)]['fr']},
+                    field='__fraction', adsfile_id=adsinfiles[sfid])
 
     # Store params
     passedparams_exdelete = {**req['params']['flags'], **req['params']['inputparams'], **req['params']['multicheck']}
@@ -1178,11 +1203,13 @@ def store_analysis(request):
         else:
             sampletables = {}
         shadow_dss = {}
-        for x in base_ana.analysisdatasetsetvalue_set.all():
+        for x in am.AnalysisSetValue.objects.filter(setname__analysis=base_ana).values(
+                'setname__analysisdatasetsetname__dsanalysis__dataset_id', 'field', 'value', 'setname__setname'):
             try:
-                shadow_dss[x.dataset_id]['fields'][x.field] = x.value
+                shadow_dss[x['setname__analysisdatasetsetname__dsanalysis__dataset_id']]['fields'][x['field']] = x['value']
             except KeyError:
-                shadow_dss[x.dataset_id] = {'setname': x.setname.setname, 'fields': {x.field: x.value}}
+                shadow_dss[x['setname__analysisdatasetsetname__dsanalysis__dataset_id']] = {'setname': x['setname__setname'],
+                        'fields': {x['field']: x['value']}}
         shadow_isoquants = get_isoquants(base_ana, sampletables)
         # Add the base analysis' own base analysis shadow isquants/dsa is any
         try:
@@ -1213,6 +1240,7 @@ def store_analysis(request):
                 'rerun_from_psms': rerun,
                 'shadow_isoquants': shadow_isoquants,
                 'shadow_dssetnames': shadow_dss,
+                #'shadow_filevalues': shadow_fvs,
                 }
         ana_base, cr = am.AnalysisBaseanalysis.objects.update_or_create(defaults=base_def, analysis_id=analysis.id)
         # Add base analysis isoquant to the job params if it is complement analysis
@@ -1224,6 +1252,7 @@ def store_analysis(request):
                     rm_ch_cli.append(f'{setname}:{ch_rm}')
         # FIXME if fractionated, add the old mzmls for the plate QC count - yes that is necessary 
         # because plate names are not stored in the SQLite - maybe it should?
+        # I think this is fixed??
         # Options:
         # - store in SQL (msstitch change or dirty in the pipeline with an extra table - rather not?)
         # - pass old_mzmls to task in job, task with fn/instr/set/plate/fraction 
@@ -1258,17 +1287,23 @@ def store_analysis(request):
     if not req['upload_external']:
         fname = 'run_nf_search_workflow'
         jobinputs['params'] = [x for nf, vals in jobparams.items() for x in [nf, ';'.join([str(v) for v in vals])] if x]
-        #param_args = {'wfv_id': req['nfwfvid'], 'inputs': jobinputs}
         kwargs = {'analysis_id': analysis.id, 'wfv_id': req['nfwfvid'], 'inputs': jobinputs,
                 **data_args}
-        if req['analysis_id'] and hasattr(analysis, 'nextflowsearch'):
+        if existing_job := jm.Job.objects.filter(nextflowsearch__analysis=analysis):
+            # Job already exists, check if we need to recreate it or 
+            # only update it 
             jwrap = jobmap[fname](False)
-            for extrajob in jwrap.on_create_prep_rsync_jobs(**kwargs):
-                create_job(extrajob['name'], **extrajob['kwargs'])
-            jobq = jm.Job.objects.filter(nextflowsearch__analysis=analysis)
-            jobq.update(kwargs=kwargs, state=jj.Jobstates.WAITING)
-            jobid = jobq.values('pk').get()['pk']
+            if len(jwrap.on_create_prep_rsync_jobs(**kwargs)):
+                # new rsync jobs will be made, so we should recreate 
+                # this job, so those will be queued before the analysis job
+                # which would error otherwise
+                existing_job.delete()
+                jobid = create_job(fname, state=jj.Jobstates.WAITING, **kwargs)['id']
+            else:
+                existing_job.update(kwargs=kwargs, state=jj.Jobstates.WAITING)
+                jobid = existing_job.values('pk').get()['pk']
         else:
+            # no old job
             jobid = create_job(fname, state=jj.Jobstates.WAITING, **kwargs)['id']
         am.NextflowSearch.objects.update_or_create(defaults={'nfwfversionparamset_id': req['nfwfvid'], 'job_id': jobid, 'workflow_id': req['wfid'], 'token': ''}, analysis=analysis)
     analysis.base_rundir = analysis.get_run_base_dir()
@@ -1280,7 +1315,7 @@ def get_isoquants(analysis, sampletables):
     """For analysis passed, return its analysisisoquants from DB in nice format for frontend"""
     isoquants = {}
     for aiq in am.AnalysisIsoquant.objects.select_related('setname').filter(analysis=analysis):
-        set_dsets = am.DatasetAnalysis.objects.filter(analysisdsinputfile__analysisset=aiq.setname)
+        set_dsets = am.DatasetAnalysis.objects.filter(analysisdatasetsetname__setname=aiq.setname)
         qtypename = set_dsets.values('dataset__quantdataset__quanttype__shortname').distinct().get()['dataset__quantdataset__quanttype__shortname']
         qcsamples = {qcs.channel.channel_id: qcs.projsample.sample for qcs in dm.QuantChannelSample.objects.filter(dataset_id__in=set_dsets.values('dataset'))}
         channels = {qtc.channel.name: qtc.channel_id for anasds in set_dsets.distinct('dataset__quantdataset__quanttype') for qtc in anasds.dataset.quantdataset.quanttype.quanttypechannel_set.all()}
@@ -1507,9 +1542,11 @@ def stop_analysis(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Must use POST'}, status=405)
     req = json.loads(request.body.decode('utf-8'))
-    anaq = am.Analysis.objects.filter(pk=req['item_id'], user=request.user)
-    if not request.user.is_superuser and not anaq.exists():
-        return JsonResponse({'error': 'Analysis does not exist or you dont have permission'}, status=403)
+    anaq = am.Analysis.objects.filter(pk=req['item_id'])
+    if not anaq.exists():
+        return JsonResponse({'error': 'Analysis does not exist'}, status=403)
+    elif not (anaq.filter(user=request.user).exists() or request.user.is_superuser):
+        return JsonResponse({'error': 'You dont have permission to stop this analysis'}, status=403)
     anaq.update(editable=True)
     jm.Job.objects.filter(nextflowsearch__analysis_id=req['item_id']).update(state=jj.Jobstates.REVOKING)
     return JsonResponse({})
