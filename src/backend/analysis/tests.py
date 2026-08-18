@@ -814,7 +814,7 @@ class TestStoreAnalysis(AnalysisPageTest):
                 },
             'analysisname': 'Test new analysis',
             'fnfields': {self.f3sfmz.pk: {'fakefn': 'yesfakefn'}},
-            'dsetfields': {f'{self.ds.pk}': {'__regex': 'fr_find', 'fakeds': 'hellofakeds', '__sample': 'fakesample'}},
+            'dsetfields': {f'{self.ds.pk}': {'__regex': 'fr_find', 'fakeds': 'hellofakeds'}},
             'params': params,
             'singlefiles': {self.pfn2.pk: self.sflib.pk},
             'multifiles': {self.pfn1.pk: [self.sfusr.pk]},
@@ -901,7 +901,7 @@ class TestStoreAnalysis(AnalysisPageTest):
             header = next(fp).strip().split('\t')
             self.assertEqual(header, self.inputdef.value)
             line = next(fp).strip().split('\t')
-            self.assertEqual(line, [fnpath, plate, 'fakesample', self.msit.name, 'yesfakefn', 'hellofakeds'])
+            self.assertEqual(line, [fnpath, plate, 'setA', self.msit.name, 'yesfakefn', 'hellofakeds'])
             oldheader = next(fp).strip().split('\t')
             self.assertEqual(oldheader, self.inputdef.value)
             oldline = next(fp).strip().split('\t')

@@ -1128,10 +1128,13 @@ def store_analysis(request):
     dset_and_filevalues = defaultdict(dict)
     for str_dsid, fields in req['dsetfields'].items():
         for field, val in fields.items():
-            if field == '__sample' or not field.startswith('__'):
+            if not field.startswith('__'):
                 # __regex, does not go to AnaFileVal
                 for sf in dsfiles[int(str_dsid)]:
                     dset_and_filevalues[sf.pk][field] = val
+        if setname := req['dssetnames'].get(str_dsid):
+            [dset_and_filevalues[x.pk].update({'__sample': setname}) for x in dsfiles[int(str_dsid)]]
+
     [dset_and_filevalues[int(sfid)].update(sample) for sfid, sample in req['fnfields'].items()]
     for sfid, sample in dset_and_filevalues.items():
         # Remove fields no longer used, then update/create existing/new
