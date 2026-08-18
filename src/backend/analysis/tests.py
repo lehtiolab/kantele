@@ -193,8 +193,8 @@ class AnalysisLabelfreeSamples(AnalysisPageTest):
 
     def setUp(self):
         super().setUp()
-        adsi2 = am.AnalysisDSInputFile.objects.create(sfile=self.oldsf, dsanalysis=self.dsalf)
-        self.afs2 = am.AnalysisFileValue.objects.create(adsfile=adsi2, value='newname2',
+        self.adsi2 = am.AnalysisDSInputFile.objects.create(sfile=self.oldsf, dsanalysis=self.dsalf)
+        self.afs2 = am.AnalysisFileValue.objects.create(adsfile=self.adsi2, value='newname2',
                 field='__sample')
 
 
@@ -973,10 +973,10 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
             'infiles': {self.f3sfmz.pk: {'fr': 1}},
             'picked_ftypes': {self.ds.pk: f'mzML (pwiz {self.f3sfmz.mzmlfile.pwiz.version_description})'},
             'nfwfvid': self.nfwf.pk,
-            'dssetnames': {self.ds.pk: 'setA'},
-            'components': {'ISOQUANT_SAMPLETABLE': [[self.qch.name, 'setA', 'samplename', 'groupname']],
+            'dssetnames': {self.ds.pk: 'set1'},
+            'components': {'ISOQUANT_SAMPLETABLE': [[self.qch.name, 'set1', 'samplename', 'groupname']],
                 'INPUTDEF': 'a',
-                'ISOQUANT': {'setA': {'chemistry': quant.shortname,
+                'ISOQUANT': {'set1': {'chemistry': quant.shortname,
                     'denoms': {x.channel.name: [f'{x}_sample', x.channel.id] for x in quant.quanttypechannel_set.all()},
                     'report_intensity': False,
                     'sweep': False,
@@ -1009,7 +1009,7 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
         self.assertEqual(resp.status_code, 200)
         self.ana.refresh_from_db()
         self.assertEqual(self.ana.analysissampletable.samples, 
-                [[self.qch.name, 'setA', 'samplename', 'groupname']])
+                [[self.qch.name, 'set1', 'samplename', 'groupname']])
         regexes = {x['setname__analysisdatasetsetname__dsanalysis__dataset_id']: x['value'] for x in am.AnalysisSetValue.objects.filter(
             setname__analysis=self.ana, field='__regex').values('setname__analysisdatasetsetname__dsanalysis__dataset_id', 'value')}
         for adsif in am.AnalysisDSInputFile.objects.filter(dsanalysis__analysis=self.ana):
@@ -1040,10 +1040,10 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
           'inputs': {'components': {c_ch.INPUTDEF.name: self.inputdef.value,
               c_ch.COMPLEMENT_ANALYSIS.name: self.complement_c.value,
               c_ch.PREFRAC.name: '.*fr([0-9]+).*mzML$', c_ch.ISOQUANT.name: {},
-              c_ch.ISOQUANT_SAMPLETABLE.name: [[self.qch.name, 'setA', 'samplename', 'groupname']],
+              c_ch.ISOQUANT_SAMPLETABLE.name: [[self.qch.name, 'set1', 'samplename', 'groupname']],
               },
               'multifiles': {self.pfn1.nfparam: [self.sfusr.pk]},
-              'params': ['--isobaric', f'setA:{self.qt.shortname}:{self.qch.name}',
+              'params': ['--isobaric', f'set1:{self.qt.shortname}:{self.qch.name}',
                   self.param2.nfparam, self.popt1.value, 
                   self.param1.nfparam, # flag so no value
                   self.param3.nfparam, '42',
@@ -1114,6 +1114,8 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
                 'selected analysis server', resp.json()['multierror'])
 
     def test_existing_analysis(self):
+        afs3 = am.AnalysisFileValue.objects.create(adsfile=self.adsi2, value='something',
+                field='afield')
         am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwf, config_commit='123jkl')
         nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf, repolocation=self.nfw.repo)
         am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwf, config_commit='123jkl')
@@ -1163,6 +1165,8 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         self.assertFalse(hasattr(self.analf, 'analysissampletable'))
         # no new dsinput files
         self.assertEqual(am.AnalysisDSInputFile.objects.filter(dsanalysis__analysis=self.analf).count(), 1)
+        # Removed the no longer used "afield" field
+        self.assertFalse(am.AnalysisFileValue.objects.filter(pk=afs3.pk).exists())
         for afs in am.AnalysisFileValue.objects.filter(adsfile__dsanalysis__analysis=self.analf):
             self.assertEqual(postdata['fnfields'][afs.adsfile.sfile_id]['__sample'], afs.value)
         PT = am.Param.PTypes

@@ -1085,7 +1085,7 @@ def store_analysis(request):
     else:
         jobinputs['components']['INPUTDEF'] = False
 
-    # Store setnames (cascades)
+    # Store setnames (delete unused setnames, which cascades)
     setname_ids = {}
     am.AnalysisSetname.objects.filter(analysis=analysis).exclude(setname__in=req['dssetnames'].values()).delete()
     for setname in set(req['dssetnames'].values()):
@@ -1095,12 +1095,11 @@ def store_analysis(request):
     new_ads = {}
     for str_dsid, setname in req['dssetnames'].items():
         dsid = int(str_dsid)
-        am.AnalysisDatasetSetname.objects.create(dsanalysis_id=dsa_map[dsid],
-                setname_id=setname_ids[setname])
+        am.AnalysisDatasetSetname.objects.update_or_create(dsanalysis_id=dsa_map[dsid],
+                defaults={'setname_id': setname_ids[setname]})
         for fieldname, value in req['dsetfields'][str_dsid].items():
-            ads, created = am.AnalysisSetValue.objects.update_or_create(
-                    defaults={'setname_id': setname_ids[setname], 'value': value},
-                    field=fieldname)
+            ads, created = am.AnalysisSetValue.objects.update_or_create(defaults={'value': value},
+                    setname_id=setname_ids[setname], field=fieldname)
             new_ads[ads.pk] = created
         dset = dsets[dsid]
         
@@ -1135,6 +1134,8 @@ def store_analysis(request):
                     dset_and_filevalues[sf.pk][field] = val
     [dset_and_filevalues[int(sfid)].update(sample) for sfid, sample in req['fnfields'].items()]
     for sfid, sample in dset_and_filevalues.items():
+        # Remove fields no longer used, then update/create existing/new
+        am.AnalysisFileValue.objects.filter(adsfile_id=adsinfiles[sfid]).exclude(field__in=sample.keys()).delete()
         for fieldname, value in sample.items():
             am.AnalysisFileValue.objects.update_or_create(defaults={'value': value},
                     field=fieldname, adsfile_id=adsinfiles[sfid])
