@@ -503,19 +503,24 @@ def classified_rawfile_treatment(request):
     elif dsid:
         # Make sure dataset exists
         dsq = dsmodels.Dataset.objects.filter(pk=dsid, locked=False)
+        dss_q = dsmodels.DatasetServer.objects.filter(dataset_id=dsid, active=True)
         if not dsq.exists():
             # TODO this needs error logging? For now this is fine
             # File will not be classified and kept on upload
             print(f'Classify task error for task {data["task_id"]} - dsid {dsid} doesnt exist '
                     'or is locked')
+        elif not dss_q.exists():
+            print(f'Classify task error for task {data["task_id"]} - dsid {dsid} does not have '
+                    'storage location')
+
         elif dsq.filter(datasetcomponentstate__dtcomp__component=dsmodels.DatasetUIComponent.FILES,
                 datasetcomponentstate__state=dsmodels.DCStates.NEW).exists():
             # Only accept files if file component state is NEW
             # First check job errors
             # FIXME return errors 
             dss_mvjobs = []
-            for dss in dsmodels.DatasetServer.objects.filter(dataset_id=dsid, active=True).values(
-                    'pk', 'storage_loc', 'storageshare_id'):
+            rsjob_error = False
+            for dss in dss_q.values('pk', 'storage_loc', 'storageshare_id'):
                 mvjob_kw = {'dss_id': dss['pk'], 'sfloc_ids': [sfloc.pk],
                         'dstshare_id': dss['storageshare_id']}
                 if rsjob_error := check_job_error('rsync_dset_files_to_servershare', **mvjob_kw):
