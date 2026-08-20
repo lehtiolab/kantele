@@ -8,6 +8,7 @@ Scheduler runs sequential and waits for each job that contains files running in 
 from celery import states
 from django.core.management.base import BaseCommand
 from time import sleep
+import traceback
 
 from kantele import settings
 from jobs.models import Task, Job
@@ -137,7 +138,10 @@ def run_ready_jobs(job_fn_map, job_ds_map, active_jobs):
                         print(f'Error occurred: {e}, not executing this job')
                         jwrapper.set_error(job, errmsg=str(e))
                     except Exception as e:
+                        print('-----------')
                         print(f'Uncaught error occurred: {e} --- not executing this job')
+                        traceback.print_exc()
+                        print('-----------')
                         jwrapper.set_error(job, errmsg=str(e))
                     else:
                         # PROCESSING state update saved here:
