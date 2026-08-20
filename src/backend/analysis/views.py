@@ -1069,7 +1069,7 @@ def store_analysis(request):
         api_token = False
 
     in_components = {k: v for k, v in req['components'].items() if v}
-    data_args = {'platenames': {}, **server_dss_args}
+    data_args = {'platenames': {x: '' for x in dsids}, **server_dss_args}
     jobinputs = {'components': wf_components, 'singlefiles': {}, 'multifiles': {}, 'params': {}}
     # FIXME this and dss can in theory be duplicates, if the analysis server has multiple
     # storage mounts (not counting the ANALYSISRESULTS mount for e.g. fresh mzML)
@@ -1143,7 +1143,7 @@ def store_analysis(request):
             am.AnalysisFileValue.objects.update_or_create(defaults={'value': value},
                     field=fieldname, adsfile_id=adsinfiles[sfid])
         # Special save for fractions
-        if data_args['platenames'].get(sfid_dsid_map[sfid]):
+        if data_args['platenames'].get(sfid_dsid_map[sfid]) != '':
             am.AnalysisFileValue.objects.update_or_create(
                     defaults={'value': req['infiles'][str(sfid)]['fr']},
                     field='__fraction', adsfile_id=adsinfiles[sfid])

@@ -36,7 +36,7 @@ with open(args.input) as fp:
         lines.append(line.strip().split('\t'))
 
 oldlines = []
-if os.path.exists(args.oldmzml):
+if args.oldmzml and os.path.exists(args.oldmzml):
     with open(args.oldmzml) as fp:
         oldheader = next(fp).strip().split('\t')
         for line in fp:
@@ -48,10 +48,11 @@ with open(os.path.join(args.outdir, 'report.html'), 'w') as fp:
         fp.write('\n')
         fp.write('\t'.join(line))
     fp.write('\n')
-    fp.write(f'{"\t".join(oldheader)}')
-    for line in oldlines:
-        fp.write('\n')
-        fp.write('\t'.join(line))
+    if oldlines:
+        fp.write(f'{"\t".join(oldheader)}')
+        for line in oldlines:
+            fp.write('\n')
+            fp.write('\t'.join(line))
 
 
 with open('.nextflow.log', 'w') as fp:
