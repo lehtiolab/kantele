@@ -283,7 +283,7 @@ def populate_inputfiles(analysis, sflocs_values, inputdef_fields_nofn, dsetfield
                 dsfield, dsidkey = dsfield_dsidkey
                 infile[field] = dsetfields[dsfield][str(fn[dsidkey])]
             elif translatedfield := models.INPUTDEF_LOOKUPS.get(field):
-                infile[field] = filevals[fn['sfile_id']][translatedfield]
+                infile[field] = filevals[fn['sfile_id']].get(translatedfield, '')
             else:
                 infile[field] = filevals[fn['sfile_id']][field]
         infiles.append(infile)
