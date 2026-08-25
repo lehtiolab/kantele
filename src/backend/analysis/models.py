@@ -249,9 +249,10 @@ class PipelineVersionOutput(models.Model):
 # to be handled, e.g. __file_path.
 # INPUTDEF_LOOKUPS is here to handle values saved under a different name, e.g. setname: __sample
 INPUTDEF_LOOKUPS = {
-        'condition': '__sample',
-        'sampleID': '__sample',
-        'setname': '__sample',
+        'condition': '__sample', # spectronaut
+        'sampleID': '__sample', # pgt
+        'setname': '__sample', # dda
+        'sample': '__sample', # dia-nn
         'fraction': '__fraction',
 }
 
