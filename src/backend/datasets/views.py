@@ -2045,6 +2045,11 @@ def save_ms_sampleprep_tracking_step(request):
             # If stage = 3, there should be 2 stages already in DB
             return JsonResponse({'error': 'Cannot update that stage without first updating previous'
                 ' dated stages'}, status=403)
+        datecheck_q = Q(stage__lt=stage, timestamp__gt=timestamp_dt) | Q(stage__gt=stage, timestamp__lt=timestamp_dt)
+        if cm.DatasetPrepTracking.objects.filter(dspipe_id=dspipe_id).filter(datecheck_q).exists():
+            return JsonResponse({'error': 'Cannot update to a date earlier than previous step, or '
+                'later than a subsequent step!'}, status=403)
+
         cm.DatasetPrepTracking.objects.update_or_create(dspipe_id=dspipe_id, stage=stage,
                 defaults={'timestamp': timestamp_dt})
         if stage > cm.TrackingStages.PREPSTARTED:
