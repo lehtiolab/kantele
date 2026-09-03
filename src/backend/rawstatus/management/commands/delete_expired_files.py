@@ -123,7 +123,8 @@ class Command(BaseCommand):
                 for ds_soon in dm.Dataset.objects.annotate(nr_active=Count('datasetserver__id',
                         filter=Q(datasetserver__active=True)), nr_soon=Count('datasetserver__id',
                         filter=Q(datasetserver__active=True,
-                        datasetserver__last_date_used__lt=timezone.now() + 
+                            datasetserver__storageshare__maxdays_data__gt=0,
+                            datasetserver__last_date_used__lt=timezone.now() + 
                             timedelta(days=settings.DATASET_EXPIRY_DAYS_MESSAGE) -
                             timedelta(days=1) * F('datasetserver__storageshare__maxdays_data')))
                         ).filter(nr_active__gt=0, nr_soon=F('nr_active')).values('pk'):

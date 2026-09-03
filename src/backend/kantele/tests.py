@@ -69,7 +69,7 @@ class BaseTest(TestCase):
         self.tmpctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
                 share=self.sstmp, path=os.path.join(self.rootdir, 'tmp'))
         self.ssnewstore = rm.ServerShare.objects.create(name='ssnewstore', max_security=1,
-                function=rm.ShareFunction.RAWDATA)
+                function=rm.ShareFunction.RAWDATA, maxdays_data=1)
         self.newstorctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
                 share=self.ssnewstore, path=os.path.join(self.rootdir, 'newstorage'))
         self.ana_newstor = rm.FileserverShare.objects.create(server=self.anaserver,
