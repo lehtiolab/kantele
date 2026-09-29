@@ -11,6 +11,11 @@ analysis_path_url: /analysisfiles
 # Certbot
 host_certbot_path: "{{ kanteledir }}/certbot"
 rsa_key_size: 4096
+# Downloading raw files path in nginx container
+container_downloadpath: /downloadfiles_to_share
+host_downloadfile_path: "/mnt/etc .."
+file_download_url: /share_downloads
+
 
 # For restoring backups
 pgdatadir: "{{ homedir }}/pgdata"
