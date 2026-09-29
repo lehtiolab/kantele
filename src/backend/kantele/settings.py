@@ -50,6 +50,7 @@ RSYNC_SSHPORT = os.environ.get('RSYNC_SSHPORT')
 UPLOAD_URL = 'uploads'
 
 
+NGINX_DOWNLOAD_REDIRECT = os.environ.get('NGINX_DOWNLOAD_REDIRECT')
 NGINX_ANALYSIS_REDIRECT = os.environ.get('NGINX_ANALYSIS_REDIRECT')
 SERVABLE_FILENAMES = ['qc.html', 'qc_full.html', 'qc_light.html', 'pipeline_report.html', 'report.html']
 

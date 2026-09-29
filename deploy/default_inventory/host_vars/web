@@ -11,6 +11,10 @@ container_analysispath: /analysisfiles
 host_analysispath: "{{ kanteledir }}/srv_analysis"
 analysis_path_url: /analysisfiles
 
+# Downloading raw files path in nginx container
+container_downloadpath: /downloadfiles_to_share
+host_downloadfile_path: "/mnt/etc .."
+file_download_url: /share_downloads
 
 
 # For restoring backups

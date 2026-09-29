@@ -27,6 +27,7 @@ services:
         volumes:
             - "${HOST_UPLOADPATH}:${CONTAINER_UPLOADPATH}"
             - "${HOST_ANALYSISFILES}:${CONTAINER_ANALYSISPATH}"
+            - "${HOST_DOWNLOADFILES}:${CONTAINER_DOWLOADPATH}"
             - "${HOST_TLSCERTPATH}:/${CONTAINER_TLSCERTPATH}"
         logging:
             driver: syslog

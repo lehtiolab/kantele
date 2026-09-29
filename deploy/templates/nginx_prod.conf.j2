@@ -68,6 +68,11 @@ http {
             alias {{ container_analysispath }};
         }
 
+        location {{ file_download_url }} {
+            internal;
+            alias {{ container_downloadpath }};
+        }
+
         # Finally, send all non-media requests to the Django server
         location / {
             uwsgi_pass  django;

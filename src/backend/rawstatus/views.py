@@ -1170,6 +1170,21 @@ def show_old_new_projects(request):
     pass
 
 
+def download_file_to_share(request, sfloc_id, task_id):
+    # Authenticate with task id
+    if job := jm.Job.objects.filter(funcname='download_file_to_share',
+            state=jj.Jobstates.PROCESSING, task__id=task_id):
+        job = job.values().get()
+    else:
+        return JsonResponse({'msg': 'Not authenticated to download file'}, status=403)
+    StoredFileLoc.objects.get(pk=sfloc_id).values('sfile__filename', 'path',
+        'share__fileservershare__path')
+    resp = HttpResponse()
+    resp['X-Accel-Redirect'] = os.path.join(settings.NGINX_DOWNLOAD_REDIRECT, 
+        sfloc['share__fileservershare__path'], sfloc['path'], sfloc['sfile__filename'])
+    return resp
+
+
 @login_required
 def download_px_project(request):
     # FIXME check if pxacc exists on pride and here, before creating dset
