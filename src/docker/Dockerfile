@@ -49,9 +49,56 @@ RUN cd /src/frontend/mstulos && npm install && npm run build
 RUN cd /src/frontend/staffpage && npm install && npm run build
 RUN cd /src/frontend/corefac && npm install && npm run build
 
-# Nginx to serve static stuff, uploads etc
-# also copy in the relevant config files
-FROM nginx:1.27.5 AS nginx_prod
+FROM nginx:1.31.6 AS nginx_build
+ENV NGINX_VERSION 1.31.6
+RUN apt-get update
+RUN apt-get install -y build-essential \
+                       wget \
+                       git \
+                       procps
+RUN apt remove -y nginx
+RUN mkdir src
+WORKDIR /src/
+# Build openSSL
+RUN wget https://www.openssl.org/source/openssl-3.0.13.tar.gz && \
+    tar -zxf openssl-3.0.13.tar.gz && \
+    cd openssl-3.0.13 && \
+    ./config --prefix=/usr/local --openssldir=/usr/local/ssl && \
+    make && \
+    make install
+# Build PCRE
+RUN wget https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.43/pcre2-10.43.tar.gz && \
+    tar -zxf pcre2-10.43.tar.gz && \
+    cd pcre2-10.43 && \
+    ./configure && \
+    make && \
+    make install
+# Build zlib
+RUN wget http://zlib.net/zlib-1.3.2.tar.gz && \
+    tar -zxf zlib-1.3.2.tar.gz && \
+    cd zlib-1.3.2 && \
+    ./configure && \
+    make && \
+    make install
+
+RUN wget http://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz && \
+    tar -xzvf nginx-${NGINX_VERSION}.tar.gz
+RUN git clone https://github.com/evanmiller/mod_zip.git
+RUN cd nginx-${NGINX_VERSION} && ./configure \
+    --sbin-path=/usr/sbin/nginx \
+    --conf-path=/etc/nginx/nginx.conf \
+    --pid-path=/etc/nginx/nginx.pid \
+    --error-log-path=/var/logs/error.log \
+    --http-log-path=/var/logs/access.log \
+    --with-pcre=../pcre2-10.43 \
+    --with-zlib=../zlib-1.3.2 \
+    --with-http_ssl_module \
+    --with-stream \
+    --add-module=../mod_zip && make && make install
+WORKDIR /
+RUN rm -rf src
+
+FROM nginx_build AS nginx_prod
 COPY --from=build_frontend /static /static
 COPY --from=django_static /kantele/static/ /static/
 COPY docker/nginx.conf /etc/nginx/nginx.conf

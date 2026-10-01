@@ -25,7 +25,14 @@ services:
             - ./data/analysisfiles:/analysisfiles
     
     nginx:
-        image: "nginx:1.21"
+        image: nginx_dev
+        build:
+            context: ./src
+            dockerfile: ./docker/Dockerfile
+            target: nginx_build
+            args:
+                USER_ID: "${USER_ID:-You must run export USER_ID}"
+                GROUP_ID: "${GROUP_ID:-You must run export GROUP_ID}"
         depends_on:
             web:
                 condition: service_healthy
