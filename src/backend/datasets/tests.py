@@ -232,7 +232,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertTrue(newdss.exists())
         newdss = newdss.get()
         self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.pk} transferred dataset '
-                f'{self.ds.pk} to {self.analocalstor.name}({self.analocalstor.pk})').exists())
+                f'{self.ds.pk} to {self.analocalstor.name} ({self.analocalstor.pk})').exists())
 
         # execute dataset move on disk, should not move the added files on tmp (nor update their DB)
         mvjob = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare').last()

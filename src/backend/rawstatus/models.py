@@ -154,22 +154,64 @@ class ServerShare(models.Model):
             return ''
 
     @staticmethod
-    def classify_shares_by_rsync_reach(dstshare_ids, srcserverid):
-        '''For all dst shares to rsync to, classify them with respect to if they are either
-        local to a server where srcfiles are, or can be used to rsync from, or are remote.
+    def classify_shares_by_rsync_reach(srcshare_ids, dstshare_ids):
+        '''src_sfl_ids, the sfloc files to be rsynced, must all live on one server
         '''
-        # shares local, which are not used in rsyncing, since the files are already
-        # accessible on that server, but use them for exclude below
-        localshares = [x['share_id'] for x in FileserverShare.objects.filter(
-            server_id=srcserverid, share_id__in=dstshare_ids).values('share_id')]
+        all_combinations = []
+        has_local, has_sourcable = False, False
+        fss_dst = FileserverShare.objects.filter(share_id__in=dstshare_ids).exclude(
+                share_id__in=srcshare_ids)
+        fss_dst_rs = fss_dst.exclude(server__rsyncusername='', server__rsynckeyfile='')
+        for srcshareid in srcshare_ids:
+            fss_src = FileserverShare.objects.filter(share_id=srcshareid)
 
-        # shares which can be used to rsync push from (excluded local job server shares):
-        rsync_srcshares = [x['share_id'] for x in FileserverShare.objects.exclude(
-            share_id__in=localshares).filter(share_id__in=dstshare_ids, server__can_rsync_remote=True).values('share_id')]
-        # remote shares
-        remote_shares = [x['share_id'] for x in FileserverShare.objects.exclude(
-            share_id__in=[*localshares, *rsync_srcshares]).filter(share_id__in=dstshare_ids).values('share_id')]
-        return {'local': localshares, 'rsync_sourcable': rsync_srcshares, 'remote': remote_shares}
+            # shares local means, src and dstfiles on same server mounted, so no
+            # traffic over SSH needed
+            localdstshares = [x['share_id'] for x in fss_dst.filter(
+                server__fileservershare__in=fss_src, share_id__in=dstshare_ids).distinct('share_id'
+                ).values('share_id')]
+            rsync_ssh_dstshares, remote_shares = [], []
+
+            # Dst share is on server elsewhere, but source server can do rsync
+            # over SSH, prefer this as a second option
+            if fss_src.filter(server__can_rsync_remote=True) and fss_dst_rs:
+                rsync_ssh_dstshares = [x['share_id'] for x in fss_dst_rs.exclude(
+                    share_id__in=localdstshares).distinct('share_id').values('share_id')
+                                   ]
+            # Also reverse: pulling file from source to dst is in here
+            fss_dst_pull = fss_dst.filter(server__can_rsync_remote=True).exclude(
+                    share_id__in=[*rsync_ssh_dstshares, *localdstshares])
+            fss_src_pull = fss_src.exclude(server__rsyncusername='', server__rsynckeyfile='') 
+            if fss_src_pull and fss_dst_pull:
+                rsync_ssh_dstshares.extend([x['share_id'] for x in fss_dst_pull.distinct(
+                    'share_id').values('share_id')])
+
+            # files need pulling from one rsync remote share, then pushing to another.
+            # In between they land on INBOX share
+            # If source server can pull but cannot push (no can_rsync), and
+            # dst server cannot pull (no can_rsync), 
+            fss_dst_rm = fss_dst_rs.filter(server__can_rsync_remote=False)
+            if fss_src_pull.filter(server__can_rsync_remote=False) and fss_dst_rm:
+                remote_shares = [x['share_id'] for x in fss_dst_rm.exclude(
+                    share_id__in=rsync_ssh_dstshares).distinct('share_id').values('share_id')]
+
+                # FIXME downloads!
+            has_local = has_local or len(localdstshares)
+            has_sourcable = has_sourcable or len(rsync_ssh_dstshares)
+
+            all_combinations.append((srcshareid, {'local': localdstshares,
+                        'rsync_sourcable': rsync_ssh_dstshares, 'remote': remote_shares,
+                                                  #'download': download_shares
+                                                  }))
+
+        # If there are multiple src_shares, optimize for the one with most local dstshares
+        # on the same server
+        if has_local:
+            return max(all_combinations, key=lambda x: x[1]['local'])
+        elif has_sourcable:
+            return max(all_combinations, key=lambda x: x[1]['rsync_sourcable'])
+        else:
+            return all_combinations[0]
 
 
 class FileserverShare(models.Model):

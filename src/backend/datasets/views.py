@@ -501,7 +501,7 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
     alldss_q = models.DatasetServer.objects.filter(dataset=dset, active=True)
     existing_sfl = filemodels.StoredFileLoc.objects.filter(active=True,
             sfile__rawfile__datasetrawfile__dataset=dset)
-    dsshare_upds, dsshare_mvjobs, rsync_jobs, retrieve_jobs = [], [], [], []
+    dsshare_upds, dsshare_mvjobs, rsync_shares, retrieve_jobs = [], [], set(), []
     qpid = models.Datatype.get_quantprot_id()
     sfls_dss = {}
 
@@ -562,32 +562,34 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
                     return JsonResponse({'error': 'Error while trying to upload dset files to new '
                         'file server: some files already exist on that server according to DB'},
                         status=403)
-                rsync_jobs.append(share)
+                rsync_shares.add(sshare_id)
             elif models.DatasetRawFile.objects.filter(dataset=dset).exists():
                 # Dont fail when doing a new dataset save
                 return JsonResponse({'error': 'There are no existing stored files to rsync, or '
                     'a dataset location to rename'}, status=403)
                 # FIXME append params for rsync job here if no sflocs.exists()?
 
-    if rsync_jobs:
+    if rsync_shares:
+        # This takes first rsync server, which means if there are multiple of those (not usual!)
+        # it will possibly first need to transfer it to this chosen one
         if rsync_server := filemodels.FileServer.objects.filter(can_rsync_remote=True, active=True):
             rsync_server = rsync_server.values('pk').first()
         else:
             return JsonResponse({'error': 'There is no configured fileserver that can handle '
-                'rsync jobs, please configure your system'} , status=403)
+                'rsync jobs, and no downloads either, please configure your system'} , status=403)
 
     # From here we start saving to DB:
-    # Before adding dss, create non-changing pre_alldss_pks for source to rsync from:
-    pre_alldss_pks = [x['pk'] for x in alldss_q.values('pk')]
+    # Before adding dss, create non-changing src_alldss_pks for source to rsync from:
+    src_alldss_pks = [x['pk'] for x in alldss_q.values('pk')]
 
     # Update/create remaining shares
-    dss_shares = {}
-
+    dss_shares, share_names = {}, {}
     for share, upd_defaults in dsshare_upds:
         dss, _cr = models.DatasetServer.objects.update_or_create(dataset=dset, storageshare=share,
                 defaults=upd_defaults, create_defaults={**upd_defaults, 'startdate': timezone.now(),
                     'storage_loc': upd_defaults['storage_loc_ui']})
-        dss_shares[share] = dss
+        dss_shares[share.pk] = dss
+        share_names[share.pk] = share.name
 
     # Rename any existing dataset sites
     for dss, oldpath, newpath in dsshare_mvjobs:
@@ -597,54 +599,56 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
                 message=f'User {user_id} changed dataset {dset.pk} path to {newpath} from {oldpath}')
 
     # Create rsync jobs to new storage shares if needed
-    if rsync_jobs:
-        # get original alldss_q, since it has been changed above
-        pre_alldss = alldss_q.filter(pk__in=pre_alldss_pks)
-        rsync_dss = pre_alldss.filter(storageshare__fileservershare__server__can_rsync_remote=True,
-                storageshare__fileservershare__server__active=True)
-        models.ProjectLog.objects.create(project=project, level=models.ProjLogLevels.INFO,
-                message=f'User {user_id} transferred dataset {dset.pk} to {share.name}({share.pk})')
-        if rsync_dss.exists():
-            # we have a dss local on an rsync server
-            srcdss = rsync_dss.first()
-            src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(servershare=srcdss.storageshare,
-                sfile__rawfile__datasetrawfile__dataset=dset).values('pk')]
-            for dstshare in rsync_jobs:
-                dstdss = dss_shares[dstshare]
-                # Rsync but since this is a new(ly activated) dss, also set its storage_loc
+    if rsync_shares:
+        # get original alldss_q, since it has been changed above, to have all possible source dss
+        if src_alldss := alldss_q.filter(pk__in=src_alldss_pks):
+            src_share_ids = [x['storageshare_id'] for x in src_alldss.values('storageshare_id')]
+            srcshare_id, dstshare_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
+                    src_share_ids, rsync_shares)
+            # Try first all local and all rsync_sourcable
+            dstshares_in_round = dstshare_classes['local'] or dstshare_classes['rsync_sourcable']
+            while dstshares_in_round:
+                src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
+                    servershare_id=srcshare_id).values('pk')]
+                # Files to these dst are on the rsync_server, so do those first
+                for dstshare_pk in dstshares_in_round:
+                    dstdss = dss_shares[dstshare_pk]
+                    # Rsync but since this is a new(ly activated) dss, also set its storage_loc
+                    # FIXME should we really do this before job creation, seems wrong?
+                    dstdss.storage_loc = dstdss.storage_loc_ui
+                    dstdss.save()
+                    create_job('rsync_dset_files_to_servershare', dss_id=dstdss.pk, sfloc_ids=src_sfloc_ids, dstshare_id=dstshare_pk)
+                    models.ProjectLog.objects.create(project=project, level=models.ProjLogLevels.INFO,
+                            message=f'User {user_id} transferred dataset {dset.pk} to '
+                                    f'{share_names[dstshare_pk]} ({dstshare_pk})')
+                    # Add dstshare to src_shares as files are now there for next round of rsync
+                    src_share_ids.append(dstshare_pk)
+                    rsync_shares.remove(dstshare_pk)
+                # Re-check if exist have local etc files for remaining shares after this round
+                srcshare_id, dstshare_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
+                        src_share_ids, rsync_shares)
+                dstshares_in_round = dstshare_classes['local'] or dstshare_classes['rsync_sourcable']
+
+            # Now only 2-step transfers over rsync possible, e.g. between 2 HPCs
+            if dstshare_classes['remote']:
+                # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
+                # controller (and sensitive classed)
+                inboxshare = filemodels.ServerShare.objects.filter(
+                        function=filemodels.ShareFunction.INBOX).values('pk').first()
+                src_sflids_inbox = []
+                for sflpk in [x['pk'] for x in existing_sfl.filter(
+                            servershare_id=srcshare_id).values('pk')]:
+                    inboxjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflpk,
+                                          dstshare_id=inboxshare['pk'],
+                            dstpath=filemodels.ServerShare.get_inbox_path(dset_id=dset.pk))
+                    src_sflids_inbox.append(inboxjob['kwargs']['dstsfloc_id'])
+            for dstshare_id in dstshare_classes['remote']:
+                dstdss = dss_shares[dstshare_id]
                 dstdss.storage_loc = dstdss.storage_loc_ui
                 dstdss.save()
                 create_job('rsync_dset_files_to_servershare', dss_id=dstdss.pk,
-                        sfloc_ids=src_sfloc_ids, dstshare_id=dstshare.pk)
+                        sfloc_ids=src_sflids_inbox, dstshare_id=dstshare_id)
 
-        elif pre_alldss.exists():
-            # there is a live dss somewhere, get it onto an rsync source first
-            # This is VERY similar to what we do in home/views around L1050 and L1180
-            # for mzml, except the local storage
-            src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
-                servershare=pre_alldss.first().storageshare,
-                    sfile__rawfile__datasetrawfile__dataset=dset).values('pk')]
-            share_ids_dss_map = {x.storageshare_id: x.pk for x in alldss_q}
-            dstshare_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
-                    [x.pk for x in rsync_jobs], rsync_server['pk'])
-            for dstshare_id in dstshare_classes['rsync_sourcable']:
-                rsjob = create_job('rsync_dset_files_to_servershare', dstshare_id=dstshare_id,
-                        dss_id=share_ids_dss_map[dstshare_id], sfloc_ids=src_sfloc_ids)
-                src_sflids_for_remote = rsjob['kwargs']['dstsfloc_ids']
-            if dstshare_classes['remote'] and not dstshare_classes['rsync_sourcable']:
-                # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
-                # controller (and sensitive classed)
-                dstshare = filemodels.ServerShare.objects.filter(function=filemodels.ShareFunction.INBOX
-                        ).values('pk').first()
-                src_sflids_for_remote = []
-                for sflpk in src_sfloc_ids:
-                    inboxjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflpk,
-                            dstshare_id=dstshare['pk'], dstpath=filemodels.ServerShare.get_inbox_path(
-                                dset_id=dset.pk))
-                    src_sflids_for_remote.append(inboxjob['kwargs']['dstsfloc_id'])
-            for dstshare_id in dstshare_classes['remote']:
-                create_job('rsync_dset_files_to_servershare', dss_id=share_ids_dss_map[dstshare_id],
-                        sfloc_ids=src_sflids_for_remote, dstshare_id=dstshare_id)
         else:
             # This should not happen! dset.deleted should have been set, show error to user
             return JsonResponse({'error': 'Dataset is not set to deleted but has no storage. - '

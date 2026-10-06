@@ -1352,48 +1352,43 @@ def update_sfile_storage(request):
         sfile.deleted = False
         sfile.save()
 
-    elif src_sfl_q := sfile.storedfileloc_set.filter(active=True, servershare__active=True, 
-            servershare__fileservershare__server__can_rsync_remote=True,
-            servershare__fileservershare__server__active=True):
-        # We have an accessible file to distribute on rsync-capable server
-        src_sfl = src_sfl_q.values('pk', 'servershare_id').first()
-        src_sfl_id = src_sfl['pk']
-        remaining_share_ids = [x for x in share_ids if x != src_sfl['servershare_id']]
+    existing_sfl = sfile.storedfileloc_set.filter(active=True, servershare__active=True)
+    src_share_ids = [x['servershare_id'] for x in existing_sfl.values('servershare_id')]
+    rsync_shares = set(share_ids)
+    srcshare_id, dstshare_classes = ServerShare.classify_shares_by_rsync_reach(
+            src_share_ids, rsync_shares)
+    print(srcshare_id, dstshare_classes)
+    dstshares_in_round = dstshare_classes['local'] or dstshare_classes['rsync_sourcable']
+    # Try first all local and all rsync_sourcable
+    while dstshares_in_round:
+        for dstshare_pk in dstshares_in_round:
+            # sfloc_ids are here per defintion created by job, but maybe not after some
+            # rsync jobs
+            src_sfl_id = existing_sfl.filter(servershare_id=srcshare_id).values('pk').get()['pk']
+            print(sfile, srcshare_id, dss, analysis)
+            dstpath = get_path(sfile, dstshare_pk, dss, analysis)
+            create_job('rsync_otherfiles_to_servershare', sfloc_id=src_sfl_id,
+                       dstshare_id=dstshare_pk, dstpath=dstpath)
+            # Add dstshare to src_shares as files are now there for next round of rsync
+            src_share_ids.append(dstshare_pk)
+            rsync_shares.remove(dstshare_pk)
+        # Re-check if exist have local etc files for remaining shares after this round
+        srcshare_id, dstshare_classes = ServerShare.classify_shares_by_rsync_reach(
+                src_share_ids, rsync_shares)
+        dstshares_in_round = dstshare_classes['local'] or dstshare_classes['rsync_sourcable']
 
-    else:
-        # File only on remote, rsync to first rsync capable server
-        src_sfl = sfile.storedfileloc_set.filter(active=True, servershare__active=True, 
-            servershare__fileservershare__server__active=True).values('servershare_id').first()
-        srcserver = FileserverShare.objects.filter(share_id=src_sfl['servershare_id'],
-                ).values('server_id').first()
-        dstshare_classes = ServerShare.classify_shares_by_rsync_reach([x for x in share_ids],
-                srcserver['server_id'])
-        if dstshare_classes['rsync_sourcable']:
-            rs_src_dstshare_id = dstshare_classes['rsync_sourcable'][0]
-            rs_src_dstpath = get_path(sfile, rs_src_dstshare_id, dss, analysis)
-
-        elif dstshare_classes['remote']:
-            # need to rsync to INBOX (as it is guaranteed to be on an rsyncing capable
-            # controller (and sensitive classed)
-            rs_src_dstshare_id = ServerShare.objects.filter(function=ShareFunction.INBOX
-                    ).values('pk').first()['pk']
-            rs_src_dstpath = get_path(sfile, rs_src_dstshare_id, dss, analysis)
-
-        else:
-            return JsonResponse({'error': 'There is no copy of a file on a storage server which '
-                'can be reached, or maybe the servers are not correctly registered'}, status=400)
-
-        rs_src_job = create_job('rsync_otherfiles_to_servershare', sfloc_id=existing_shares[0][0],
-                    dstshare_id=rs_src_dstshare_id, dstpath=rs_src_dstpath)
-        src_sfl_id = rs_src_job['kwargs']['dstsfloc_id']
-        remaining_share_ids = [x for x in share_ids if x != rs_src_job['kwargs']['dstshare_id']]
-
-    # Now distribute to remaining dst shares
-    rsync_shares =  [x for x in remaining_share_ids if x not in [x[1] for x in existing_shares]]
-    for share_id in rsync_shares:
-        dstpath = get_path(sfile, share_id, dss, analysis)
-        create_job('rsync_otherfiles_to_servershare', sfloc_id=src_sfl_id, dstshare_id=share_id,
-                dstpath=dstpath)
+    # Now only 2-step transfers over rsync possible, e.g. between 2 HPCs
+    if dstshare_classes['remote']:
+        # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
+        # controller (and sensitive classed)
+        inboxshare = ServerShare.objects.filter(
+                function=ShareFunction.INBOX).values('pk').first()
+        sflpk = existing_sfl.filter(servershare_id=srcshare_id).values('pk').get()['pk']
+        inboxjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflpk,
+                dstshare_id=inboxshare['pk'], dstpath=ServerShare.get_inbox_path())
+        for dstshare_id in dstshare_classes['remote']:
+            create_job('rsync_otherfiles_to_servershare', sfloc_id=inboxjob['kwargs']['dstsfloc_id'],
+                       dstshare_id=dstshare_id, path=get_path(sfile, dstshare_id, dss, analysis))
 
     # Delete files from excluded shares
     if rm_sfls := sfile.storedfileloc_set.filter(active=True).exclude(servershare__in=share_ids):
