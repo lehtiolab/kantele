@@ -55,7 +55,7 @@ class BaseFilesTest(BaseTest):
 class TestBrowserUpload(BaseIntegrationTest):
 
     def test_libfile(self):
-        url = f'{self.live_server_url}/files/upload/userfile/'
+        url = f'http://nginx/files/upload/userfile/'
         libfn = os.path.join(self.newstorctrl.path, 'libfiles', 'db.fa')
         data = {'ftype_id': self.lft.pk, 'uploadtype': rm.UploadFileType.LIBRARY, 'desc': 'abc',
                 'file': open(libfn, 'r')}
@@ -75,7 +75,7 @@ class TestBrowserUpload(BaseIntegrationTest):
         self.assertTrue(os.path.exists(os.path.join(self.libctrl.path, fn.filename)))
 
     def test_userfile(self):
-        url = f'{self.live_server_url}/files/upload/userfile/'
+        url = f'http://nginx/files/upload/userfile/'
         upfn = os.path.join(self.newstorctrl.path, 'libfiles', 'db.fa')
         data = {'ftype_id': self.lft.pk, 'uploadtype': rm.UploadFileType.USERFILE, 'desc': 'abc',
                 'file': open(upfn, 'r')}
@@ -107,7 +107,7 @@ class TestUploadScript(BaseIntegrationTest):
                 producer=self.adminprod, filetype=self.ft, uploadtype=rm.UploadFileType.RAWFILE)
         need_desc = 0
         #need_desc = int(self.uploadtype in [ufts.LIBRARY, ufts.USERFILE])
-        self.user_token = b64encode(f'{self.token}|{self.live_server_url}|{need_desc}'.encode('utf-8')).decode('utf-8')
+        self.user_token = b64encode(f'{self.token}|http://nginx|{need_desc}'.encode('utf-8')).decode('utf-8')
         self.actual_md5 = '1eab409e2965943f52df8e3c63874d5b'
 
     def tearDown(self):
@@ -162,7 +162,7 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertEqual(cmsjobs.count(), 1)
 
     def get_token(self, *, uploadtype=False):
-        resp = self.cl.post(f'{self.live_server_url}/files/token/', content_type='application/json',
+        resp = self.cl.post(f'http://nginx/files/token/', content_type='application/json',
                 data={'ftype_id': self.ft.pk, 'archive_only': False,
                     'uploadtype': uploadtype or rm.UploadFileType.RAWFILE})
         self.assertEqual(resp.status_code, 200)
@@ -216,7 +216,7 @@ class TestUploadScript(BaseIntegrationTest):
         explines = [f'Token OK, expires on {self.token["expires"]}',
                 'Registering 1 new file(s)', 
                 f'File {new_raw.name} has ID {new_raw.pk}, instruction: transfer',
-                f'Uploading {zipboxpath} to {self.live_server_url}',
+                    f'Uploading {zipboxpath} to http://nginx',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
         outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
@@ -272,7 +272,7 @@ class TestUploadScript(BaseIntegrationTest):
         explines = [f'Token OK, expires on {self.token["expires"]}',
                 'Registering 1 new file(s)', 
                 f'File {self.f3raw.name} has ID {self.f3raw.pk}, instruction: transfer',
-                f'Uploading {zipboxpath} to {self.live_server_url}',
+                    f'Uploading {zipboxpath} to http://nginx',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
         outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
@@ -297,7 +297,7 @@ class TestUploadScript(BaseIntegrationTest):
         shutil.copytree(fullp, os.path.join(outbox, self.f3sf.filename))
         timestamp = os.path.getctime(os.path.join(outbox, self.f3sf.filename))
         with open(os.path.join(tmpdir, 'config.json'), 'w') as fp:
-            json.dump({'client_id': self.prod.client_id, 'host': self.live_server_url,
+            json.dump({'client_id': self.prod.client_id, 'host': 'http://nginx',
 
                 'token': self.token, 'outbox': outbox, 'raw_is_folder': True,
                 'filetype_id': self.ft.pk, 'acq_process_names': ['TEST'],
@@ -319,7 +319,7 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Found new file: {os.path.join(outbox, newraw.name)} produced {timestamp}',
                 'Registering 1 new file(s)',
                 f'File {newraw.name} has ID {newraw.pk}, instruction: transfer',
-                f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to {self.live_server_url}',
+                    f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to http://nginx',
                 f'Moving file {newraw.name} to skipbox',
                 f'Another file in the system has the same name and is stored in the same path '
                 f'({self.f3sssinbox.path}/{self.f3sf.filename}). Please '
@@ -441,7 +441,7 @@ class TestUploadScript(BaseIntegrationTest):
         lastraw = rm.RawFile.objects.last()
         lastsf = rm.StoredFile.objects.last()
         with open(os.path.join(tmpdir, 'config.json'), 'w') as fp:
-            json.dump({'client_id': self.prod.client_id, 'host': self.live_server_url,
+            json.dump({'client_id': self.prod.client_id, 'host': 'http://nginx',
 
                 'token': self.token, 'outbox': outbox, 'raw_is_folder': True,
                 'filetype_id': self.ft.pk, 'acq_process_names': ['TEST'],
@@ -511,7 +511,7 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Found new file: {os.path.join(outbox, newraw.name)} produced {timestamp}',
                 'Registering 1 new file(s)',
                 f'File {newraw.name} has ID {newraw.pk}, instruction: transfer',
-                f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to {self.live_server_url}',
+                    f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to http://nginx',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
         # Remove warnings for upload.py ascii art
@@ -540,7 +540,7 @@ class TestUploadScript(BaseIntegrationTest):
                 securityclass=rm.DataSecurityClass.NOSECURITY)
         exta = am.ExternalAnalysis.objects.create(analysis=ana, description='bla', last_token=self.uploadtoken)
         need_desc = 0
-        self.user_token = b64encode(f'{self.token}|{self.live_server_url}|{need_desc}'.encode('utf-8')).decode('utf-8')
+        self.user_token = b64encode(f'{self.token}|http://nginx|{need_desc}'.encode('utf-8')).decode('utf-8')
         self.actual_md5 = 'dee94af7703a5beb01e8fdc84da018bb'
         fpath = os.path.join(self.rootdir, self.newstorctrl.path, self.f3sss.path, self.f3sf.filename)
         self.f3sf.filename = 'analysis.tdf'
@@ -580,7 +580,7 @@ class TestUploadScript(BaseIntegrationTest):
         explines = [f'Token OK, expires on {datetime.strftime(self.uploadtoken.expires, "%Y-%m-%d, %H:%M")}',
                 'Registering 1 new file(s)', 
                 f'File {new_raw.name} has ID {new_raw.pk}, instruction: transfer',
-                f'Uploading {fullp} to {self.live_server_url}',
+                    f'Uploading {fullp} to http://nginx',
                 f'Succesful transfer of file {fullp}',
                 ]
         outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
@@ -610,7 +610,7 @@ class TestUploadScript(BaseIntegrationTest):
         lastraw = rm.RawFile.objects.last()
         lastsf = rm.StoredFile.objects.last()
         with open(os.path.join(tmpdir, 'config.json'), 'w') as fp:
-            json.dump({'client_id': self.prod.client_id, 'host': self.live_server_url,
+            json.dump({'client_id': self.prod.client_id, 'host': 'http://nginx',
 
                 'token': self.token, 'outbox': outbox, 'raw_is_folder': True,
                 'filetype_id': self.ft.pk, 'acq_process_names': ['flock'],
@@ -659,7 +659,7 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Found new file: {os.path.join(outbox, newraw.name)} produced {timestamp}',
                 'Registering 1 new file(s)',
                 f'File {newraw.name} has ID {newraw.pk}, instruction: transfer',
-                f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to {self.live_server_url}',
+                    f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to http://nginx',
                 f'Succesful transfer of file {zipboxpath}',
                 # This is enough, afterwards the 'Checking new files in outbox' starts
                 ]
@@ -696,7 +696,7 @@ class TestUploadScript(BaseIntegrationTest):
         lastraw = rm.RawFile.objects.last()
         lastsf = rm.StoredFile.objects.last()
         with open(os.path.join(tmpdir, 'config.json'), 'w') as fp:
-            json.dump({'client_id': self.prod.client_id, 'host': self.live_server_url,
+            json.dump({'client_id': self.prod.client_id, 'host': 'http://nginx',
 
                 'token': self.token, 'outbox': outbox, 'raw_is_folder': True,
                 'filetype_id': self.ft.pk, 'acq_process_names': ['TEST'],
@@ -748,7 +748,7 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Found new file: {os.path.join(outbox, newraw.name)} produced {timestamp}',
                 'Registering 1 new file(s)',
                 f'File {newraw.name} has ID {newraw.pk}, instruction: transfer',
-                f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to {self.live_server_url}',
+                    f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to http://nginx',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
         outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
@@ -872,7 +872,7 @@ class TestUploadScript(BaseIntegrationTest):
         explines = [f'Token OK, expires on {self.token["expires"]}',
                 'Registering 1 new file(s)', 
                 f'File {new_raw.name} has ID {new_raw.pk}, instruction: transfer',
-                f'Uploading {zipboxpath} to {self.live_server_url}',
+                    f'Uploading {zipboxpath} to http://nginx',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
         outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
@@ -930,7 +930,7 @@ class TestUploadScript(BaseIntegrationTest):
         explines = [f'Token OK, expires on {self.token["expires"]}',
                 'Registering 1 new file(s)', 
                 f'File {new_raw.name} has ID {new_raw.pk}, instruction: transfer',
-                f'Uploading {zipboxpath} to {self.live_server_url}',
+                    f'Uploading {zipboxpath} to http://nginx',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
         outlines = [x for x in sperr.decode('utf-8').strip().split('\n')

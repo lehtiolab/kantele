@@ -33,7 +33,7 @@ $DOCKERCMD run -T web pylint -E --disable E1101,E0307 --ignore-paths '.*\/migrat
 echo Linting OK
 
 echo Prebuilding DB and MQ containers
-$DOCKERCMD up --detach --wait db mq
+$DOCKERCMD up --detach --wait db mq web nginx
 echo db and mq ready
 
 
@@ -53,11 +53,11 @@ echo Running tests
 TESTCMD="python manage.py test"
 if [[ -z "$1" ]]
 then
-    $DOCKERCMD run --use-aliases web $TESTCMD --tag slow --exclude-tag mstulos --exclude-tag home
-    $DOCKERCMD run --use-aliases web $TESTCMD --tag slow --exclude-tag mstulos --exclude-tag analysis --exclude-tag datasets --exclude-tag storage
-    $DOCKERCMD run --use-aliases web $TESTCMD --exclude-tag slow --exclude-tag mstulos
+    $DOCKERCMD exec web $TESTCMD --tag slow --exclude-tag mstulos --exclude-tag home
+    $DOCKERCMD exec web $TESTCMD --tag slow --exclude-tag mstulos --exclude-tag analysis --exclude-tag datasets --exclude-tag storage
+    $DOCKERCMD exec web $TESTCMD --exclude-tag slow --exclude-tag mstulos
 else
-    $DOCKERCMD run --use-aliases web $TESTCMD $1
+    $DOCKERCMD exec web $TESTCMD $1
 fi
 echo Clean Up
 # FIXME: update this so those files are removed

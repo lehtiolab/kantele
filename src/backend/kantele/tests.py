@@ -314,7 +314,7 @@ class ProcessJobTest(BaseTest):
 class BaseIntegrationTest(LiveServerTestCase):
     # use a live server so that jobrunner can interface with it (otherwise only dummy
     # test client can do that)
-    port = 80
+    port = 8010 ## 8009 is already used in container CMD, and this is an exec that runs django manage.py
     host = '0.0.0.0'
     jobrun_timeout = 2
 

@@ -59,9 +59,9 @@ services:
               source: ../../data/teststorage
               target: /storage
         environment:
-            KANTELEHOST: '0.0.0.0:80'
+            KANTELEHOST: nginx
             SECRET_KEY: test_secret
-            HOST_DOMAIN: 'web'
+            HOST_DOMAIN: nginx
             TESTING: 1
             PROTOCOL: http
             DB_HOST: db
@@ -70,6 +70,25 @@ services:
             TMP_UPLOADPATH: /storage/uploads
             QUEUE_QC_NXF: 'nextflow'
             HOST_UPLOADDIR: /storage/uploads
+            NGINX_DOWNLOAD_REDIRECT: /fake/
+
+    nginx:
+        image: nginx_dev
+        build:
+            context: ../
+            dockerfile: ./docker/Dockerfile
+            target: nginx_build
+            args:
+                USER_ID: "${USER_ID:-You must run export USER_ID}"
+                GROUP_ID: "${GROUP_ID:-You must run export GROUP_ID}"
+        depends_on:
+          web:
+            condition: service_healthy
+        ports:
+            - 80:80
+        volumes:
+            - ../../static:/static
+            - ./nginx_test.conf:/etc/nginx/nginx.conf
     
     db: 
         image: postgres:17.5
@@ -107,7 +126,7 @@ services:
               source: ../../data/teststorage
               target: /storage
         environment:
-            KANTELEHOST: web
+          KANTELEHOST: nginx
 
     storage_fastqueue_1:
         extends:
@@ -122,7 +141,7 @@ services:
               source: ../../data/teststorage
               target: /storage
         environment:
-            KANTELEHOST: web
+            KANTELEHOST: nginx
 
 
     storage_ssh_1:
@@ -160,7 +179,7 @@ services:
               source: ../../data/teststorage
               target: /storage
         environment:
-            KANTELEHOST: web
+            KANTELEHOST: nginx
             PROTOCOL: http
             RABBITHOST: mq
             RABBIT_VHOST: "${RABBIT_VHOST}"
@@ -183,7 +202,7 @@ services:
               source: ../../data/teststorage
               target: /storage
         environment:
-            KANTELEHOST: web
+            KANTELEHOST: nginx
 
     analysis_fastqueue_2:
         extends:
@@ -198,7 +217,7 @@ services:
               source: ../../data/teststorage
               target: /storage
         environment:
-            KANTELEHOST: web
+            KANTELEHOST: nginx
 
 
     analysis_ssh_2:
@@ -229,7 +248,7 @@ services:
             target: /storage
       command: celery -A kantele worker -Q scaninbox -n storage_downloads.%h --concurrency=1
       environment:
-          KANTELEHOST: web
+          KANTELEHOST: nginx
 
     storage_web_rsync:
         extends:
@@ -244,24 +263,27 @@ services:
               source: ../../data/teststorage
               target: /storage
         environment:
-            KANTELEHOST: web
+            KANTELEHOST: nginx
             RSYNC_SSHPORT: "${RSYNC_SSHPORT}"
             HOST_UPLOADDIR: /storage/uploads
 
-    storage_downloads:
+              # FIXME repurpose this!
+              # from DL from PX/external, to up/downloading off web HTTP
+              # dont think it is being used anyway in tests!
+    storage_updownloads:
         extends:
             file: ./docker-compose-dev.yml
             service: storage
         env_file:
             - testing.env
-        command: celery -A kantele worker -Q file_download -n storage_downloads.%h --concurrency=1
+        command: celery -A kantele worker -Q download__rsyncstorage -n storage_updownloads.%h --concurrency=1
         volumes:
           # Overwrite dev storage here
             - type: bind
               source: ../../data/teststorage
               target: /storage
         environment:
-            KANTELEHOST: web
+            KANTELEHOST: nginx
             RSYNC_SSHPORT: "${RSYNC_SSHPORT}"
             HOST_UPLOADDIR: /storage/uploads
 
@@ -285,7 +307,7 @@ services:
               source: ../../data/teststorage
               target: /storage
         environment:
-            KANTELEHOST: web
+            KANTELEHOST: nginx
             PROTOCOL: http
             RABBITHOST: mq
             RABBIT_VHOST: "${RABBIT_VHOST}"
@@ -323,7 +345,7 @@ services:
               source: ../../data/teststorage
               target: /storage
         environment:
-            KANTELEHOST: web
+            KANTELEHOST: nginx
 
     analysis_fastqueue_1:
         extends:
@@ -338,7 +360,7 @@ services:
               source: ../../data/teststorage
               target: /storage
         environment:
-            KANTELEHOST: web
+            KANTELEHOST: nginx
 
 
     upload_bay_rsync:
