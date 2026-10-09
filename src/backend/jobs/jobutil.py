@@ -13,6 +13,7 @@ alljobs = [
         dsjobs.RemoveDatasetFilesFromServershare,
         dsjobs.ConvertDatasetMzml,
         #dsjobs.DeleteDatasetPDCBackup,
+        dsjobs.DownloadDsetFilesToServerShare,
         rsjobs.RsyncOtherFileServershare,
         rsjobs.RsyncFileTransferFromWeb,
         rsjobs.RemoveFilesFromServershare,

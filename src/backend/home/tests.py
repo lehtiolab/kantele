@@ -192,22 +192,62 @@ class TestCreateMzmls(MzmlTests):
         self.assertTrue(os.path.exists(mzmlfn2))
 
     def test_create_mzml_qe_rsyncpush_and_refine(self):
-        '''Run conversion and then push files to other server w rsync job,
+        '''Dset is on 
+           - dss: ssnewstore
+           - dss2: analocalstor  converting to mzml on remoteanaserver)
+           - dss3: "dlshare"
+
+        DLshare is mounted on DLserver, can only download, no rsync keys
+
+        - Run conversion
+        - Rsync to inbox
+        - Rsync to ssnewstore
+        - Download to dlshare
+
+        and then push files to other server w rsync job,
+        and download job for third server
         newstorage is here not attached to storagecontroller,
         so need to push files first to inbox
         '''
+
+        # Remove anaprofile and newstorctrl, so dset cannot be analysed on anaserver
+        # and upload to ssnewstor goes through the inbox instead of rsync pull from 
+        # storagecontroller
         self.anaprofile.delete()
         self.newstorctrl.delete()
 
+        # fake webserver for downloading storage raws
+        webserver = rm.FileServer.objects.create(name='webserver', uri='web1.test',
+                fqdn='nginx', is_download_server=True)
+        websharestorage = rm.FileserverShare.objects.create(server=webserver,
+                share=self.ssnewstore, path='/task_downloads/storage')
+        # Data server which can only download:
+        dlserver = rm.FileServer.objects.create(name='download', uri='dl.test',
+                fqdn='dl_http_1', rsyncusername='', rsynckeyfile='')
+        dlshare = rm.ServerShare.objects.create(name='dlshare', max_security=1,
+                function=rm.ShareFunction.RAWDATA, maxdays_data=1)
+        dlctrl = rm.FileserverShare.objects.create(server=dlserver, share=dlshare,
+                path=os.path.join(self.rootdir, 'dlshare'))
+
+        # Setup dataset shares on ana server and download-to-server, e.g.
+        # no-rsync for 2FA is in the way
         rawfn = os.path.join(self.f3path, self.f3raw.name)
         dss2path = 'testdss2'
         dss2_fpath = os.path.join(self.oldstorctrl.path, dss2path)
+        dss3_fpath = os.path.join(dlctrl.path, dss2path)
         os.makedirs(dss2_fpath)
+        os.makedirs(dss3_fpath)
         rawfn_dss2 = os.path.join(dss2_fpath, self.f3raw.name)
+        rawfn_dss3 = os.path.join(dss3_fpath, self.f3raw.name)
         copytree(rawfn, rawfn_dss2)
+        copytree(rawfn, rawfn_dss3)
         dss2 = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.analocalstor,
                 storage_loc_ui=dss2path, storage_loc=dss2path, startdate=timezone.now())
+        dss3 = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=dlshare,
+                storage_loc_ui=dss2path, storage_loc=dss2path, startdate=timezone.now())
         rm.StoredFileLoc.objects.create(sfile=self.f3sf, servershare=self.analocalstor,
+                path=dss2path, active=True, purged=False)
+        rm.StoredFileLoc.objects.create(sfile=self.f3sf, servershare=dlshare,
                 path=dss2path, active=True, purged=False)
 
         self.f3sfmz.delete()
@@ -238,19 +278,26 @@ class TestCreateMzmls(MzmlTests):
         mzmlfn3 = os.path.join(self.f3path, mzmlfn)
         m3q = rm.StoredFileLoc.objects.filter(sfile=f3sfmz, servershare=self.ssnewstore,
                 path=self.storloc, active=True, purged=False)
+        mzmlfn4 = os.path.join(dss3_fpath, mzmlfn)
+        m4q = rm.StoredFileLoc.objects.filter(sfile=f3sfmz, servershare=dlshare,
+                path=dss2path, active=True, purged=False)
         self.assertFalse(m1q.filter(purged=True).exists())
         self.run_job() # run convert
         self.assertTrue(m1q.exists())
         self.assertFalse(m2q.exists())
         self.assertTrue(os.path.exists(mzmlfn1))
-        self.run_job() # running rsync to accessible primary dset on open storage
+        self.run_job() # running rsync to inbox since we cant access dset storage
         self.assertTrue(os.path.exists(mzmlfn2))
         self.assertTrue(m2q.exists())
         self.assertFalse(m3q.exists())
         self.assertFalse(os.path.exists(mzmlfn3))
         self.run_job() # rsync to second dset from primary controller
         self.assertTrue(os.path.exists(mzmlfn3))
+        self.assertFalse(os.path.exists(mzmlfn4))
         self.assertTrue(m3q.exists())
+        self.run_job() # download file to dss3 on download-only share
+        self.assertTrue(os.path.exists(mzmlfn4))
+        self.assertTrue(m4q.exists())
         self.run_job() # set to done
         j2 = jm.Job.objects.last()
         self.assertEqual(j2.state, 'done')

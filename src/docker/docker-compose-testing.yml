@@ -27,7 +27,7 @@ services:
                 condition: service_started
             analysis_ssh_2:
                 condition: service_started
-            storage_downloads:
+            storage_updownloads:
                 condition: service_started
             storage_web_rsync:
                 condition: service_started
@@ -70,7 +70,7 @@ services:
             TMP_UPLOADPATH: /storage/uploads
             QUEUE_QC_NXF: 'nextflow'
             HOST_UPLOADDIR: /storage/uploads
-            NGINX_DOWNLOAD_REDIRECT: /fake/
+            NGINX_DOWNLOAD_REDIRECT: /task_downloads
 
     nginx:
         image: nginx_dev
@@ -89,6 +89,7 @@ services:
         volumes:
             - ../../static:/static
             - ./nginx_test.conf:/etc/nginx/nginx.conf
+            - ../../data/teststorage:/download_storage
     
     db: 
         image: postgres:17.5
