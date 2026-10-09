@@ -1186,32 +1186,18 @@ def create_mzmls(request):
                 sfile__storedfileloc__id__in=produced_mzml, active=True)
         dstshare_ids_dss = {x.storageshare_id: x.pk for x in  dsmodels.DatasetServer.objects.filter(
             dataset=dset, active=True)}
-        src_share_ids = [source_ssid]
         rsync_shares = set(dstshare_ids_dss.keys())
-        srcshare_id, dstshare_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
-                src_share_ids, dstshare_ids_dss.keys())
-        dstshares_in_round = dstshare_classes['local'] or dstshare_classes['rsync_sourcable']
-        # Try first all local and all rsync_sourcable
-        while dstshares_in_round:
-            for dstshare_pk in dstshares_in_round:
-                # sfloc_ids are here per defintion created by job, but maybe not after some
-                # rsync jobs
-                src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
-                    servershare_id=srcshare_id).values('pk')]
-                srcjob = create_job('rsync_dset_files_to_servershare', dstshare_id=dstshare_pk,
-                        dss_id=dstshare_ids_dss[dstshare_pk], sfloc_ids=src_sfloc_ids)
-                # Add dstshare to src_shares as files are now there for next round of rsync
-                src_share_ids.append(dstshare_pk)
-                rsync_shares.remove(dstshare_pk)
-            # Re-check if exist have local etc files for remaining shares after this round
-            srcshare_id, dstshare_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
-                    src_share_ids, rsync_shares)
-            dstshares_in_round = dstshare_classes['local'] or dstshare_classes['rsync_sourcable']
+        # First rounds of distributing mzML through rsync or download
+        src_share_ids, rsync_shares, dstshare_classes, srcshare_id = distribute_produced_files(
+                [source_ssid], rsync_shares, dstshare_ids_dss, existing_sfl)
 
         # Now only 2-step transfers over rsync possible, e.g. between 2 HPCs
-        if dstshare_classes['remote']:
+        # firsr transfer to an inbox, then do the distribution
+        if rsync_shares and dstshare_classes['remote'] or dstshare_classes['download']:
             # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
             # controller (and sensitive classed)
+            # FIXME have 2 inboxes, one of them sens data, one of them web-HTTP
+            # web HTTP can also upload over HTTP?
             inboxshare = filemodels.ServerShare.objects.filter(
                     function=filemodels.ShareFunction.INBOX).values('pk').first()
             src_sflids_inbox = []
@@ -1221,11 +1207,47 @@ def create_mzmls(request):
                                       dstshare_id=inboxshare['pk'],
                         dstpath=filemodels.ServerShare.get_inbox_path(dset_id=dset.pk))
                 src_sflids_inbox.append(inboxjob['kwargs']['dstsfloc_id'])
-            for dstshare_id in dstshare_classes['remote']:
-                dstdss_pk = dstshare_ids_dss[dstshare_id]
-                create_job('rsync_dset_files_to_servershare', dss_id=dstdss_pk,
-                        sfloc_ids=src_sflids_inbox, dstshare_id=dstshare_id)
+            src_share_ids.append(inboxshare['pk'])
+            print('inbox done', src_share_ids, rsync_shares)
+            distribute_produced_files(src_share_ids, rsync_shares, dstshare_ids_dss, existing_sfl)
+
     return JsonResponse({})
+
+
+def distribute_produced_files(src_share_ids, rsync_shares, dstshare_ids_dss, existing_sfl):
+    '''Given source files and dst shares for files in a dataset, this will try to
+    place the files in the dst shares, by rsync or download from the web server (proxy)
+    as far as that is possible through DB-acquired knowledge of the shares accessibility.
+    '''
+    srcshare_id, dstshare_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
+            src_share_ids, dstshare_ids_dss.keys())
+    dstshares_in_round = (dstshare_classes['local'] or dstshare_classes['rsync_sourcable']
+                          or dstshare_classes['download'])
+    # Try first all local and all rsync_sourcable
+    while dstshares_in_round:
+        src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
+                servershare_id=srcshare_id).values('pk')]
+        for dstshare_pk in dstshares_in_round:
+            # sfloc_ids are here per defintion created by job, but maybe not after some
+            # rsync jobs
+            if dstshare_classes['local'] or dstshare_classes['rsync_sourcable']:
+                print('rsync it', srcshare_id, dstshare_pk)
+                srcjob = create_job('rsync_dset_files_to_servershare', dstshare_id=dstshare_pk,
+                        dss_id=dstshare_ids_dss[dstshare_pk], sfloc_ids=src_sfloc_ids)
+            else:
+                # Download job is different, same input kwargs though
+                print('download it')
+                srcjob = create_job('download_dset_to_servershare', dstshare_id=dstshare_pk,
+                            dss_id=dstshare_ids_dss[dstshare_pk], sfloc_ids=src_sfloc_ids)
+            # Add dstshare to src_shares as files are now there for next round of rsync
+            src_share_ids.append(dstshare_pk)
+            rsync_shares.remove(dstshare_pk)
+        # Re-check if exist have local etc files for remaining shares after this round
+        srcshare_id, dstshare_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
+                src_share_ids, rsync_shares)
+        dstshares_in_round = (dstshare_classes['local'] or dstshare_classes['rsync_sourcable']
+                           or dstshare_classes['download'])
+    return src_share_ids, rsync_shares, dstshare_classes, srcshare_id
 
 
 @require_POST
@@ -1331,32 +1353,16 @@ def refine_mzmls(request):
                 sfile__storedfileloc__id__in=produced_mzml, active=True)
         dstshare_ids_dss = {x.storageshare_id: x.pk for x in  dsmodels.DatasetServer.objects.filter(
             dataset=dset, active=True)}
-        src_share_ids = [source_ssid]
         rsync_shares = set(dstshare_ids_dss.keys())
-        srcshare_id, dstshare_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
-                src_share_ids, rsync_shares)
-        dstshares_in_round = dstshare_classes['local'] or dstshare_classes['rsync_sourcable']
-        # Try first all local and all rsync_sourcable
-        while dstshares_in_round:
-            for dstshare_pk in dstshares_in_round:
-                # sfloc_ids are here per defintion created by job, but maybe not after some
-                # rsync jobs
-                src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
-                    servershare_id=srcshare_id).values('pk')]
-                srcjob = create_job('rsync_dset_files_to_servershare', dstshare_id=dstshare_pk,
-                        dss_id=dstshare_ids_dss[dstshare_pk], sfloc_ids=src_sfloc_ids)
-                # Add dstshare to src_shares as files are now there for next round of rsync
-                src_share_ids.append(dstshare_pk)
-                rsync_shares.remove(dstshare_pk)
-            # Re-check if exist have local etc files for remaining shares after this round
-            srcshare_id, dstshare_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
-                    src_share_ids, rsync_shares)
-            dstshares_in_round = dstshare_classes['local'] or dstshare_classes['rsync_sourcable']
-
+        # First rounds of distributing mzML through rsync or download
+        src_share_ids, rsync_shares, dstshare_classes, srcshare_id = distribute_produced_files(
+                [source_ssid], rsync_shares, dstshare_ids_dss, existing_sfl)
         # Now only 2-step transfers over rsync possible, e.g. between 2 HPCs
-        if dstshare_classes['remote']:
+        # firsr transfer to an inbox, then do the distribution
+        if rsync_shares and dstshare_classes['remote'] or dstshare_classes['download']:
             # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
             # controller (and sensitive classed)
+            # FIXME have 2 inboxes, one of them sens data, one of them web-HTTP
             inboxshare = filemodels.ServerShare.objects.filter(
                     function=filemodels.ShareFunction.INBOX).values('pk').first()
             src_sflids_inbox = []
@@ -1366,10 +1372,8 @@ def refine_mzmls(request):
                                       dstshare_id=inboxshare['pk'],
                         dstpath=filemodels.ServerShare.get_inbox_path(dset_id=dset.pk))
                 src_sflids_inbox.append(inboxjob['kwargs']['dstsfloc_id'])
-            for dstshare_id in dstshare_classes['remote']:
-                dstdss_pk = dstshare_ids_dss[dstshare_id]
-                create_job('rsync_dset_files_to_servershare', dss_id=dstdss_pk,
-                        sfloc_ids=src_sflids_inbox, dstshare_id=dstshare_id)
+            src_share_ids.append(inboxshare['pk'])
+            distribute_produced_files(src_share_ids, rsync_shares, dstshare_ids_dss, existing_sfl)
 
     uwf = anmodels.UserWorkflow.objects.get(nfwfversionparamsets=data['wfid'],
             wftype=anmodels.UserWorkflow.WFTypeChoices.SPEC)

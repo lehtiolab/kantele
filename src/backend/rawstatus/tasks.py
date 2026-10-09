@@ -17,7 +17,7 @@ from tempfile import NamedTemporaryFile, TemporaryDirectory
 from django.urls import reverse
 
 from kantele import settings
-from celery import shared_task
+from celery import shared_task, states
 from celery.exceptions import MaxRetriesExceededError
 from jobs.post import update_db, taskfail_update_db
 
@@ -262,6 +262,63 @@ def rsync_transfer_file_web(self, sfloc_id, srcpath, dstsharepath, dstpath, dsts
             #update_db(url, json=postdata, msg=msg)
             raise
     print(msg)
+
+
+@shared_task(bind=True)
+def download_files_to_servershare(self, dstbasepath, dstpath, src_dst_sfloc_ids_fns):
+    '''Download file over HTTP to some server share that we cannot rsync-push to
+
+    dstbasepath: mount path of share on server, e.g. /mnt/storage
+    dstpath: storage path of file, e.g. project/experiment/file.raw
+    src_dst_sfloc_ids_fns: [(srcpk, dstpk, md5 of file, is file a folder (unzip)), ...]
+    '''
+    print('running download')
+    upd_url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
+    for src_sfl_pk, fname, dst_sfl_pk, md5_check, is_dir_stable_fn in src_dst_sfloc_ids_fns:
+        urlpath = reverse("files:download_to_share", kwargs={'sfloc_id': src_sfl_pk, 'task_id': self.request.id})
+        dl_url = urljoin(settings.KANTELEHOST, urlpath)
+        dighash = hashlib.md5()
+        dst = os.path.join(dstbasepath, dstpath, fname)
+        print(dl_url)
+        with requests.get(dl_url, stream=True) as req, NamedTemporaryFile(mode='wb') as wfp:
+            if req.status_code == 500:
+                print(req.text)
+                return
+            elif req.status_code != 200:
+                print(req.text)
+                msg = req.json()
+                taskfail_update_db(self.request.id, f'Could not download file {fname}: {msg}')
+                return
+            else:
+                print('thetext', req.text)
+                try:
+                    for chunk in req.iter_content(chunk_size=8192):
+                        print('this', chunk)
+                        if chunk:
+                            wfp.write(chunk)
+                        dighash.update(chunk)
+                    # stay in context until copied, else tempfile is deleted
+                    wfp.seek(0)
+                    dighash = dighash.hexdigest() 
+                    if dighash == md5_check:
+                        shutil.copy(wfp.name, dst)
+                        postdata = {'sfloc_id': dst_sfl_pk, 'dst_path': dstpath,
+                                'client_id': settings.APIKEY, 'task_id': self.request.id}
+                        update_db(upd_url, json=postdata)
+                    else:
+                        #self.retry
+                        pass
+                    print(dighash, md5_check)
+                    print(dst)
+                except Exception as e:
+                    # Possibly write or network error
+                    print(e)
+                    taskfail_update_db(self.request.id, 'Could not download or write file '
+                        f'{fname}: {e}')
+                    raise
+    taskurl = urljoin(settings.KANTELEHOST, reverse('jobs:settask'))
+    update_db(taskurl, json={'client_id': settings.APIKEY, 'task_id': self.request.id,
+        'state': states.SUCCESS})
 
 
 @shared_task(bind=True)

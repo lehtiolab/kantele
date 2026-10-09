@@ -554,12 +554,15 @@ async function saveShare(share) {
             </div>
             <div class="field is-horizontal">
               <div class="field-label is-normal">
-                <label class="label">Mount path</label>
+
+                <label class="label">Mount or URL path</label>
               </div>
               <div class="field-body">
                 <div class="field">
-                  <p class="control">
-                    <input class="input" placeholder="Can be empty" bind:value="{fss.path}" />
+                  <p class="control is-size-7">
+                    If you change mount path or urlpath, make sure it is changed in the filesystem
+                    or proxyserver config!
+                    <input class="input" placeholder="Empty, /mnt/to/storage, or urlpath e.g. /downloads" bind:value="{fss.path}" />
                   </p>
                 </div>
               </div>
