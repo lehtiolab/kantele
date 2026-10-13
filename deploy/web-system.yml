@@ -1,7 +1,6 @@
 --- 
 # Prepare server for Kantele on Ubuntu 24.04 LTS
 # All things to install but not the actual kantele deploy
-# Run again when e.g. TLS cert, apt updates
 # TODO: configure rsyslog to listen on TCP/UDP
 
 - hosts: kantele
@@ -74,47 +73,6 @@
             # read content of file
             key: "{{ lookup('file', 'ssh_key_rsync.pub') }}"
 
-      - name: TLS certificate directory exists
-        ansible.builtin.file:
-            path: "{{ tls_path }}"
-            state: directory
-            owner: root
-            group: root
-
-      - name: Install TLS certificate
-        ansible.builtin.copy:
-            src: 'tls_server.crt'
-            dest: "{{ tls_path }}/only_cert_no_chain.crt"
-            owner: root
-            group: root
-            mode: 0644
-
-      - name: Install TLS CA-cert bundle
-        ansible.builtin.copy:
-            src: 'ca.bundle.pem'
-            dest: "{{ tls_path }}/ca.bundle.pem"
-            owner: root
-            group: root
-            mode: 0644
-
-      - name: Concatenate ca bundle and no-chain-crt
-        ansible.builtin.shell: "cat {{ tls_path }}/only_cert_no_chain.crt {{ tls_path }}/ca.bundle.pem > {{ tls_path }}/{{ tls_cert }}"
-
-      - name: Finalize TLS certificate (mode, ownership)
-        ansible.builtin.file:
-            path: "{{ tls_path }}/{{ tls_cert }}"
-            owner: root
-            group: root
-            mode: 0644
-
-      - name: Install TLS certificate key
-        ansible.builtin.copy:
-            src: 'tls_server.key'
-            dest: "{{ tls_path }}/{{ tls_cert_key }}"
-            owner: root
-            group: root
-            mode: 0600
-
       - name: Create necessary folders for analysis serving, uploads
         ansible.builtin.file:
             path: "{{ item }}"
@@ -124,3 +82,4 @@
         loop:
             - "{{ host_uploadpath }}"
             - "{{ host_pgbackup_path }}"
+            - "{{ host_certbot_path }}/conf/live/{{ kantele_host }}"

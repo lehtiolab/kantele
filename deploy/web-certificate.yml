@@ -1,0 +1,83 @@
+--- 
+# Renew HTTPS TLS cert kantele
+
+- hosts: kantele
+  become: yes
+  become_user: '{{ kanteleuser }}'
+  tasks:
+      - name: Deploy templates with env variables for compose script and container insides
+        ansible.builtin.template:
+            src: '{{ item[0] }}'
+            dest: '{{ item[1] }}'
+        loop:
+            - ['.compose.prod.env.j2', '{{ compose_env_file }}']
+            - ['container_env_vars.j2', '{{ kanteledir }}/prod-container.env']
+            - ['nginx_prod.conf.j2', '{{ kanteledir }}/src/docker/nginx.conf']
+
+      - name: Create necessary folders for cert automation
+        ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: "{{ kanteleuser }}"
+            group: "{{ kantelegroup }}"
+        loop:
+            - "{{ host_certbot_path }}/conf/live/{{ kantele_host }}"
+
+      - name: Download TLS parameters
+        ansible.builtin.get_url:
+          url:  '{{ item[0] }}'
+          dest: '{{ item[1] }}'
+        loop:
+          - ["https://raw.githubusercontent.com/certbot/certbot/refs/heads/main/certbot/src/certbot/_internal/plugins/nginx/tls_configs/options-ssl-nginx.conf", "{{ host_certbot_path }}/conf/options-ssl-nginx.conf"]
+          - ["https://raw.githubusercontent.com/certbot/certbot/main/certbot/src/certbot/ssl-dhparams.pem", "{{ host_certbot_path }}/conf/ssl-dhparams.pem"]
+
+      # Determine if a path exists and is a directory.  Note that we need to test
+      # both that p.stat.isdir actually exists, and also that it's set to true.
+      - name: Get stats of certbot cert
+        ansible.builtin.stat:
+          path: "{{ host_certbot_path }}/conf"
+        register: certbot_path
+
+      # Open firewall for letsencrypt on port 80
+      - name: UFW allow web traffic on 80 from anywhere
+        community.general.ufw:
+            rule: allow
+            src: any
+            port: http
+
+      # Either install new cert if host_certbot_path not exist
+      - name: 
+        ansible.builtin.command: {{ dockercmd }} run --rm certbot \
+            certbot certonly --webroot -w /var/www/certbot \
+            --email {{ email }} \
+            -d {{ kantele_host }} \
+            --rsa-key-size {{ rsa_key_size }} \
+            --agree-tos \
+            --force-renewal" certbot
+        when: certbot_path.stat.isdir is not defined or not certbot_path.stat.isdir
+
+      # Or run the certbot renew thing
+      - name: 
+        ansible.builtin.command: {{ dockercmd }} run --rm certbot renew
+        when: certbot_path.stat.isdir is defined and certbot_path.stat.isdir
+
+      # Close firewall for letsencrypt on port 80
+      - name: UFW allow web traffic on 80 from anywhere
+        community.general.ufw:
+            rule: allow
+            src: any
+            port: http
+            delete: true
+
+      - name: Cron job for cert bot renews 
+        ansible.builtin.cron:
+            name: Renew TLS certificates for nginx
+            hour: "01"
+            job: "" # should run ansible script: open fw, bring up 
+
+      - name: Cron job for nginx reload config
+        ansible.builtin.cron:
+            name: Nginx reload config nightly in case of new certificates added
+            hour: "02"
+            job: "cd {{ kanteledir }} && {{ dockercmd }} exec nginx nginx -t && {{ dockercmd }} exec nginx nginx -s reload"
+

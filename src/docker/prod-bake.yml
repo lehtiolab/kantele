@@ -18,9 +18,3 @@ services:
             args:
                 USER_ID: "${USER_ID:-You must run export USER_ID}"
                 GROUP_ID: "${GROUP_ID:-You must run export GROUP_ID}"
-
-    db:
-        image: postgres:14.3
-
-    mq:
-        image: rabbitmq:3.10
