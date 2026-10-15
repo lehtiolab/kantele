@@ -14,6 +14,13 @@
             - ['container_env_vars.j2', '{{ kanteledir }}/prod-container.env']
             - ['nginx_prod.conf.j2', '{{ kanteledir }}/src/docker/nginx.conf']
 
+      # Determine if a path exists and is a directory.  Note that we need to test
+      # both that p.stat.isdir actually exists, and also that it's set to true.
+      - name: Get stats of certbot cert
+        ansible.builtin.stat:
+          path: "{{ host_certbot_path }}/conf/accounts"
+        register: certbot_path
+
       - name: Create necessary folders for cert automation
         ansible.builtin.file:
             path: "{{ item }}"
@@ -22,6 +29,7 @@
             group: "{{ kantelegroup }}"
         loop:
             - "{{ host_certbot_path }}/conf/live/{{ kantele_host }}"
+        when: certbot_path.stat.isdir is not defined or not certbot_path.stat.isdir
 
       - name: Download TLS parameters
         ansible.builtin.get_url:
@@ -30,13 +38,6 @@
         loop:
           - ["https://raw.githubusercontent.com/certbot/certbot/refs/heads/main/certbot/src/certbot/_internal/plugins/nginx/tls_configs/options-ssl-nginx.conf", "{{ host_certbot_path }}/conf/options-ssl-nginx.conf"]
           - ["https://raw.githubusercontent.com/certbot/certbot/main/certbot/src/certbot/ssl-dhparams.pem", "{{ host_certbot_path }}/conf/ssl-dhparams.pem"]
-
-      # Determine if a path exists and is a directory.  Note that we need to test
-      # both that p.stat.isdir actually exists, and also that it's set to true.
-      - name: Get stats of certbot cert
-        ansible.builtin.stat:
-          path: "{{ host_certbot_path }}/conf/accounts"
-        register: certbot_path
 
       # Open firewall for letsencrypt on port 80
       - name: UFW allow web traffic on 80 from anywhere
@@ -59,7 +60,15 @@
           chdir: "{{ kanteledir }}"
         when: certbot_path.stat.isdir is not defined or not certbot_path.stat.isdir
 
-      # Rebuild nginx so we get correct config containing also the letsencrypt stuff
+      - name: Build new nginx compose images
+        ansible.builtin.command:
+            cmd: "docker buildx bake --file src/docker/bake-nginx.yml"
+            chdir: "{{ kanteledir }}"
+        environment:
+            - USER_ID: '{{ kanteleuid }}'
+            - GROUP_ID: '{{ kantelegid }}'
+
+      # Recreate nginx container so we get correct config containing also the letsencrypt stuff
       # if there is a dummy cert the website will go down (if up)
       - name: Rebuild and start nginx 
         community.docker.docker_compose_v2:
@@ -72,7 +81,7 @@
                 - '{{ kanteledir }}/src/docker/docker-compose-prod.yml'
             env_files:
               - '{{ compose_env_file }}'
-            build: always
+            build: never
             recreate: always
 
       # Now nginx is running, delete dummy cert!
@@ -117,7 +126,7 @@
 
       - name: Nginx reload config with new cert
         ansible.builtin.shell:
-          cmd: "{{ dockercmd }} exec nginx -t && {{ dockercmd }} exec nginx -s reload"
+          cmd: "{{ dockercmd }} exec nginx nginx -t && {{ dockercmd }} exec nginx nginx -s reload"
           chdir: "{{ kanteledir }}"
 
       # This job doesnt hurt but it is not relevant unless we start with auto
