@@ -460,10 +460,10 @@ class TestUploadScript(BaseIntegrationTest):
         classifyjob = jm.Job.objects.filter(funcname='classify_msrawfile', kwargs={
             'sfloc_id': newsfloc.pk, 'token': self.token})
         classifytask = jm.Task.objects.filter(job__funcname='classify_msrawfile', job__kwargs__sfloc_id=newsfloc.pk)
-        rsjobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare', kwargs__sfloc_id=newsfloc.pk, kwargs__dstshare_id=self.ssnewstore.pk,
+        rsjobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare', kwargs__sfloc_ids=[newsfloc.pk], kwargs__dstshare_id=self.ssnewstore.pk,
             kwargs__dstpath=os.path.join(settings.QC_STORAGE_DIR, self.prod.name))
         nfrsjobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
-                kwargs__sfloc_id=self.nfc_loc.pk, kwargs__dstshare_id=self.ssnewstore.pk)
+                kwargs__sfloc_ids=[self.nfc_loc.pk], kwargs__dstshare_id=self.ssnewstore.pk)
         self.assertEqual(classifyjob.count(), 1)
         self.assertEqual(classifytask.count(), 0)
         self.assertEqual(rsjobs.count(), 0)
@@ -1018,7 +1018,7 @@ class TransferStateTest(BaseFilesTest):
             'oldname': sflib.filename, 'newname': f'libfile_{lf.pk}_{sflib.filename}'})
         self.assertEqual(jobs.count(), 1)
         jobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
-                kwargs__sfloc_id=sfloc.pk, kwargs__dstshare_id=remotesslib.pk,
+                kwargs__sfloc_ids=[sfloc.pk], kwargs__dstshare_id=remotesslib.pk,
                 kwargs__dstpath=settings.LIBRARY_FILE_PATH)
         self.assertEqual(jobs.count(), 1)
         pdcjobs = jm.Job.objects.filter(funcname='create_pdc_archive', kwargs={
@@ -1503,7 +1503,7 @@ class TestDeleteFile(BaseFilesTest):
                 data={'item_id': self.oldsf.pk, 'force': True})
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
-            kwargs__sfloc_id=self.oldsss.pk, kwargs__dstshare_id=self.ssinbox.pk).exists())
+            kwargs__sfloc_ids=[self.oldsss.pk], kwargs__dstshare_id=self.ssinbox.pk).exists())
         self.assertTrue(jm.Job.objects.filter(funcname='create_pdc_archive',
             kwargs__sfloc_id=self.oldsf.storedfileloc_set.get(servershare=self.ssinbox).pk).exists())
         self.assertTrue(jm.Job.objects.filter(funcname='purge_files',

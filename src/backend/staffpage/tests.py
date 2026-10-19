@@ -37,7 +37,7 @@ class QueueNewFile(BaseQCFileTest):
 
     def test_run_new_qc(self):
         mv_jobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare', state=jj.Jobstates.PENDING,
-                kwargs__sfloc_id=self.tmpsss.pk)
+                kwargs__sfloc_ids=[self.tmpsss.pk])
         qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow',
                 state=jj.Jobstates.PENDING)
         self.assertEqual(mv_jobs.count(), 0)
@@ -53,7 +53,7 @@ class QueueNewFile(BaseQCFileTest):
         jm.Job.objects.create(funcname='run_longit_qc_workflow', state=jj.Jobstates.ERROR,
                 kwargs={'sfloc_id': self.tmpsss.pk}, timestamp=timezone.now())
         mv_jobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare', state=jj.Jobstates.PENDING,
-                kwargs__sfloc_id=self.tmpsss.pk)
+                kwargs__sfloc_ids=[self.tmpsss.pk])
         qc_jobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow',
                 state=jj.Jobstates.PENDING)
         self.assertEqual(mv_jobs.count(), 0)

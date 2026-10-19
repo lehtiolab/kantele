@@ -2,6 +2,7 @@ import requests
 
 from celery import states
 from django.utils import timezone
+from django.db.models import Q
 
 from kantele import settings
 from jobs.models import Task, Job, JobError
@@ -71,6 +72,11 @@ class BaseJob:
     # as long as we dont have proper on_delete cleanup - this is needed
     # to avoid having created file entries that are needed downstream
     can_be_canceled = False
+
+    # is this a job on a dataset? Runner will know and wait for dset, if it is
+    # not but still has sfloc_ids it will wait for those
+    is_dset_job = False
+
     # FIXME in most cases, kwargs is passed as a **dict, since we dont know what is in it
     # except inside the specific job, and on instantiation. This means it's not necessary
     # to pass AND receive with ** - may as well be a dict. It's a bit dirty though,
@@ -226,7 +232,7 @@ class BaseJob:
                 else:
                     path = extra_sfl['path']
                 newjobs.append({'name': 'rsync_otherfiles_to_servershare',
-                    'kwargs': {'sfloc_id': extra_sfl['pk'], 'dstshare_id': dstshare_id,
+                    'kwargs': {'sfloc_ids': [extra_sfl['pk']], 'dstshare_id': dstshare_id,
                         'dstpath': path}})
         return newjobs
 
@@ -235,14 +241,19 @@ class BaseJob:
         add those to the get_sf_ids_for_filejobs but then you wouldnt be able to run two
         analyses in parallel if theyd use the same DB or server config file.
         '''
+        # FIXME now it looks for hits in kwargs__sfloc_ids in , and from kwargs__singlefiles etc,
+        # so it is pretty specific to analysis and rsync_otherfile, can we make it more general?
         if sfpks := self._get_extrafiles_to_rsync(**kwargs):
             # This is run for any job that has extrafiles (i.e. analysis jobs)
-            all_sfl = StoredFileLoc.objects.filter(sfile_id__in=sfpks, active=True).values('pk')
-            return Job.objects.filter(kwargs__sfloc_id__in=[x['pk'] for x in all_sfl])
-        elif sfl := kwargs.get('sfloc_id'):
-            jobs_to_wait = []
+            sfl_q = Q()
+            for sfl in StoredFileLoc.objects.filter(sfile_id__in=sfpks, active=True).values('pk'):
+                sfl_q = sfl_q | Q(kwargs__sfloc_ids__contains=sfl['pk'])
+            return Job.objects.filter(sfl_q)
+
+        elif not self.is_dset_job and (sfls := kwargs.get('sfloc_id')):
             # Other way around, this single file job has to wait for analysis jobs
-            sf = StoredFile.objects.filter(storedfileloc__id=sfl).values('pk').get()
+            jobs_to_wait = []
+            sf = StoredFile.objects.filter(storedfileloc__id=sfls).values('pk').get()
             for job in Job.objects.filter(state__in=JOBSTATES_RUNNER_WAIT, kwargs__inputs__has_any_keys=[
                         'singlefiles', 'multifiles']).values('pk', 'kwargs', 'timestamp', 'state'):
                 extrafn_sfpk = [
@@ -253,7 +264,6 @@ class BaseJob:
                     jobs_to_wait.append(job['pk'])
             return Job.objects.filter(pk__in=jobs_to_wait)
         else:
-            # Dset jobs etc are expected to wait via sfloc_ids anyway
             return Job.objects.none()
 
     def get_rf_ids_for_filejobs(self):
@@ -337,6 +347,7 @@ class DatasetJob(BaseJob):
     then, not only for the files-to-be-added, which is good since otherwise you could start
     an analysis on the dataset without those files, for example.
     '''
+    is_dset_job = True
 
     def get_dsids_jobrunner(self, **kwargs):
         return [x.pk for x in dm.Dataset.objects.filter(datasetserver__pk=kwargs['dss_id'])]
@@ -366,6 +377,8 @@ class DatasetJob(BaseJob):
 
 class MultiDatasetJob(BaseJob):
     '''For jobs on multiple datasets, currently NF search job'''
+
+    is_dset_job = True
 
     def get_dss_ids(self, **kwargs):
         return kwargs['dss_ids']

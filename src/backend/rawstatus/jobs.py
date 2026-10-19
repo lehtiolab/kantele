@@ -23,10 +23,9 @@ def get_host_upload_dst(web_dst):
     return web_dst.replace(settings.TMP_UPLOADPATH, settings.HOST_UPLOADDIR, 1)
 
 
-class RsyncOtherFileServershare(SingleFileJob):
-    '''Does the same as rsync dset, but for when files are not in a dataset
-
-    Dst path will be identical to src path, if not given.
+class RsyncOtherFileServershare(MultiFileJob):
+    '''Does the same as rsync dset, but for when files are not in a dataset, or
+    only part of a dataset (i.e. mzMLs) need syncing
     '''
     refname = 'rsync_otherfiles_to_servershare'
     queue = False
@@ -37,54 +36,52 @@ class RsyncOtherFileServershare(SingleFileJob):
 
     def on_create_addkwargs(self, **kwargs):
         '''Create destination sfloc db rows'''
-        if kwargs.get('dstsfloc_id', False):
-            dstsfl = rm.StoredFileLoc.objects.get(pk=kwargs['dstsfloc_id'])
-            return {'dstshare_id': dstsfl.servershare_id}
-        else:
-            sfl = self.oncreate_getfiles_query(**kwargs).values('sfile_id', 'path').get()
-            dstpath = kwargs.get('dstpath', sfl['path'])
+        dstsfls = []
+        for sfl in self.oncreate_getfiles_query(**kwargs).values('sfile_id', 'path'):
             dstsfl, _ = rm.StoredFileLoc.objects.update_or_create(sfile_id=sfl['sfile_id'],
-                    servershare_id=kwargs['dstshare_id'], defaults={'path': dstpath, 'active': True})
-            return {'dstsfloc_id': dstsfl.pk, 'dstshare_id': dstsfl.servershare_id}
+                    servershare_id=kwargs['dstshare_id'], defaults={'path': kwargs['dstpath'],
+                    'active': True})
+            dstsfls.append(dstsfl.pk)
+        return {'dstsfloc_ids': dstsfls}#, 'dstshare_id': dstsfl.servershare_id}
 
     def check_error_on_creation(self, **kwargs):
         '''This should check errors on creation, i.e. files crashing with other files etc,
         which means we cannot check for database fields reflecting an immediate current state (e.g. purged sfl)
         '''
-        srcsfl = self.oncreate_getfiles_query(**kwargs).values('sfile__filename', 'path').get()
-        dstpath = kwargs.get('dstpath', srcsfl['path'])
-        if rm.StoredFileLoc.objects.filter(sfile__filename=srcsfl['sfile__filename'],
-                path=dstpath, servershare_id=kwargs['dstshare_id'], active=True).exists():
-            return ('There is already a file existing with the same name as a the target file'
-                    f' in path {srcsfl["path"]}')
-        return self._check_error_either(srcsfl, **kwargs)
+        srcsfls = self.oncreate_getfiles_query(**kwargs).values('sfile__filename', 'path',
+                                                                'servershare_id')
+        if srcsfls.distinct('servershare_id').count() > 1:
+            return ('This job rsync_otherfiles needs all files to come from same source resp. '
+                    'destination servers. Please contact admin to report this bug.')
 
-    def _check_error_either(self, srcsfl, **kwargs):
+        if rm.StoredFileLoc.objects.filter(sfile__filename__in=[x['sfile__filename'] for x in srcsfls],
+                path=kwargs['dstpath'], servershare_id=kwargs['dstshare_id'], active=True).exists():
+            return ('There is already a file existing with the same name as a the target file'
+                    f' in path {kwargs["dstpath"]}')
+        return self._check_error_either(srcsfls, **kwargs)
+
+    def _check_error_either(self, srcsfls, **kwargs):
         # Check for storage_loc_ui in the on_creation error check
-        err_fpath = os.path.join(srcsfl['path'], srcsfl['sfile__filename'])
-        err_dss = dm.DatasetServer.objects.filter(storageshare_id=kwargs['dstshare_id'],
-                storage_loc_ui=err_fpath)
-        if err_dss.exists():
-            return (f'There is already a dataset with the exact path as the target file {err_fpath}, '
-                    f'namely dataset {err_dss.values("pk").get()["pk"]}. Consider renaming the dataset.')
-        else:
-            return False
+        for srcsfl in srcsfls:
+            err_fpath = os.path.join(srcsfl['path'], srcsfl['sfile__filename'])
+            err_dss = dm.DatasetServer.objects.filter(storageshare_id=kwargs['dstshare_id'],
+                    storage_loc_ui=err_fpath)
+            if err_dss.exists():
+                return (f'There is already a dataset with the exact path as the target file {err_fpath}, '
+                        f'namely dataset {err_dss.values("pk").get()["pk"]}. Consider renaming the dataset.')
+        return False
             
     def check_error_on_running(self, **kwargs):
-        srcsfl = self.getfiles_query(**kwargs).values('sfile__filename', 'path').get()
-        if rm.StoredFileLoc.objects.exclude(pk=kwargs['dstsfloc_id']).filter(
-                sfile__filename=srcsfl['sfile__filename'], path=srcsfl['path'],
+        srcsfl = self.getfiles_query(**kwargs).values('sfile__filename', 'path')
+        if rm.StoredFileLoc.objects.exclude(pk__in=kwargs['dstsfloc_ids']).filter(
+                sfile__filename__in=[x['sfile__filename'] for x in srcsfl], path=kwargs['dstpath'],
                 servershare_id=kwargs['dstshare_id'], active=True).exists():
             return ('There is already a file existing with the same name as a the target file'
-                    f' in path {srcsfl["path"]}')
+                    f' in path {kwargs["dstpath"]}')
         return self._check_error_either(srcsfl, **kwargs)
 
     def process(self, **kwargs):
-        try:
-            srcsfl = self.getfiles_query(**kwargs).values('sfile__filename', 'path', 'servershare_id',
-                'sfile__filetype__is_folder', 'sfile__mzmlfile').get()
-        except rm.StoredFileLoc.DoesNotExist:
-            raise RuntimeError('Cannot find source file, maybe the storage share has been deactivated?')
+        srcsfls = self.getfiles_query(**kwargs)
         try:
             dstshare = rm.ServerShare.objects.values('pk', 'name').get(pk=kwargs['dstshare_id'], active=True)
         except rm.ServerShare.DoesNotExist:
@@ -92,30 +89,35 @@ class RsyncOtherFileServershare(SingleFileJob):
                     f'{kwargs["dstshare_id"]}, maybe it is not configured correctly')
 
         # Check if target sflocs already exist in a nonpurged state in wrong path?
-        dstsfl = rm.StoredFileLoc.objects.filter(pk=kwargs['dstsfloc_id'])
+        dstsfl = rm.StoredFileLoc.objects.filter(pk__in=kwargs['dstsfloc_ids'])
         if dstsfl.filter(purged=False).exclude(servershare_id=dstshare['pk']).exists():
             raise RuntimeError('There is an existing target file in another location than the '
             'dataset'
                     ' - contact admin, make sure files are consolidated before sync to a new location')
         if not dstsfl.exists():
-            # skip FIXME is this ok? please document why
+            # skip FIXME is this ok? please document why we check if there is NO dst sfloc and skip that
+            # use case???
             return
 
         # Select file servers to rsync from/to
-        srcserver, dstserver, rsyncservername, src_user, dst_user, rskey = self._select_rsync_server(srcsfl['servershare_id'], kwargs['dstshare_id'])
+        srcloc_one = srcsfls.values('servershare_id', 'path').get()
+        srcserver, dstserver, rsyncservername, src_user, dst_user, rskey = self._select_rsync_server(srcloc_one['servershare_id'], kwargs['dstshare_id'])
 
         # Now run job
         self.queue = self.get_server_based_queue(rsyncservername, settings.QUEUE_STORAGE)
-        srcpath = os.path.join(srcserver['path'], srcsfl['path'])
-        dstpath = dstsfl.values('path').get()['path']
-        if srcsfl['sfile__mzmlfile']:
-            isdir = False
-        else:
-            isdir = srcsfl['sfile__filetype__is_folder']
+        srcpath = os.path.join(srcserver['path'], srcloc_one['path'])
+        fns = {}
+        for srcsfl in srcsfls.values('sfile__filename', 'path', 'servershare_id',
+                    'sfile__filetype__is_folder', 'sfile__mzmlfile'):
+            srcpath = os.path.join(srcserver['path'], srcsfl['path'])
+            if srcsfl['sfile__mzmlfile']:
+                isdir = False
+            else:
+                isdir = srcsfl['sfile__filetype__is_folder']
+            fns[srcsfl['sfile__filename']] = isdir
         self.run_tasks.append((src_user, srcserver['server__fqdn'], srcpath, dst_user,
-            dstserver['server__fqdn'], dstserver['path'], dstpath, rskey,
-            {srcsfl['sfile__filename']: isdir},
-            [kwargs['dstsfloc_id']]))
+            dstserver['server__fqdn'], dstserver['path'], kwargs['dstpath'], rskey, fns,
+            kwargs['dstsfloc_ids']))
 
 
 class RemoveFilesFromServershare(RemoveDatasetFilesFromServershare):

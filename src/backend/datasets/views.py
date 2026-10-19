@@ -635,19 +635,17 @@ def update_storage_shares(share_ids, project, experiment, dset, dtype, prefrac, 
                 # controller (and sensitive classed)
                 inboxshare = filemodels.ServerShare.objects.filter(
                         function=filemodels.ShareFunction.INBOX).values('pk').first()
-                src_sflids_inbox = []
-                for sflpk in [x['pk'] for x in existing_sfl.filter(
-                            servershare_id=srcshare_id).values('pk')]:
-                    inboxjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflpk,
-                                          dstshare_id=inboxshare['pk'],
+                sflpks = [x['pk'] for x in existing_sfl.filter(
+                            servershare_id=srcshare_id).values('pk')]
+                inboxjob = create_job('rsync_otherfiles_to_servershare', sfloc_ids=sflpks,
+                            dstshare_id=inboxshare['pk'],
                             dstpath=filemodels.ServerShare.get_inbox_path(dset_id=dset.pk))
-                    src_sflids_inbox.append(inboxjob['kwargs']['dstsfloc_id'])
             for dstshare_id in dstshare_classes['remote']:
                 dstdss = dss_shares[dstshare_id]
                 dstdss.storage_loc = dstdss.storage_loc_ui
                 dstdss.save()
                 create_job('rsync_dset_files_to_servershare', dss_id=dstdss.pk,
-                        sfloc_ids=src_sflids_inbox, dstshare_id=dstshare_id)
+                        sfloc_ids=inboxjob['kwargs']['dstsfloc_id'], dstshare_id=dstshare_id)
 
         else:
             # This should not happen! dset.deleted should have been set, show error to user
