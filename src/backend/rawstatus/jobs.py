@@ -4,6 +4,7 @@ from urllib.parse import urlsplit, urlparse, urljoin
 import ftplib
 from datetime import datetime
 from django.utils import timezone
+from django.db.models import Q
 
 from rawstatus import tasks
 from rawstatus import models as rm
@@ -118,6 +119,70 @@ class RsyncOtherFileServershare(MultiFileJob):
         self.run_tasks.append((src_user, srcserver['server__fqdn'], srcpath, dst_user,
             dstserver['server__fqdn'], dstserver['path'], kwargs['dstpath'], rskey, fns,
             kwargs['dstsfloc_ids']))
+
+
+class HttpUploadFilesServershare(RsyncOtherFileServershare):
+    '''When you cant rsync push/pull 
+    through web/nginx
+    '''
+    refname = 'http_upload_servershare'
+    queue = False
+    task = tasks.upload_files_to_inbox
+
+    def process(self, **kwargs):
+        srcsfs = self.getfiles_query(**kwargs)
+        try:
+            dstshare = rm.ServerShare.objects.values('pk', 'name').get(pk=kwargs['dstshare_id'], active=True)
+        except rm.ServerShare.DoesNotExist:
+            raise RuntimeError('Cannot find specified destination share with ID '
+                    f'{kwargs["dstshare_id"]}, maybe it is not configured correctly')
+
+        # Check if target sflocs already exist in a nonpurged state in wrong path?
+        dstsfl = rm.StoredFileLoc.objects.filter(pk__in=kwargs['dstsfloc_ids'])
+        if dstsfl.filter(purged=False).exclude(servershare_id=dstshare['pk']).exists():
+            raise RuntimeError('There is an existing target file in another location than the '
+            'dataset'
+                    ' - contact admin, make sure files are consolidated before sync to a new location')
+        if not dstsfl.exists():
+            # skip FIXME is this ok? please document why we check if there is NO dst sfloc and skip that
+            # use case???
+            return
+
+        # FIXME make sure that only one srcpath is used in this job
+        # when creating the job
+
+        srcloc = srcsfs.values('path', 'servershare_id').first()
+
+        ## Check if target sflocs already exist in a nonpurged state in wrong path?
+        or_wrongloc_q = Q(path=kwargs['dstpath']) | Q(servershare_id=dstshare['pk'])
+        all_dstsfls = rm.StoredFileLoc.objects.filter(pk__in=kwargs['dstsfloc_ids']) 
+        if all_dstsfls.filter(purged=False).exclude(or_wrongloc_q).exists():
+            raise RuntimeError('There are existing target files in another location than the dataset'
+                    ' - contact admin, make sure files are consolidated before sync to a new location')
+        if all_dstsfls.count() == 0:
+            # Do not error on empty dataset, just skip
+            return
+
+        # Make src/dst id mapping so task can report updates for each file
+        src_dst_matched = {}
+        for srcsfl in srcsfs.values('pk', 'sfile_id', 'sfile__filename'):
+            src_dst_matched[srcsfl['sfile_id']] = [srcsfl['sfile__filename'], srcsfl['pk']]
+        for dstsfl in all_dstsfls.values('pk', 'sfile_id', 'sfile__filetype__is_folder',
+                'sfile__mzmlfile'):
+            if dstsfl['sfile__mzmlfile']:
+                print('mzml is not folder')
+                isdir = False
+            else:
+                isdir = dstsfl['sfile__filetype__is_folder']
+                print('folder:', isdir)
+            src_dst_matched[dstsfl['sfile_id']].extend([dstsfl['pk'], isdir])
+        src_dst_matched = [x for x in src_dst_matched.values()]
+                
+        srcserver = rm.FileserverShare.objects.filter(server__active=True,
+                    share_id=srcloc['servershare_id']).values('path', 'server__name').first()
+        # Now run job
+        self.queue = self.get_server_based_queue(srcserver['server__name'], settings.QUEUE_STORAGE)
+        self.run_tasks.append((os.path.join(srcserver['path'], srcloc['path']), kwargs['inbox_fss'], src_dst_matched))
 
 
 class RemoveFilesFromServershare(RemoveDatasetFilesFromServershare):

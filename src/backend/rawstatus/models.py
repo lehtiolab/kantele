@@ -79,6 +79,8 @@ class FileServer(models.Model):
     # username/keyfilename are for access TO this server 
     is_download_server = models.BooleanField(default=False,
         help_text='This server is used for downloading data from')
+    is_upload_server = models.BooleanField(default=False,
+        help_text='This server is used for uploading data from over HTTP')
     rsyncusername = models.TextField(blank=True)
     rsynckeyfile = models.TextField(blank=True)
 
@@ -197,24 +199,47 @@ class ServerShare(models.Model):
                 download_shares = [x['share_id'] for x in fss_dst_dl.distinct('share_id'
                             ).values('share_id')]
 
-            # files need pulling from one rsync remote share, then pushing to another.
-            # In between they land on INBOX share
-            # If source server can pull but cannot push (no can_rsync), and
-            # dst server cannot pull (no can_rsync), 
-            fss_dst_rm = fss_dst_rs.filter(server__can_rsync_remote=False)
-            if fss_src_pull.filter(server__can_rsync_remote=False) and fss_dst_rm:
-                remote_shares = [x['share_id'] for x in fss_dst_rm.exclude(
-                    share_id__in=[*localdstshares, *rsync_ssh_dstshares]).distinct('share_id'
-                    ).values('share_id')]
+            # Files that are not in the previous source/dst categories
+            # need a detour through INBOX share:
+            remote_dst_shares = fss_dst.exclude(
+                    share_id__in=[*localdstshares, *rsync_ssh_dstshares])
+            # Shares that can rsync AFTER a move to inbox. All shares are expected to be able to
+            # download from web share as they need to connect to web anyway for task updates
+            remote_dst_rs = remote_dst_shares.filter(Q(server__can_rsync_remote=True) | ~Q(server__rsyncusername=''))
+            inbox_shares = FileserverShare.objects.filter(server__active=True,
+                    share__active=True, share__function=ShareFunction.INBOX)
+            remote_rs_shares, http_upload_shares = [], []
+            push_inbox_id, pull_inbox_id, http_inbox_id = False, False, False
+            # Either we rsync push from src to inbox (probably rare)
+            # FIXME which inbox can be put here too! Can be multiple shares mounted on same server!
+            # We must make sure there is no write access to the download share, and that
+            # it wont be selected here in this picker
+            if fss_src.filter(server__can_rsync_remote=True) and remote_dst_rs and (
+                    inbox_rs_q := inbox_shares.exclude(server__rsyncusername='')):
+                push_inbox_id = inbox_rs_q.values('share_id').first()['share_id']
+                remote_rs_shares = [x['share_id'] for x in remote_dst_rs.distinct(
+                    'share_id').values('share_id')]
+            # Or we pull to inbox through inbox controller which is likely to have keys
+            if fss_src_pull and (inbox_rs_q := inbox_shares.filter(server__can_rsync_remote=True)):
+                pull_inbox_id = inbox_rs_q.values('share_id').first()['share_id']
+                remote_rs_shares.extend([x['share_id'] for x in remote_dst_rs.exclude(
+                    share_id__in=remote_rs_shares).distinct('share_id').values('share_id')])
+            # There are no keys so we will try to select an inbox on a server
+            # with uploading over HTTP capabilities, this should not be allowed for
+            # sensitive data
+            if inbox_http_q := inbox_shares.filter(server__is_upload_server=True):
+                http_inbox_id = inbox_http_q.values('pk').first()['pk']
+                http_upload_shares.extend([x['share_id'] for x in remote_dst_shares.exclude(
+                    share_id__in=remote_rs_shares).distinct('share_id').values('share_id')])
 
-            # FIXME need class to upload to distribute? Or should that be automatic
-            # as soon as a file is produced on eg a 2FA-server?
             has_local = has_local or len(localdstshares)
             has_sourcable = has_sourcable or len(rsync_ssh_dstshares)
-
             dstshares_classified_per_src.append((srcshareid, {'local': localdstshares,
-                        'rsync_sourcable': rsync_ssh_dstshares, 'remote': remote_shares,
-                        'download': download_shares}))
+                    'rsync_sourcable': rsync_ssh_dstshares,
+                    'http_inbox_id': http_inbox_id,
+                    'rsync_inbox_id': push_inbox_id or pull_inbox_id,
+                    'download': download_shares,
+            }))
 
         # If there are multiple src_shares, optimize for the one with most local dstshares
         # on the same server

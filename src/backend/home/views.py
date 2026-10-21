@@ -1192,24 +1192,62 @@ def create_mzmls(request):
                 [source_ssid], rsync_shares, dstshare_ids_dss, existing_sfl)
 
         # Now only 2-step transfers over rsync possible, e.g. between 2 HPCs
-        # firsr transfer to an inbox, then do the distribution
-        if rsync_shares and dstshare_classes['remote'] or dstshare_classes['download']:
-            # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
-            # controller (and sensitive classed)
-            # FIXME have 2 inboxes, one of them sens data, one of them web-HTTP
-            # web HTTP can also upload over HTTP?
-            inboxshare = filemodels.ServerShare.objects.filter(
-                    function=filemodels.ShareFunction.INBOX).values('pk').first()
-            src_sflids_inbox = []
-            for sflpk in [x['pk'] for x in existing_sfl.filter(
-                        servershare_id=srcshare_id).values('pk')]:
-                inboxjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflpk,
-                                      dstshare_id=inboxshare['pk'],
-                        dstpath=filemodels.ServerShare.get_inbox_path(dset_id=dset.pk))
-                src_sflids_inbox.append(inboxjob['kwargs']['dstsfloc_id'])
-            src_share_ids.append(inboxshare['pk'])
-            print('inbox done', src_share_ids, rsync_shares)
-            distribute_produced_files(src_share_ids, rsync_shares, dstshare_ids_dss, existing_sfl)
+        # first transfer to an inbox, then do the distribution
+        http_inbox_dss, rs_inbox_dss = False, False
+        http_inboxjob, rs_inboxjob = False, False
+        if rsync_shares and dstshare_classes['rsync_inbox_id']:
+            # need to rsync to INBOX, check if security level is ok
+            if rsync_inboxshare_q := filemodels.ServerShare.objects.filter(
+                    max_security__gte=dset.securityclass,
+                    fileservershare__id=dstshare_classes['rsync_inbox_id']):
+                rsync_inboxshare = rsync_inboxshare_q.values('pk').first()
+                upd_defaults = {'storage_loc_ui': filemodels.ServerShare.get_inbox_path(dset_id=dset.pk),
+                        'storage_loc': filemodels.ServerShare.get_inbox_path(dset_id=dset.pk),
+                        'active': True,
+                }
+                ## create a dss on inbox, to delete dset from it later
+                rs_inbox_dss, _cr = dsmodels.DatasetServer.objects.update_or_create(dataset=dset,
+                        storageshare_id=rsync_inboxshare['pk'], defaults=upd_defaults,
+                        create_defaults={**upd_defaults, 'startdate': timezone.now()})
+                src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
+                        servershare_id=srcshare_id).values('pk')]
+                rs_inboxjob = create_job('rsync_otherfiles_to_servershare',
+                        dstpath=filemodels.ServerShare.get_inbox_path(dset_id=dset.pk),
+                        dstshare_id=rsync_inboxshare['pk'], sfloc_ids=src_sfloc_ids)
+                src_share_ids.append(rsync_inboxshare['pk'])
+                # Do the distribute rounds again now we have a dset in inbox:
+                src_share_ids, rsync_shares, dstshare_classes, srcshare_id = distribute_produced_files(
+                        src_share_ids, rsync_shares, dstshare_ids_dss, existing_sfl)
+        if rsync_shares and dstshare_classes['http_inbox_id']:
+            if http_inboxshare_q := filemodels.ServerShare.objects.filter(
+                    max_security__gte=dset.securityclass,
+                    fileservershare__id=dstshare_classes['http_inbox_id']):
+                http_inboxshare = http_inboxshare_q.values('pk').first()
+                upd_defaults = {'active': True,
+                        'storage_loc_ui': filemodels.ServerShare.get_inbox_path(dset_id=dset.pk),
+                        'storage_loc': filemodels.ServerShare.get_inbox_path(dset_id=dset.pk),
+                }
+                ## create a dss on inbo, to delete dset from it later
+                http_inbox_dss, _cr = dsmodels.DatasetServer.objects.update_or_create(dataset=dset,
+                        storageshare_id=http_inboxshare['pk'], defaults=upd_defaults,
+                        create_defaults={**upd_defaults, 'startdate': timezone.now()})
+                src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
+                        servershare_id=srcshare_id).values('pk')]
+                http_inboxjob = create_job('http_upload_servershare',
+                        dstshare_id=http_inboxshare['pk'],
+                        inbox_fss=dstshare_classes['http_inbox_id'],
+                        dstpath=filemodels.ServerShare.get_inbox_path(dset_id=dset.pk),
+                        sfloc_ids=src_sfloc_ids)
+            src_share_ids.append(http_inboxshare['pk'])
+            src_share_ids, rsync_shares, dstshare_classes, srcshare_id = distribute_produced_files(
+                    src_share_ids, rsync_shares, dstshare_ids_dss, existing_sfl)
+        # delete jobs to remove stuff from inbox after were done with it
+        if http_inbox_dss:
+            create_job('remove_dset_files_servershare', dss_id=http_inbox_dss.pk,
+                       sfloc_ids=http_inboxjob['kwargs']['dstsfloc_ids'])
+        if rs_inboxjob:
+            create_job('remove_dset_files_servershare', dss_id=rs_inbox_dss.pk,
+                       sfloc_ids=rs_inboxjob['kwargs']['dstsfloc_ids'])
 
     return JsonResponse({})
 
@@ -1231,12 +1269,10 @@ def distribute_produced_files(src_share_ids, rsync_shares, dstshare_ids_dss, exi
             # sfloc_ids are here per defintion created by job, but maybe not after some
             # rsync jobs
             if dstshare_classes['local'] or dstshare_classes['rsync_sourcable']:
-                print('rsync it', srcshare_id, dstshare_pk)
                 srcjob = create_job('rsync_dset_files_to_servershare', dstshare_id=dstshare_pk,
                         dss_id=dstshare_ids_dss[dstshare_pk], sfloc_ids=src_sfloc_ids)
             else:
                 # Download job is different, same input kwargs though
-                print('download it')
                 srcjob = create_job('download_dset_to_servershare', dstshare_id=dstshare_pk,
                             dss_id=dstshare_ids_dss[dstshare_pk], sfloc_ids=src_sfloc_ids)
             # Add dstshare to src_shares as files are now there for next round of rsync
@@ -1357,23 +1393,67 @@ def refine_mzmls(request):
         # First rounds of distributing mzML through rsync or download
         src_share_ids, rsync_shares, dstshare_classes, srcshare_id = distribute_produced_files(
                 [source_ssid], rsync_shares, dstshare_ids_dss, existing_sfl)
+        # FIXME this following inbox distribution, should be its own function somewhere?
         # Now only 2-step transfers over rsync possible, e.g. between 2 HPCs
-        # firsr transfer to an inbox, then do the distribution
-        if rsync_shares and dstshare_classes['remote'] or dstshare_classes['download']:
-            # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
-            # controller (and sensitive classed)
-            # FIXME have 2 inboxes, one of them sens data, one of them web-HTTP
-            inboxshare = filemodels.ServerShare.objects.filter(
-                    function=filemodels.ShareFunction.INBOX).values('pk').first()
-            src_sflids_inbox = []
-            for sflpk in [x['pk'] for x in existing_sfl.filter(
-                        servershare_id=srcshare_id).values('pk')]:
-                inboxjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflpk,
-                                      dstshare_id=inboxshare['pk'],
-                        dstpath=filemodels.ServerShare.get_inbox_path(dset_id=dset.pk))
-                src_sflids_inbox.append(inboxjob['kwargs']['dstsfloc_id'])
-            src_share_ids.append(inboxshare['pk'])
-            distribute_produced_files(src_share_ids, rsync_shares, dstshare_ids_dss, existing_sfl)
+        # first transfer to an inbox, then do the distribution
+        http_inbox_dss, rs_inbox_dss = False, False
+        http_inboxjob, rs_inboxjob = False, False
+        if rsync_shares and dstshare_classes['rsync_inbox_id']:
+            # need to rsync to INBOX, check if security level is ok
+            if rsync_inboxshare_q := filemodels.ServerShare.objects.filter(
+                    max_security__gte=dset.securityclass,
+                    fileservershare__id=dstshare_classes['rsync_inbox_id']):
+                rsync_inboxshare = rsync_inboxshare_q.values('pk').first()
+                upd_defaults = {'storage_loc_ui': filemodels.ServerShare.get_inbox_path(dset_id=dset.pk),
+                        'storage_loc': filemodels.ServerShare.get_inbox_path(dset_id=dset.pk),
+                        'active': True,
+                }
+                ## create a dss on inbox, to delete from later
+                rs_inbox_dss, _cr = dsmodels.DatasetServer.objects.update_or_create(dataset=dset,
+                        storageshare_id=rsync_inboxshare['pk'], defaults=upd_defaults,
+                        create_defaults={**upd_defaults, 'startdate': timezone.now()})
+                src_sflids_inbox = []
+                for sflpk in [x['pk'] for x in existing_sfl.filter(
+                            servershare_id=srcshare_id).values('pk')]:
+                src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
+                        servershare_id=srcshare_id).values('pk')]
+                rs_inboxjob = create_job('rsync_otherfiles_to_servershare',
+                        dstpath=filemodels.ServerShare.get_inbox_path(dset_id=dset.pk),
+                        dstshare_id=rsync_inboxshare['pk'], sfloc_ids=src_sfloc_ids)
+                #src_sflids_inbox.append(inboxjob['kwargs']['dstsfloc_id'])
+                src_share_ids.append(rsync_inboxshare['pk'])
+                # Do the distribute rounds again now we have a dset in inbox:
+                src_share_ids, rsync_shares, dstshare_classes, srcshare_id = distribute_produced_files(
+                        src_share_ids, rsync_shares, dstshare_ids_dss, existing_sfl)
+        if rsync_shares and dstshare_classes['http_inbox_id']:
+            if http_inboxshare_q := filemodels.ServerShare.objects.filter(
+                    max_security__gte=dset.securityclass,
+                    fileservershare__id=dstshare_classes['http_inbox_id']):
+                http_inboxshare = http_inboxshare_q.values('pk').first()
+                upd_defaults = {'active': True,
+                        'storage_loc_ui': filemodels.ServerShare.get_inbox_path(dset_id=dset.pk),
+                        'storage_loc': filemodels.ServerShare.get_inbox_path(dset_id=dset.pk),
+                }
+                ## create a dss on inbox, to delete from later
+                http_inbox_dss, _cr = dsmodels.DatasetServer.objects.update_or_create(dataset=dset,
+                        storageshare_id=http_inboxshare['pk'], defaults=upd_defaults,
+                        create_defaults={**upd_defaults, 'startdate': timezone.now()})
+                src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
+                        servershare_id=srcshare_id).values('pk')]
+                http_inboxjob = create_job('http_upload_servershare',
+                        dstshare_id=http_inboxshare['pk'],
+                        dstpath=filemodels.ServerShare.get_inbox_path(dset_id=dset.pk),
+                        sfloc_ids=src_sfloc_ids)
+            src_share_ids.append(http_inboxshare['pk'])
+            src_share_ids, rsync_shares, dstshare_classes, srcshare_id = distribute_produced_files(
+                    src_share_ids, rsync_shares, dstshare_ids_dss, existing_sfl)
+        # delete jobs to remove stuff from inbox after were done with it
+        if http_inbox_dss:
+            create_job('remove_dset_files_servershare', dss_id=http_inbox_dss.pk,
+                       sfloc_ids=http_inboxjob['kwargs']['dstsfloc_ids'])
+        if rs_inbox_dss:
+            create_job('remove_dset_files_servershare', dss_id=rs_inbox_dss.pk,
+                       sfloc_ids=rs_inboxjob['kwargs']['dstsfloc_ids'])
 
     uwf = anmodels.UserWorkflow.objects.get(nfwfversionparamsets=data['wfid'],
             wftype=anmodels.UserWorkflow.WFTypeChoices.SPEC)

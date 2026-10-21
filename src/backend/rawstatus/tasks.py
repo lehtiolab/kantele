@@ -13,13 +13,14 @@ from urllib.parse import urljoin, urlsplit
 from time import sleep
 from datetime import datetime
 from tempfile import NamedTemporaryFile, TemporaryDirectory
+from requests_toolbelt.multipart.encoder import MultipartEncoder
 
 from django.urls import reverse
 
 from kantele import settings
 from celery import shared_task, states
 from celery.exceptions import MaxRetriesExceededError
-from jobs.post import update_db, taskfail_update_db
+from jobs.post import update_db, taskfail_update_db, get_session_cookies
 
 
 def calc_sha1(fnpath):
@@ -316,6 +317,53 @@ def download_files_to_servershare(self, dstbasepath, dstpath, src_dst_sfloc_ids_
                     taskfail_update_db(self.request.id, 'Could not download or write file '
                         f'{fname}: {e}')
                     raise
+    taskurl = urljoin(settings.KANTELEHOST, reverse('jobs:settask'))
+    update_db(taskurl, json={'client_id': settings.APIKEY, 'task_id': self.request.id,
+        'state': states.SUCCESS})
+
+
+@shared_task(bind=True)
+def upload_files_to_inbox(self, base_srcpath, inbox_fss, fn_dstsfls):
+    '''Upload file over HTTP to inbox share
+
+    dstbasepath: mount path of share on server, e.g. /mnt/storage
+    dstpath: storage path of file, e.g. project/experiment/file.raw
+    src_dst_sfloc_ids_fns: [(srcpk, dstpk, md5 of file, is file a folder (unzip)), ...]
+    '''
+    for fname, src_sfl_pk, dst_sfl_pk, is_dir_stable_fn in fn_dstsfls:
+        url = urljoin(settings.KANTELEHOST, reverse('files:upload_to_inbox'))
+        stddata = {'task': self.request.id, 'srcsfl_id': f'{src_sfl_pk}', 'dstsfl_id': f'{dst_sfl_pk}', 'in_fss': f'{inbox_fss}'}
+        fpath = os.path.join(base_srcpath, fname)
+        session, headers = get_session_cookies()
+        if is_dir_stable_fn:
+            # Zip the file if it is a dir, like .d
+            with TemporaryDirectory() as tmpdir:
+                archive = os.path.join(tmpdir, fname)
+                zipfile = shutil.make_archive(archive, 'zip', fpath)
+                with open(zipfile, 'rb') as fp:
+                    stddata['file'] = (zipfile, fp)
+                    mpedata = MultipartEncoder(fields=stddata)
+                    headers['Content-Type'] = mpedata.content_type
+                    req = session.post(url, data=mpedata, headers=headers)
+        else:
+            with open(fpath, 'rb') as fp:
+                stddata['file'] = (fname, fp)
+                # MultipartEncoder from requests_toolbelt can stream large files, unlike requests (2024)
+                mpedata = MultipartEncoder(fields=stddata)
+                headers['Content-Type'] = mpedata.content_type
+                req = session.post(url, data=mpedata, headers=headers)
+
+        if req.status_code == 500:
+            taskfail_update_db(self.request.id, 'Server error 500. Could not upload file '
+                               f'{fname}, contact admin')
+            return
+        elif req.status_code != 200:
+            msg = req.json()
+            try:
+                self.retry(countdown=60)
+            except MaxRetriesExceededError:
+                taskfail_update_db(self.request.id, f'Could not upload file {fname}: {msg}')
+                return
     taskurl = urljoin(settings.KANTELEHOST, reverse('jobs:settask'))
     update_db(taskurl, json={'client_id': settings.APIKEY, 'task_id': self.request.id,
         'state': states.SUCCESS})

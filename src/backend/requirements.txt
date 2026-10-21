@@ -7,3 +7,4 @@ uWSGI==2.0.29
 dulwich==0.22.8
 biopython==1.83
 psutil==7.0.0
+stream-unzip==0.0.101
