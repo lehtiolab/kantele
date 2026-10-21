@@ -15,6 +15,7 @@ alljobs = [
         #dsjobs.DeleteDatasetPDCBackup,
         dsjobs.DownloadDsetFilesToServerShare,
         rsjobs.RsyncOtherFileServershare,
+        rsjobs.HttpUploadFilesServershare,
         rsjobs.RsyncFileTransferFromWeb,
         rsjobs.RemoveFilesFromServershare,
         rsjobs.CreatePDCArchive,

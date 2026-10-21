@@ -15,12 +15,13 @@ import re
 import json
 import shutil
 import zipfile
-from tempfile import NamedTemporaryFile, mkstemp
+from tempfile import NamedTemporaryFile, TemporaryDirectory, mkstemp
 import requests
 from hashlib import md5
 from urllib.parse import urlsplit
 from Bio import SeqIO
 from celery import states as taskstates
+from stream_unzip import stream_unzip
 
 from kantele import settings
 from rawstatus.models import (RawFile, Producer, StoredFile, FileServer, ServerShare, StoredFileLoc,
@@ -782,6 +783,75 @@ def mzml_uploaded(request):
     sfl.purged = False
     sfl.save()
     return JsonResponse({'error': False})
+
+
+@require_POST
+def upload_file_to_inbox(request):
+    data = request.POST
+    # Authenticate by job/task/file
+    try:
+        task_id = data['task']
+        jm.Job.objects.get(funcname='http_upload_servershare',
+            kwargs__sfloc_ids__contains=int(data['srcsfl_id']),
+            state=jj.Jobstates.PROCESSING, task__asyncid=task_id)
+        sfloc = StoredFileLoc.objects.values('servershare_id', 'path', 'sfile__filetype__is_folder',
+      'sfile__mzmlfile',      'sfile__filename', 'sfile__filetype__stablefiles', 'sfile__md5').get(pk=data['dstsfl_id'])
+        share_path = FileserverShare.objects.filter(pk=data['in_fss']).values('path').get()
+    except KeyError as error:
+        print(f'POST request to transfer_file with missing parameter, {error}')
+        return JsonResponse({'error': 'Bad request'}, status=400)
+    except ValueError:
+        print(f'POST request to transfer_file with incorrect fn_id, {error}')
+        return JsonResponse({'error': 'Bad request'}, status=400)
+    except jm.Job.DoesNotExist:
+        return JsonResponse({'error': 'Cannot authenticate file upload'}, status=403)
+    except StoredFileLoc.DoesNotExist:
+        return JsonResponse({'error': 'Cannot find file being uploaded'}, status=403)
+    except FileserverShare.DoesNotExist:
+        return JsonResponse({'error': 'Cannot find upload destination share passed'}, status=403)
+
+
+    # Write file from /tmp (or in memory if small) to its destination in upload folder
+    def chunk_zipfn(upfile):
+        yield from upfile.chunks(chunk_size=65536)
+
+    upfile = request.FILES['file']
+    dighash = md5()
+    basedst_path = os.path.join(share_path['path'], sfloc['path'])
+    destfile = os.path.join(basedst_path, sfloc['sfile__filename'])
+    os.makedirs(basedst_path)
+    isdir = not sfloc['sfile__mzmlfile'] and sfloc['sfile__filetype__is_folder']
+    with TemporaryDirectory(dir=basedst_path) as tmp_unzip:
+        # Do everything in a tmp workdir
+        tmp_result = os.path.join(tmp_unzip, sfloc['sfile__filename'])
+        if isdir and len(sfloc['sfile__filetype__stablefiles']):
+            # Unzip in case there is a file inside that we need the md5 of
+            ch_to_mode = 0o755
+            os.makedirs(tmp_result)
+            for file_name, file_size, unzipped_chunks in stream_unzip(chunk_zipfn(upfile)):
+                subfn = os.path.join(tmp_unzip, file_name)
+                with open(subfn, 'wb+') as fp:
+                    for chunk in unzipped_chunks:
+                        fp.write(chunk)
+                        if file_name in sfloc['sfile__filetype__stablefiles']:
+                            dighash.update(chunk)
+        else:
+            # No predictable file inside zipped folder if any, so we instead do MD5 on
+            # entire zipped folder or non-zipped file which is uploaded.
+            ch_to_mode = 0o644
+            with open(tmp_result, 'wb+') as fp:
+                for chunk in upfile.chunks():
+                    fp.write(chunk)
+                    dighash.update(chunk)
+        if dighash.hexdigest() != sfloc['sfile__md5']:
+            return JsonResponse({'error': f'Failed to upload file, checksum {dighash.hexdigest()} differs from '
+                f'expected {sfloc["sfile__md5"]}, possibly corrupted in transfer or changed on local disk',
+                'state': 'error'}, status=409)
+        else:
+            shutil.move(tmp_result, destfile)
+            os.chmod(destfile, ch_to_mode)
+        # Leave tmpdir context, tmpdir gets deleted
+    return JsonResponse({})
 
 
 @require_POST
