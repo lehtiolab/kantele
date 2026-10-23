@@ -210,7 +210,7 @@ class RemoveFilesFromServershare(RemoveDatasetFilesFromServershare):
         """Copied from singlefile job, since this is otherwise inheriting from dataset job.
         This is run before running job, to define files used by
         the job (so it cant run if if files are in use by other job)"""
-        return [x['sfile__rawfile_id'] for x in self.getfiles_query(**self.job.kwargs
+        return [x['sfile__rawfile_id'] for x in self.oncreate_getfiles_query(**self.job.kwargs
             ).values('sfile__rawfile_id')]
 
 
