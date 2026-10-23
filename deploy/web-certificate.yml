@@ -134,5 +134,6 @@
       - name: Cron job for nginx reload config
         ansible.builtin.cron:
             name: Nginx reload config nightly in case of new certificates added
-            hour: "02"
+            minute: "0"
+            hour: "2"
             job: "cd {{ kanteledir }} && {{ dockercmd }} exec nginx nginx -t && {{ dockercmd }} exec nginx nginx -s reload"

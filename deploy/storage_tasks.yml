@@ -100,5 +100,5 @@
   ansible.builtin.cron:
       name: Download kantele DB dump backup
       hour: "3"
-      minute: "*/5"
+      minute: "*/20"
       job: "bash {{ homedir }}/download_backup.sh"
