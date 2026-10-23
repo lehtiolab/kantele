@@ -1,0 +1,138 @@
+--- 
+# Renew HTTPS TLS cert kantele
+
+- hosts: kantele
+  become: yes
+  become_user: '{{ kanteleuser }}'
+  tasks:
+      - name: Deploy templates with env variables for compose script and container insides
+        ansible.builtin.template:
+            src: '{{ item[0] }}'
+            dest: '{{ item[1] }}'
+        loop:
+            - ['.compose.prod.env.j2', '{{ compose_env_file }}']
+            - ['container_env_vars.j2', '{{ kanteledir }}/prod-container.env']
+            - ['nginx_prod.conf.j2', '{{ kanteledir }}/src/docker/nginx.conf']
+
+      # Determine if a path exists and is a directory.  Note that we need to test
+      # both that p.stat.isdir actually exists, and also that it's set to true.
+      - name: Get stats of certbot cert
+        ansible.builtin.stat:
+          path: "{{ host_certbot_path }}/conf/accounts"
+        register: certbot_path
+
+      - name: Create necessary folders for cert automation
+        ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: "{{ kanteleuser }}"
+            group: "{{ kantelegroup }}"
+        loop:
+            - "{{ host_certbot_path }}/conf/live/{{ kantele_host }}"
+        when: certbot_path.stat.isdir is not defined or not certbot_path.stat.isdir
+
+      - name: Download TLS parameters
+        ansible.builtin.get_url:
+          url:  '{{ item[0] }}'
+          dest: '{{ item[1] }}'
+        loop:
+          - ["https://raw.githubusercontent.com/certbot/certbot/refs/heads/main/certbot/src/certbot/_internal/plugins/nginx/tls_configs/options-ssl-nginx.conf", "{{ host_certbot_path }}/conf/options-ssl-nginx.conf"]
+          - ["https://raw.githubusercontent.com/certbot/certbot/main/certbot/src/certbot/ssl-dhparams.pem", "{{ host_certbot_path }}/conf/ssl-dhparams.pem"]
+
+      # Open firewall for letsencrypt on port 80
+      - name: UFW allow web traffic on 80 from anywhere
+        become: true
+        become_user: root
+        community.general.ufw:
+            rule: allow
+            src: any
+            port: http
+
+      # When not existing, nginx will not be up at all, or will not be
+      # reconfigured - so we will need a dummy cert in the place
+      - name: Create a dummy cert for nginx so it wont crash when not finding cert
+        ansible.builtin.command:
+          cmd:  "{{ dockercmd }} run --rm --entrypoint \"\
+            openssl req -x509 -nodes -newkey rsa:{{ rsa_key_size }} -days 1 \
+            -keyout '/etc/letsencrypt/live/{{ kantele_host }}/privkey.pem' \
+            -out '/etc/letsencrypt/live/{{ kantele_host }}/fullchain.pem' \
+            -subj '/CN=localhost'\" certbot"
+          chdir: "{{ kanteledir }}"
+        when: certbot_path.stat.isdir is not defined or not certbot_path.stat.isdir
+
+      - name: Build new nginx compose images
+        ansible.builtin.command:
+            cmd: "docker buildx bake --file src/docker/bake-nginx.yml"
+            chdir: "{{ kanteledir }}"
+        environment:
+            - USER_ID: '{{ kanteleuid }}'
+            - GROUP_ID: '{{ kantelegid }}'
+
+      # Recreate nginx container so we get correct config containing also the letsencrypt stuff
+      # if there is a dummy cert the website will go down (if up)
+      - name: Rebuild and start nginx 
+        community.docker.docker_compose_v2:
+            project_src: '{{ kanteledir }}'
+            project_name: 'kantele'
+            services:
+              - nginx
+            files:
+                - '{{ kanteledir }}/src/docker/docker-compose-base.yml'
+                - '{{ kanteledir }}/src/docker/docker-compose-prod.yml'
+            env_files:
+              - '{{ compose_env_file }}'
+            build: never
+            recreate: always
+
+      # Now nginx is running, delete dummy cert!
+      - name: Delete the dummy cert 
+        ansible.builtin.shell:
+          cmd:  "{{ dockercmd }} run --rm --entrypoint \"\
+              rm -Rf /etc/letsencrypt/live/{{ kantele_host }} && \
+              rm -Rf /etc/letsencrypt/archive/{{ kantele_host }} && \
+              rm -Rf /etc/letsencrypt/renewal/{{ kantele_host }}.conf\" certbot"
+          chdir: "{{ kanteledir }}"
+        when: certbot_path.stat.isdir is not defined or not certbot_path.stat.isdir
+
+      # If host_certbot_path not exist, nginx is running, now install new cert
+      - name: Install new letsencrypt TLS cert as none found earlier
+        ansible.builtin.command:
+          cmd:  "{{ dockercmd }} run --rm certbot \
+            certonly --webroot -w /var/www/certbot \
+            --email {{ email_letsencrypt }} \
+            -d {{ kantele_host }} \
+            --rsa-key-size {{ rsa_key_size }} \
+            --agree-tos \
+            --force-renewal"
+          chdir: "{{ kanteledir }}"
+        when: certbot_path.stat.isdir is not defined or not certbot_path.stat.isdir
+
+      # There is existing installation, so we assume nginx is running
+      - name: Renew existing letsencrypt TLS cert
+        ansible.builtin.command:
+          cmd: "{{ dockercmd }} run --rm certbot renew"
+          chdir: "{{ kanteledir }}"
+        when: certbot_path.stat.isdir is defined and certbot_path.stat.isdir
+
+      # Close firewall for letsencrypt on port 80
+      - name: UFW DISallow web traffic on 80 from anywhere
+        become: true
+        become_user: root
+        community.general.ufw:
+            rule: allow
+            src: any
+            port: http
+            delete: true
+
+      - name: Nginx reload config with new cert
+        ansible.builtin.shell:
+          cmd: "{{ dockercmd }} exec nginx nginx -t && {{ dockercmd }} exec nginx nginx -s reload"
+          chdir: "{{ kanteledir }}"
+
+      # This job doesnt hurt but it is not relevant unless we start with auto
+      # matic renewing letsencrypt (which we should!)
+      - name: Cron job for nginx reload config
+        ansible.builtin.cron:
+            name: Nginx reload config nightly in case of new certificates added
+            hour: "02"
+            job: "cd {{ kanteledir }} && {{ dockercmd }} exec nginx nginx -t && {{ dockercmd }} exec nginx nginx -s reload"

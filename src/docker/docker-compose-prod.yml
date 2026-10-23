@@ -23,16 +23,23 @@ services:
         network_mode: host
         depends_on:
             - web
-        image: kantele_nginx
+        image: kantele_nginx # in prod-bake.yml
         volumes:
             - "${HOST_UPLOADPATH}:${CONTAINER_UPLOADPATH}"
             - "${HOST_ANALYSISFILES}:${CONTAINER_ANALYSISPATH}"
-            - "${HOST_TLSCERTPATH}:/${CONTAINER_TLSCERTPATH}"
+            - "${HOST_CERTBOT_PATH}/conf:/etc/letsencrypt"
+            - "${HOST_CERTBOT_PATH}/www:/var/www/certbot"
         logging:
             driver: syslog
             options:
                 syslog-address: "${SYSLOG_ADDRESS}"
 
+    certbot:
+      image: certbot/certbot
+      volumes:
+        - "${HOST_CERTBOT_PATH}/conf:/etc/letsencrypt"
+        - "${HOST_CERTBOT_PATH}/www:/var/www/certbot"
+          #entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"  # Renew certificates every 12 hours
     db: 
         network_mode: host
         logging:

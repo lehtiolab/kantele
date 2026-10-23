@@ -20,6 +20,18 @@ e.g. `--analysis`, `--datasets`, etc. The command will queue files for deletion:
 - Also other files in shares with an expiry time, e.g. analysis output, library files, web-served report files
 - mzML converted files which have a configured lifespan in `settings.py`
 
+## TLS certificates
+Certificates are installed via <a href="https://letsencrypt.org/">Letsencrypt</a> and <a href="https://certbot.eff.org/">Certbot</a>. Ideally we have automated this, but since it requires a permanent open port 80 on our proxy server we currently do an open-renew-close every 3 months. To run this, run the ansible
+playbook `deploy/web-certificate.yml`, like this:
+```
+cd deploy
+bash deploy_new_tls_cert.sh
+```
+
+## Installing new HPC analysis server
+- Create a key pair in `deploy/files`, name it e.g. `${hpcname}_key.secret`
+- Add key path to ansible `host_vars` for our storage controller
+- Copy public key to server
 
 ## Development, before starting
 Prerequisites:

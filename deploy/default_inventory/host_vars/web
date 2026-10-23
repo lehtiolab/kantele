@@ -1,6 +1,3 @@
-tls_cert: server.crt
-tls_cert_key: server.key
-
 # Upload paths in nginx container
 container_uploadpath: /uploads
 host_uploadpath: "{{ kanteledir }}/uploads"
@@ -11,7 +8,11 @@ container_analysispath: /analysisfiles
 host_analysispath: "{{ kanteledir }}/srv_analysis"
 analysis_path_url: /analysisfiles
 
-
+# Certbot
+host_certbot_path: "{{ kanteledir }}/certbot"
+rsa_key_size: 4096
 
 # For restoring backups
 pgdatadir: "{{ homedir }}/pgdata"
+
+dockercmd: "docker compose --env-file {{ compose_env_file }} -f src/docker/docker-compose-base.yml -f src/docker/docker-compose-prod.yml --project-name kantele"
