@@ -460,9 +460,9 @@ class TestUploadScript(BaseIntegrationTest):
         classifyjob = jm.Job.objects.filter(funcname='classify_msrawfile', kwargs={
             'sfloc_id': newsfloc.pk, 'token': self.token})
         classifytask = jm.Task.objects.filter(job__funcname='classify_msrawfile', job__kwargs__sfloc_id=newsfloc.pk)
-        rsjobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare', kwargs__sfloc_ids=[newsfloc.pk], kwargs__dstshare_id=self.ssnewstore.pk,
+        rsjobs = jm.Job.objects.filter(funcname='rsync_files_to_servershare', kwargs__sfloc_ids=[newsfloc.pk], kwargs__dstshare_id=self.ssnewstore.pk,
             kwargs__dstpath=os.path.join(settings.QC_STORAGE_DIR, self.prod.name))
-        nfrsjobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
+        nfrsjobs = jm.Job.objects.filter(funcname='rsync_files_to_servershare',
                 kwargs__sfloc_ids=[self.nfc_loc.pk], kwargs__dstshare_id=self.ssnewstore.pk)
         self.assertEqual(classifyjob.count(), 1)
         self.assertEqual(classifytask.count(), 0)
@@ -630,7 +630,7 @@ class TestUploadScript(BaseIntegrationTest):
         classifyjob = jm.Job.objects.filter(funcname='classify_msrawfile', kwargs={
             'sfloc_id': newsf.pk, 'token': self.token})
         classifytask = jm.Task.objects.filter(job__funcname='classify_msrawfile', job__kwargs__sfloc_id=newsf.pk)
-        rsjobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare')
+        rsjobs = jm.Job.objects.filter(funcname='rsync_files_to_servershare')
         qcjobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow')
         # Run classify
         sleep(1)
@@ -710,7 +710,7 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertFalse(newraw.claimed)
         # Run rsync from web
         self.run_job()
-        mvjobs = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare', kwargs__dss_id=self.olddss.pk,
+        mvjobs = jm.Job.objects.filter(funcname='rsync_addfiles_dset', kwargs__dss_id=self.olddss.pk,
                 kwargs__sfloc_ids=[self.newsf.sfile.storedfileloc_set.first().pk])
 
         qcjobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow', kwargs__sfloc_id=self.newsf.pk,
@@ -784,7 +784,7 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertEqual(resp.status_code, 200)
         backupjobs = jm.Job.objects.filter(funcname='create_pdc_archive',
                 kwargs__sfloc_id=self.newsf.sfile.storedfileloc_set.first().pk)
-        mvjobs = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare',
+        mvjobs = jm.Job.objects.filter(funcname='rsync_addfiles_dset',
                 kwargs__dss_id=self.olddss.pk, kwargs__sfloc_ids=[self.newsf.sfile.storedfileloc_set.first().pk])
         mzmljobs = jm.Job.objects.filter(funcname='convert_dataset_mzml',
                 kwargs__dss_id=self.olddss.pk, kwargs__pwiz_id=self.pwiz.pk)
@@ -1017,7 +1017,7 @@ class TransferStateTest(BaseFilesTest):
         jobs = jm.Job.objects.filter(funcname='rename_file', kwargs={'sfloc_id': sfloc.pk,
             'oldname': sflib.filename, 'newname': f'libfile_{lf.pk}_{sflib.filename}'})
         self.assertEqual(jobs.count(), 1)
-        jobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
+        jobs = jm.Job.objects.filter(funcname='rsync_files_to_servershare',
                 kwargs__sfloc_ids=[sfloc.pk], kwargs__dstshare_id=remotesslib.pk,
                 kwargs__dstpath=settings.LIBRARY_FILE_PATH)
         self.assertEqual(jobs.count(), 1)
@@ -1368,7 +1368,7 @@ class TestUpdateStorageFile(BaseFilesTest):
                 data={'item_id': self.anasfile.pk, 'share_ids': [self.ssanaruns.pk]})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(jm.Job.objects.filter(funcname='restore_from_pdc_archive').exists())
-        self.assertEqual(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare').count(), 1)
+        self.assertEqual(jm.Job.objects.filter(funcname='rsync_files_to_servershare').count(), 1)
 
         # Analysis file on rundir back to delivery, is on remote and will go to an rsync-ok server
         self.anasfile_sfl.active, self.anasfile_sfl.purged = False, True
@@ -1379,7 +1379,7 @@ class TestUpdateStorageFile(BaseFilesTest):
                 data={'item_id': self.anasfile.pk, 'share_ids': [self.ssana.pk, self.ssanaruns.pk]})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(jm.Job.objects.filter(funcname='restore_from_pdc_archive').exists())
-        self.assertEqual(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare').count(), 1)
+        self.assertEqual(jm.Job.objects.filter(funcname='rsync_files_to_servershare').count(), 1)
 
         # Analysis file on rundir to other rundir, is on remote and will go through inbox
         # set anasfile_sfl on self.ssana to active=False, so it is only on ssanaruns
@@ -1391,18 +1391,18 @@ class TestUpdateStorageFile(BaseFilesTest):
                 data={'item_id': self.anasfile.pk, 'share_ids': [self.ssanaruns2.pk]})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(jm.Job.objects.filter(funcname='restore_from_pdc_archive').exists())
-        self.assertEqual(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare').count(), 2)
-        inboxjob = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
+        self.assertEqual(jm.Job.objects.filter(funcname='rsync_files_to_servershare').count(), 2)
+        inboxjob = jm.Job.objects.filter(funcname='rsync_files_to_servershare',
             kwargs__dstshare_id=self.ssinbox.pk)
         self.assertTrue(inboxjob.exists())
-        secondjob = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
+        secondjob = jm.Job.objects.filter(funcname='rsync_files_to_servershare',
             kwargs__dstshare_id=self.ssanaruns2.pk)
         self.assertTrue(secondjob.exists())
         self.assertEqual(secondjob.get().pk, inboxjob.get().pk + 1)
 
     def test_dset(self):
         # Between shares on storagecontroller (first retrieve, then rsync)
-        rsjobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare')
+        rsjobs = jm.Job.objects.filter(funcname='rsync_files_to_servershare')
         bupjobs = jm.Job.objects.filter(funcname='restore_from_pdc_archive')
         self.assertFalse(rsjobs.exists())
         self.assertFalse(bupjobs.exists())
@@ -1502,7 +1502,7 @@ class TestDeleteFile(BaseFilesTest):
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.oldsf.pk, 'force': True})
         self.assertEqual(resp.status_code, 200)
-        self.assertTrue(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
+        self.assertTrue(jm.Job.objects.filter(funcname='rsync_files_to_servershare',
             kwargs__sfloc_ids=[self.oldsss.pk], kwargs__dstshare_id=self.ssinbox.pk).exists())
         self.assertTrue(jm.Job.objects.filter(funcname='create_pdc_archive',
             kwargs__sfloc_id=self.oldsf.storedfileloc_set.get(servershare=self.ssinbox).pk).exists())
@@ -1547,7 +1547,7 @@ class TestDeleteFile(BaseFilesTest):
         am.MzmlFile.objects.create(sfile=self.sfile, pwiz=self.pwiz)
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.sfile.pk})
         self.assertEqual(resp.status_code, 200)
-        self.assertFalse(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare').exists())
+        self.assertFalse(jm.Job.objects.filter(funcname='rsync_files_to_servershare').exists())
         self.assertFalse(jm.Job.objects.filter(funcname='create_pdc_archive').exists())
 
     def test_analysisfile(self):

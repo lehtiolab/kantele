@@ -47,8 +47,9 @@ class RsyncDatasetServershare(DatasetJob):
     '''Moves files associated to a dataset to another servershare, in one task.
     After all the files are done, update dset.storage_loc
     - dss_id is TARGET (destination) datasetserver, some files do not come from a dset
+      needed for setting path on created files, and error checks
     '''
-    refname = 'rsync_dset_files_to_servershare'
+    refname = 'rsync_addfiles_dset'
     queue = False
     task = filetasks.rsync_files_to_servershares
 

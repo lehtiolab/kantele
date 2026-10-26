@@ -255,7 +255,7 @@ class TestCreateMzmls(MzmlTests):
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 200)
         j = jm.Job.objects.first()
-        self.assertEqual(j.funcname, 'rsync_otherfiles_to_servershare')
+        self.assertEqual(j.funcname, 'rsync_files_to_servershare')
         self.run_job() # run rsync of config file
         j = jm.Job.objects.get(funcname='convert_dataset_mzml')
         exp_kw  = {'options': [], 'filters': ['precursorRefine'], 
@@ -359,7 +359,7 @@ class TestCreateMzmls(MzmlTests):
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 200)
         j = jm.Job.objects.first()
-        self.assertEqual(j.funcname, 'rsync_otherfiles_to_servershare')
+        self.assertEqual(j.funcname, 'rsync_files_to_servershare')
         j = jm.Job.objects.get(funcname='convert_dataset_mzml')
         exp_kw  = {'options': ['combineIonMobilitySpectra'], 'filters': ['precursorRefine', '"scanSumming precursorTol=0.02 scanTimeTol=10 ionMobilityTol=0.1"'], 
                 'dss_id': self.dss.pk, 'pwiz_id': self.pwiz.pk,
@@ -475,7 +475,7 @@ class TestRefineMzmls(MzmlTests):
         self.assertTrue(refined2.exists())
         self.assertEqual(resp.status_code, 200)
         jdb = jm.Job.objects.first()
-        self.assertEqual(jdb.funcname, 'rsync_otherfiles_to_servershare')
+        self.assertEqual(jdb.funcname, 'rsync_files_to_servershare')
         j = jm.Job.objects.get(funcname='refine_mzmls')
         exp_kw = {'dss_id': self.dss.pk, 'wfv_id': self.refinewf.pk, 'dbfn_id': dbsf.pk, 
                 'qtype': self.ds.quantdataset.quanttype.shortname}
@@ -503,7 +503,7 @@ class TestRefineMzmls(MzmlTests):
             'dbid': dbsf.pk, 'wfid': self.refinewf.pk})
         self.assertEqual(resp.status_code, 200)
         jdb = jm.Job.objects.first()
-        self.assertEqual(jdb.funcname, 'rsync_otherfiles_to_servershare')
+        self.assertEqual(jdb.funcname, 'rsync_files_to_servershare')
         j2 = jm.Job.objects.filter(funcname='refine_mzmls').last()
         self.assertGreater(j2.pk, j.pk)
         exp_kw = {'dss_id': self.dss.pk, 'wfv_id': self.refinewf.pk, 'dbfn_id': dbsf.pk, 
