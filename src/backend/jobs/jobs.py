@@ -231,7 +231,7 @@ class BaseJob:
                     path = settings.LIBRARY_FILE_PATH_INBOX
                 else:
                     path = extra_sfl['path']
-                newjobs.append({'name': 'rsync_otherfiles_to_servershare',
+                newjobs.append({'name': 'rsync_files_to_servershare',
                     'kwargs': {'sfloc_ids': [extra_sfl['pk']], 'dstshare_id': dstshare_id,
                         'dstpath': path}})
         return newjobs
@@ -242,7 +242,7 @@ class BaseJob:
         analyses in parallel if theyd use the same DB or server config file.
         '''
         # FIXME now it looks for hits in kwargs__sfloc_ids in , and from kwargs__singlefiles etc,
-        # so it is pretty specific to analysis and rsync_otherfile, can we make it more general?
+        # so it is pretty specific to analysis and rsync_files_to_servershare, can we make it more general?
         if sfpks := self._get_extrafiles_to_rsync(**kwargs):
             # This is run for any job that has extrafiles (i.e. analysis jobs)
             sfl_q = Q()

@@ -170,7 +170,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertTrue(self.tmpraw.claimed)
         # execute dataset move on disk, should not move the added files on tmp (nor update their DB)
         self.run_job()
-        mvjob = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare').last()
+        mvjob = jm.Job.objects.filter(funcname='rsync_addfiles_dset').last()
         self.assertEqual(mvjob.state, Jobstates.PENDING)
         self.ds.refresh_from_db()
         self.dss.refresh_from_db()
@@ -235,7 +235,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
                 f'{self.ds.pk} to {self.analocalstor.name} ({self.analocalstor.pk})').exists())
 
         # execute dataset move on disk, should not move the added files on tmp (nor update their DB)
-        mvjob = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare').last()
+        mvjob = jm.Job.objects.filter(funcname='rsync_files_to_servershare').last()
         self.assertEqual(mvjob.state, Jobstates.PENDING)
         self.assertTrue(newsfl.exists())
         f3_newdsspath = os.path.join(self.oldstorctrl.path, newdss.storage_loc, self.f3sf.filename)
@@ -419,7 +419,7 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
         self.tmpraw.save()
         self.newsfl = rm.StoredFileLoc.objects.create(sfile=self.tmpsf, path=self.dss.storage_loc,
                 servershare=self.dss.storageshare) 
-        jm.Job.objects.create(funcname='rsync_dset_files_to_servershare', state=Jobstates.HOLD,
+        jm.Job.objects.create(funcname='rsync_addfiles_dset', state=Jobstates.HOLD,
                 kwargs={'dss_id': self.dss.pk, 'dstsfloc_ids': [self.newsfl.pk],
                     'dstshare_id': self.ssnewstore.pk, 'sfloc_ids': [self.tmpsss.pk]},
                 timestamp=timezone.now())
@@ -475,7 +475,7 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
                 purged=False, active=True)
         rejdstsfl = rm.StoredFileLoc.objects.create(sfile=rejsf, servershare=self.ssnewstore,
                 path=self.dss.storage_loc)
-        jm.Job.objects.create(funcname='rsync_dset_files_to_servershare', state=Jobstates.HOLD,
+        jm.Job.objects.create(funcname='rsync_addfiles_dset', state=Jobstates.HOLD,
                 kwargs={'dss_id': self.dss.pk, 'dstsfloc_ids': [rejdstsfl.pk],
                     'dstshare_id': self.ssnewstore.pk, 'sfloc_ids': [rejsfl.pk]},
                 timestamp=timezone.now())
@@ -615,7 +615,7 @@ class UpdateProjectTest(BaseIntegrationTest):
         self.assertTrue(os.path.exists(os.path.join(self.newstorctrl.path,
             self.dss.storage_loc, self.f3sf.filename)))
         # Check if added files are not there yet, being waited
-        mvjob = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare').last()
+        mvjob = jm.Job.objects.filter(funcname='rsync_addfiles_dset').last()
         self.assertEqual(mvjob.state, Jobstates.PENDING)
         self.assertEqual(self.tmpsss.servershare, self.ssinbox)
         self.assertEqual(self.tmpsss.path, '')
@@ -1432,8 +1432,8 @@ class TestReactivateDataset(BaseTest):
         self.assertCountEqual(bupjob.kwargs['sfloc_ids'], bupsfl)
 
         rsjob = next(jobs)
-        self.assertEqual(rsjob.funcname, 'rsync_dset_files_to_servershare')
-        self.assertEqual(rsjob.kwargs['dss_id'], self.dss.pk)
+        self.assertEqual(rsjob.funcname, 'rsync_files_to_servershare')
+        self.assertEqual(rsjob.kwargs['dstpath'], self.dss.storage_loc_ui)
         self.assertCountEqual(rsjob.kwargs['sfloc_ids'], bupsfl)
         dstsfls = [x['pk'] for x in dsfiles.filter(servershare=self.ssnewstore).values('pk')]
         self.assertEqual(sorted(rsjob.kwargs['dstsfloc_ids']), sorted(dstsfls))

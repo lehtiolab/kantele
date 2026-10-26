@@ -524,28 +524,27 @@ def classified_rawfile_treatment(request):
             for dss in dss_q.values('pk', 'storage_loc', 'storageshare_id'):
                 mvjob_kw = {'dss_id': dss['pk'], 'sfloc_ids': [sfloc.pk],
                         'dstshare_id': dss['storageshare_id']}
-                if rsjob_error := check_job_error('rsync_dset_files_to_servershare', **mvjob_kw):
+                if rsjob_error := check_job_error('rsync_addfiles_dset', **mvjob_kw):
                     # TODO this needs logging
                     print(f'Classify task error for task {data["task_id"]} trying to queue '
-                            f'rsync_dset_files_to_servershare - {rsjob_error}')
+                            f'rsync_addfiles_dset - {rsjob_error}')
                 else:
                     dss_mvjobs.append(mvjob_kw)
 
             if not rsjob_error:
-                jname = 'rsync_dset_files_to_servershare'
                 for mvkw in dss_mvjobs:
                     # Create job here instead of in jobs.py, because we should not create this
                     # job multiple times, esp not if user manages to put another job in 
                     # between, so filter first to see if exists
                     # get_or_create is harder since you also need to do addkwargs before
-                    if not jm.Job.objects.filter(funcname=jname,
+                    if not jm.Job.objects.filter(funcname='rsync_addfiles_dset',
                             kwargs__sfloc_ids=mvkw['sfloc_ids'], kwargs__dss_id=mvkw['dss_id'],
                             kwargs__dstshare_id=mvkw['dstshare_id']):
-                        jwrap = jobmap['rsync_dset_files_to_servershare'](False)
+                        jwrap = jobmap['rsync_addfiles_dset'](False)
                         mvkw.update(jwrap.on_create_addkwargs(**mvkw))
                         jwrap.update_sourcefns_lastused(**mvkw)
-                        job = jm.Job.objects.create(funcname=jname, timestamp=timezone.now(),
-                                state=jj.Jobstates.HOLD, kwargs=mvkw)
+                        job = jm.Job.objects.create(funcname='rsync_addfiles_dset',
+                                timestamp=timezone.now(), state=jj.Jobstates.HOLD, kwargs=mvkw)
                         FileJob.objects.create(rawfile_id=sfloc.sfile.rawfile.pk,
                                 job_id=job.pk)
             # Make sure users cant use this file for something else:
@@ -654,7 +653,7 @@ def file_uploaded(request):
             # Only dump in sens OK data storage, 
             # so use inbox, then do backup, deliver to secure delivery, delete.
             # TODO
-            #rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sfl.pk,
+            #rsjob = create_job('rsync_files_to_servershare', sfloc_id=sfl.pk,
             #    dstshare_id=dstshare['pk'], dstpath=analysis.get_public_output_dir())
             #create_job('create_pdc_archive', sfloc_id=rsjob['kwargs']['dstsfloc_id'],
             #        isdir=sf.filetype.is_folder)
@@ -666,7 +665,7 @@ def file_uploaded(request):
             # Only rsync new files (most cases) or multi-analyses-shared files which are
             # not existing in dstshare yet
             if raw_created:
-                rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_ids=[sfl.pk],
+                rsjob = create_job('rsync_files_to_servershare', sfloc_ids=[sfl.pk],
                     dstshare_id=dstshare['pk'], dstpath=analysis.get_public_output_dir())
                 create_job('create_pdc_archive', sfloc_id=rsjob['kwargs']['dstsfloc_ids'][0],
                         isdir=sf.filetype.is_folder)
@@ -685,7 +684,7 @@ def file_uploaded(request):
         dbmodel.objects.create(**kwargs)
         rs_kwargs = []
         for dstshare in ServerShare.objects.filter(function=ShareFunction.LIBRARY).values('pk'):
-            kwargs = {'name': 'rsync_otherfiles_to_servershare', 'sfloc_ids': [sfl.pk],
+            kwargs = {'name': 'rsync_files_to_servershare', 'sfloc_ids': [sfl.pk],
                     'dstshare_id': dstshare['pk'], 'dstpath': settings.LIBRARY_FILE_PATH}
             if rsjoberr := check_job_error(**kwargs):
                 return JsonResponse({'error': rsjoberr}, status=401)
@@ -743,7 +742,7 @@ def process_file_confirmed_ready(rfn, sfn, sfloc, upload, desc):
             create_job('rename_file', sfloc_id=sfloc.pk, newname=newname, oldname=sfn.filename)
             for ss in ServerShare.objects.exclude(pk=sfloc.servershare_id).filter(
                     function=ShareFunction.LIBRARY):
-                create_job('rsync_otherfiles_to_servershare', sfloc_ids=[sfloc.id],
+                create_job('rsync_files_to_servershare', sfloc_ids=[sfloc.id],
                         dstshare_id=ss.pk, dstpath=settings.LIBRARY_FILE_PATH)
         elif upload.uploadtype == UploadFileType.ANALYSIS:
             # TODO which analysis uploads go to Kantele? Skip any sens data
@@ -1021,7 +1020,7 @@ def rsync_qc_to_analysis(sfl_q, nfwfvid):
         srcsfl = sfl_q.first()
         dstpath = os.path.join(settings.QC_STORAGE_DIR, srcsfl.sfile.rawfile.producer.name)
         # FIXME path!
-        qc_mvjob = create_job('rsync_otherfiles_to_servershare', sfloc_ids=[srcsfl.pk],
+        qc_mvjob = create_job('rsync_files_to_servershare', sfloc_ids=[srcsfl.pk],
             dstshare_id=fss['share_id'], dstpath=dstpath)
         sfloc = StoredFileLoc.objects.get(pk=qc_mvjob['kwargs']['dstsfloc_ids'][0])
 
@@ -1030,7 +1029,7 @@ def rsync_qc_to_analysis(sfl_q, nfwfvid):
         fss = fss_q.values('share_id', 'pk', 'server_id').first()
         srcsfl = srcsfloc.first()
         dstpath = os.path.join(settings.QC_STORAGE_DIR, srcsfl.sfile.rawfile.producer.name)
-        qc_mvjob = create_job('rsync_otherfiles_to_servershare', sfloc_ids=[srcsfl.pk],
+        qc_mvjob = create_job('rsync_files_to_servershare', sfloc_ids=[srcsfl.pk],
             dstshare_id=fss['share_id'], dstpath=dstpath)
         sfloc = StoredFileLoc.objects.get(pk=qc_mvjob['kwargs']['dstsfloc_ids'][0])
     else:
@@ -1473,10 +1472,9 @@ def update_sfile_storage(request):
             # sfloc_ids are here per defintion created by job, but maybe not after some
             # rsync jobs
             src_sfl_id = existing_sfl.filter(servershare_id=srcshare_id).values('pk').get()['pk']
-            print(sfile, srcshare_id, dss, analysis)
             dstpath = get_path(sfile, dstshare_pk, dss, analysis)
-            create_job('rsync_otherfiles_to_servershare', sfloc_ids=[src_sfl_id],
-                       dstshare_id=dstshare_pk, dstpath=dstpath)
+            create_job('rsync_files_to_servershare', sfloc_ids=[src_sfl_id],
+                       dstpath=dstpaht, dstshare_id=dstshare_pk)
             # Add dstshare to src_shares as files are now there for next round of rsync
             src_share_ids.append(dstshare_pk)
             rsync_shares.remove(dstshare_pk)
@@ -1492,10 +1490,10 @@ def update_sfile_storage(request):
         inboxshare = ServerShare.objects.filter(
                 function=ShareFunction.INBOX).values('pk').first()
         sflpk = existing_sfl.filter(servershare_id=srcshare_id).values('pk').get()['pk']
-        inboxjob = create_job('rsync_otherfiles_to_servershare', sfloc_ids=[sflpk],
+        inboxjob = create_job('rsync_files_to_servershare', sfloc_ids=[sflpk],
                 dstshare_id=inboxshare['pk'], dstpath=ServerShare.get_inbox_path())
         for dstshare_id in dstshare_classes['remote_rsync']:
-            create_job('rsync_otherfiles_to_servershare', sfloc_ids=inboxjob['kwargs']['dstsfloc_ids'],
+            create_job('rsync_files_to_servershare', sfloc_ids=inboxjob['kwargs']['dstsfloc_ids'],
                        dstshare_id=dstshare_id, path=get_path(sfile, dstshare_id, dss, analysis))
 
     # Delete files from excluded shares
@@ -1571,7 +1569,7 @@ def delete_file(request):
             inbox = ServerShare.objects.filter(function=ShareFunction.INBOX, active=True).values(
                     'pk').first()
             inboxpath = ServerShare.get_inbox_path(dset_id=dset_id, analysis_id=analysis_id)
-            rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_ids=[sflocid],
+            rsjob = create_job('rsync_files_to_servershare', sfloc_ids=[sflocid],
                     dstpath=inboxpath, dstshare_id=inbox['pk'])
             sflocid = rsjob['kwargs']['dstsfloc_ids'][0]
         create_job('create_pdc_archive', sfloc_id=sflocid, isdir=sfile.filetype.is_folder)

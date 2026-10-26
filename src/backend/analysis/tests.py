@@ -1052,7 +1052,7 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
               'singlefiles': {f'{self.pfn2.nfparam}': self.sflib.pk, '-c': self.sfnfc.pk}},
           'platenames': {self.ds.pk: f'{self.hirief.start}-{self.hirief.end}'}, 'wfv_id': self.nfwf.pk}
 
-        self.assertTrue(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
+        self.assertTrue(jm.Job.objects.filter(funcname='rsync_files_to_servershare',
             kwargs__sfloc_ids=[self.sflibloc.pk], kwargs__dstshare_id=self.analocalstor.pk).exists())
         self.assertJSONEqual(json.dumps(self.anajob.kwargs), json.dumps(job_check_kwargs))
         checkjson = {'errmsg': False, 'multierror': [], 'analysis_id': self.ana.pk, 'token': False}

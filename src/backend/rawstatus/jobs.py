@@ -28,12 +28,9 @@ class RsyncOtherFileServershare(MultiFileJob):
     '''Does the same as rsync dset, but for when files are not in a dataset, or
     only part of a dataset (i.e. mzMLs) need syncing
     '''
-    refname = 'rsync_otherfiles_to_servershare'
+    refname = 'rsync_files_to_servershare'
     queue = False
     task = tasks.rsync_files_to_servershares
-
-    def get_dsids_jobrunner(self, **kwargs):
-        return []
 
     def on_create_addkwargs(self, **kwargs):
         '''Create destination sfloc db rows'''
@@ -43,7 +40,7 @@ class RsyncOtherFileServershare(MultiFileJob):
                     servershare_id=kwargs['dstshare_id'], defaults={'path': kwargs['dstpath'],
                     'active': True})
             dstsfls.append(dstsfl.pk)
-        return {'dstsfloc_ids': dstsfls}#, 'dstshare_id': dstsfl.servershare_id}
+        return {'dstsfloc_ids': dstsfls}
 
     def check_error_on_creation(self, **kwargs):
         '''This should check errors on creation, i.e. files crashing with other files etc,
@@ -52,7 +49,7 @@ class RsyncOtherFileServershare(MultiFileJob):
         srcsfls = self.oncreate_getfiles_query(**kwargs).values('sfile__filename', 'path',
                                                                 'servershare_id')
         if srcsfls.distinct('servershare_id').count() > 1:
-            return ('This job rsync_otherfiles needs all files to come from same source resp. '
+            return ('This job rsync_files_to_servershare needs all files to come from same source resp. '
                     'destination servers. Please contact admin to report this bug.')
 
         if rm.StoredFileLoc.objects.filter(sfile__filename__in=[x['sfile__filename'] for x in srcsfls],
@@ -100,8 +97,11 @@ class RsyncOtherFileServershare(MultiFileJob):
             # use case???
             return
 
+        # FIXME make sure that only one srcpath is used in this job
+        # when creating the job
+
         # Select file servers to rsync from/to
-        srcloc_one = srcsfls.values('servershare_id', 'path').get()
+        srcloc_one = srcsfls.values('servershare_id', 'path').first()
         srcserver, dstserver, rsyncservername, src_user, dst_user, rskey = self._select_rsync_server(srcloc_one['servershare_id'], kwargs['dstshare_id'])
 
         # Now run job
