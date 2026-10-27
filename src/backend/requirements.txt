@@ -4,6 +4,6 @@ psycopg2==2.9.13
 requests==2.34.2
 requests_toolbelt==1.0.0
 uWSGI==2.0.31
-dulwich==0.22.8
+dulwich==1.2.9
 biopython==1.88
 psutil==7.2.2
