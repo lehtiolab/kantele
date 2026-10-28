@@ -238,15 +238,16 @@ class BaseTest(TestCase):
         self.olddsuser = dm.DatasetOwner.objects.create(dataset=self.oldds, user=self.user)
         self.oldfpath = os.path.join(self.oldstorctrl.path, self.oldstorloc)
         oldsize = os.path.getsize(os.path.join(self.oldfpath, oldfn))
+        self.fileft = rm.StoredFileType.objects.create(name='testft_thermo', filetype='tstraw',
+                is_rawdata=True, is_folder=False, stablefiles=[])
         self.oldraw = rm.RawFile.objects.create(name=oldfn, producer=self.prod,
                 source_md5='old_to_new_fakemd5', size=oldsize, date=timezone.now(), claimed=True, usetype=rm.UploadFileType.RAWFILE)
         self.olddsr = dm.DatasetRawFile.objects.create(dataset=self.oldds, rawfile=self.oldraw)
         self.oldsf = rm.StoredFile.objects.create(rawfile=self.oldraw, filename=oldfn,
-                    md5=self.oldraw.source_md5, filetype=self.ft, checked=True)
+                    md5=self.oldraw.source_md5, filetype=self.fileft, checked=True)
         self.oldsss = rm.StoredFileLoc.objects.create(sfile=self.oldsf, servershare=self.analocalstor,
                 path=self.oldstorloc, active=True, purged=False)
         self.oldqsf = dm.QuantSampleFile.objects.create(rawfile=self.olddsr, projsample=self.projsam2)
-
         # Tmp rawfile inbox
         tmpfn = 'raw2'
         tmpfpathfn = os.path.join(self.inboxctrl.path, tmpfn)
