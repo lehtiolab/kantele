@@ -17,7 +17,7 @@ from datasets import models
 from analysis import models as am
 from analysis import views as av
 from rawstatus import models as filemodels
-from jobs.jobutil import create_job, check_job_error, create_job_without_check
+from jobs.jobutil import create_job, check_job_error, create_job_without_check, queue_rsync_and_update_sharestate
 from jobs import models as jm
 from jobs import jobs as jj
 from corefac import models as cm
@@ -493,7 +493,7 @@ def update_dataset(data, user_id):
 def distribute_dset_files(dset_pk, secclass, srcshares, existing_sfl, dstshare_ids_paths):
     rsync_shares = set(dstshare_ids_paths.keys())
     # First rounds of distributing mzML through rsync or download
-    src_share_ids, rsync_shares, dstshare_classes, srcshare_id = queue_rsync_and_update_sharestate(
+    _jc, src_share_ids, rsync_shares, dstshare_classes, srcshare_id = queue_rsync_and_update_sharestate(
             srcshares, rsync_shares, dstshare_ids_paths, existing_sfl)
 
     http_inboxjob, rs_inboxjob = False, False
@@ -513,7 +513,7 @@ def distribute_dset_files(dset_pk, secclass, srcshares, existing_sfl, dstshare_i
                     dstshare_id=rsync_inboxshare['pk'], sfloc_ids=src_sfloc_ids)
             src_share_ids.append(rsync_inboxshare['pk'])
             # Do the distribute rounds again now we have a dset in inbox:
-            src_share_ids, rsync_shares, dstshare_classes, srcshare_id = queue_rsync_and_update_sharestate(
+            _jc, src_share_ids, rsync_shares, dstshare_classes, srcshare_id = queue_rsync_and_update_sharestate(
                     src_share_ids, rsync_shares, dstshare_ids_paths, existing_sfl)
     if rsync_shares and dstshare_classes['http_inbox_id']:
         if http_inboxshare_q := filemodels.ServerShare.objects.filter(max_security__gte=secclass,
@@ -527,52 +527,17 @@ def distribute_dset_files(dset_pk, secclass, srcshares, existing_sfl, dstshare_i
                     servershare_id=srcshare_id).values('pk')]
             http_inboxjob = create_job('http_upload_servershare',
                     dstshare_id=http_inboxshare['pk'],
+                    inbox_fss=dstshare_classes['http_inbox_id'],
                     dstpath=filemodels.ServerShare.get_inbox_path(dset_id=dset_pk),
                     sfloc_ids=src_sfloc_ids)
         src_share_ids.append(http_inboxshare['pk'])
-        src_share_ids, rsync_shares, dstshare_classes, srcshare_id = queue_rsync_and_update_sharestate(
-                src_share_ids, rsync_shares, dstshare_ids_paths, existing_sfl)
+        queue_rsync_and_update_sharestate(src_share_ids, rsync_shares, dstshare_ids_paths,
+                    existing_sfl)
     # delete jobs to remove stuff from inbox after were done with it
     if http_inboxjob:
         create_job('purge_files', sfloc_ids=http_inboxjob['kwargs']['dstsfloc_ids'])
     if rs_inboxjob:
         create_job('purge_files', sfloc_ids=rs_inboxjob['kwargs']['dstsfloc_ids'])
-
-
-def queue_rsync_and_update_sharestate(src_share_ids, rsync_shares, dstshare_ids_paths, existing_sfl):
-    '''Given source files and dst shares for files in a dataset, this will try to
-    place the files in the dst shares, by rsync or download from the web server (proxy)
-    as far as that is possible through DB-acquired knowledge of the shares accessibility.
-    '''
-    srcshare_id, dstshare_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
-            src_share_ids, rsync_shares)
-    # Try first all local and all rsync_sourcable
-    dstshares_in_round = (dstshare_classes['local'] or dstshare_classes['rsync_sourcable']
-                          or dstshare_classes['download'])
-    while dstshares_in_round:
-        src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
-                servershare_id=srcshare_id).values('pk')]
-        for dstshare_pk in dstshares_in_round:
-            # sfloc_ids are here per defintion created by job, but maybe not after some
-            # rsync jobs
-            if dstshare_classes['local'] or dstshare_classes['rsync_sourcable']:
-                srcjob = create_job('rsync_files_to_servershare', dstshare_id=dstshare_pk,
-                                    dstpath=dstshare_ids_paths[dstshare_pk],
-                                    sfloc_ids=src_sfloc_ids)
-            else:
-                # Download job is different, same input kwargs though
-                srcjob = create_job('download_files_to_servershare', dstshare_id=dstshare_pk,
-                                    dstpath=dstshare_ids_paths[dstshare_pk],
-                                    sfloc_ids=src_sfloc_ids)
-            # Add dstshare to src_shares as files are now there for next round of rsync
-            src_share_ids.append(dstshare_pk)
-            rsync_shares.remove(dstshare_pk)
-        # Re-check if exist have local etc files for remaining shares after this round
-        srcshare_id, dstshare_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
-                src_share_ids, rsync_shares)
-        dstshares_in_round = (dstshare_classes['local'] or dstshare_classes['rsync_sourcable']
-                           or dstshare_classes['download'])
-    return src_share_ids, rsync_shares, dstshare_classes, srcshare_id
 
 
 

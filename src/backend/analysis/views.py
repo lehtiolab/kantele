@@ -1297,7 +1297,7 @@ def store_analysis(request):
             # Job already exists, check if we need to recreate it or 
             # only update it 
             jwrap = jobmap[fname](False)
-            if len(jwrap.on_create_prep_rsync_jobs(**kwargs)):
+            if len(jwrap._find_extrafiles_to_rsync(**kwargs)[0]):
                 # new rsync jobs will be made, so we should recreate 
                 # this job, so those will be queued before the analysis job
                 # which would error otherwise

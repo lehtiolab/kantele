@@ -36,7 +36,7 @@ from datasets import models as dsmodels
 from dashboard import models as dashmodels
 from jobs import models as jm
 from jobs import jobs as jj
-from jobs.jobutil import create_job, create_job_without_check, check_job_error, jobmap
+from jobs.jobutil import create_job, create_job_without_check, check_job_error, jobmap, queue_rsync_and_update_sharestate, distribute_file_servershares
 from home import models as hm
 
 
@@ -665,9 +665,13 @@ def file_uploaded(request):
             # Only rsync new files (most cases) or multi-analyses-shared files which are
             # not existing in dstshare yet
             if raw_created:
-                rsjob = create_job('rsync_files_to_servershare', sfloc_ids=[sfl.pk],
-                    dstshare_id=dstshare['pk'], dstpath=analysis.get_public_output_dir())
-                create_job('create_pdc_archive', sfloc_id=rsjob['kwargs']['dstsfloc_ids'][0],
+                src_shares = distribute_file_servershares([share_id],
+                        StoredFileLoc.objects.filter(sfile=sf, active=True),
+                        {dstshare['pk']: analysis.get_public_output_dir()})
+
+                delivered_sfl = StoredFileLoc.objects.values('pk').get(sfile=sf,
+                        servershare_id=dstshare['pk'])
+                create_job('create_pdc_archive', sfloc_id=delivered_sfl['pk'],
                         isdir=sf.filetype.is_folder)
     elif data.get('is_library', False):
         # Library files at this URL arrive in inbox, go to their respective shares
@@ -1458,43 +1462,15 @@ def update_sfile_storage(request):
         remaining_share_ids = [x for x in share_ids if x != src_sfl.servershare_id]
         sfile.deleted = False
         sfile.save()
+    else:
+        remaining_share_ids = share_ids
 
+    # Rsync/up/download file to destinations
     existing_sfl = sfile.storedfileloc_set.filter(active=True, servershare__active=True)
     src_share_ids = [x['servershare_id'] for x in existing_sfl.values('servershare_id')]
-    rsync_shares = set(share_ids)
-    srcshare_id, dstshare_classes = ServerShare.classify_shares_by_rsync_reach(
-            src_share_ids, rsync_shares)
-    print(srcshare_id, dstshare_classes)
-    dstshares_in_round = dstshare_classes['local'] or dstshare_classes['rsync_sourcable']
-    # Try first all local and all rsync_sourcable
-    while dstshares_in_round:
-        for dstshare_pk in dstshares_in_round:
-            # sfloc_ids are here per defintion created by job, but maybe not after some
-            # rsync jobs
-            src_sfl_id = existing_sfl.filter(servershare_id=srcshare_id).values('pk').get()['pk']
-            dstpath = get_path(sfile, dstshare_pk, dss, analysis)
-            create_job('rsync_files_to_servershare', sfloc_ids=[src_sfl_id],
-                       dstpath=dstpaht, dstshare_id=dstshare_pk)
-            # Add dstshare to src_shares as files are now there for next round of rsync
-            src_share_ids.append(dstshare_pk)
-            rsync_shares.remove(dstshare_pk)
-        # Re-check if exist have local etc files for remaining shares after this round
-        srcshare_id, dstshare_classes = ServerShare.classify_shares_by_rsync_reach(
-                src_share_ids, rsync_shares)
-        dstshares_in_round = dstshare_classes['local'] or dstshare_classes['rsync_sourcable']
-
-    # Now only 2-step transfers over rsync possible, e.g. between 2 HPCs
-    if dstshare_classes['remote']:
-        # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
-        # controller (and sensitive classed)
-        inboxshare = ServerShare.objects.filter(
-                function=ShareFunction.INBOX).values('pk').first()
-        sflpk = existing_sfl.filter(servershare_id=srcshare_id).values('pk').get()['pk']
-        inboxjob = create_job('rsync_files_to_servershare', sfloc_ids=[sflpk],
-                dstshare_id=inboxshare['pk'], dstpath=ServerShare.get_inbox_path())
-        for dstshare_id in dstshare_classes['remote_rsync']:
-            create_job('rsync_files_to_servershare', sfloc_ids=inboxjob['kwargs']['dstsfloc_ids'],
-                       dstshare_id=dstshare_id, path=get_path(sfile, dstshare_id, dss, analysis))
+    dstpaths = {dpk: get_path(sfile, dpk, dss, analysis) for dpk in remaining_share_ids}
+    if remaining_share_ids:
+        distribute_file_servershares(src_share_ids, existing_sfl, dstpaths)
 
     # Delete files from excluded shares
     if rm_sfls := sfile.storedfileloc_set.filter(active=True).exclude(servershare__in=share_ids):
@@ -1504,7 +1480,7 @@ def update_sfile_storage(request):
     # del_count is for user, do subtract the "deleted from inbox after retrieve from backup"
 
     return JsonResponse({'state': 'ok', 'msg': f'File with ID {data["item_id"]} queued for syncing '
-        f'to {len(rsync_shares) + retrieve_count} shares, and deletion from {del_count} shares'})
+        f'to {len(set(remaining_share_ids)) + retrieve_count} shares, and deletion from {del_count} shares'})
 
 
 @login_required
