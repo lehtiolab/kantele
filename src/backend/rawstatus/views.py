@@ -1246,53 +1246,40 @@ def show_old_new_projects(request):
 def download_file_to_share(request, sfloc_id, task_id):
     '''View to download files over HTTP to new servershares, using a job'''
     # Authenticate with task id
-    if job := jm.Job.objects.filter(funcname__in=['download_file_to_share',
-                                                  'download_dset_to_servershare'],
+    if job := jm.Job.objects.filter(funcname__in=['download_files_to_servershare',
+                                                  'download_files_to_servershare'],
             state=jj.Jobstates.PROCESSING, task__asyncid=task_id):
         job = job.values().get()
     else:
         return JsonResponse({'msg': 'Not authenticated to download file'}, status=403)
     if sfloc_q := StoredFileLoc.objects.filter(pk=sfloc_id, purged=False,
-                    servershare__fileservershare__server__is_download_server=True):
+                servershare__fileservershare__in=FileserverShare.objects.exclude(download_url='')):
         # It needs not active=True (i.e. it can have been deleted after this job),
         # but should not be purged
-        sfloc = sfloc_q.values('sfile__filename', 'path', 'servershare__fileservershare__path',
+        sfloc = sfloc_q.values('sfile__filename', 'path', 'servershare__fileservershare__download_url',
             'sfile__filetype__is_folder', 'sfile__mzmlfile').get()
     else:
         return JsonResponse({'msg': 'Cannot find file to download, maybe it is deleted?'}, status=403)
-    sfpath = os.path.join(sfloc['servershare__fileservershare__path'], sfloc['path'], sfloc['sfile__filename'])
-    print(sfpath)
+    sfpath = os.path.join(sfloc['servershare__fileservershare__download_url'], sfloc['path'],
+                          sfloc['sfile__filename'])
     if sfloc['sfile__filetype__is_folder'] and not sfloc['sfile__mzmlfile']:
         # .d file, walk it and create list to give to nginx for mod_zip module
         ziplist = []
-        try:
-            # Use the download mountpath
-            for wpath, _subdirs, wfns in os.walk(sfpath):
-                print(wpath, _subdirs, wfns)
-                for wfn in wfns:
-                    wfnpath = os.path.join(wpath, wfn)
-                    # full path URL for nginx to find
-                    #path_without_mountshare = os.path.relpath(wfnpath, sfloc['share__fileservershare__path'])
-                    #wfnpath_url = os.path.join(settings.NGINX_DOWNLOAD_REDIRECT, path_without_mountshare)
-                    # path as inside zip fn e.g. "filename123.d/123.m/something.sqlite"
-                    zip_fn = os.relpath(wfnpath, sfloc['path'])
-                    ziplist.append(f'- {os.path.getsize(wfnpath)} {wfnpath_url} {zip_fn}')
-        except Exception as e:
-            print(e)
-        print(ziplist)
+        # Use the download mountpath
+        for wpath, _subdirs, wfns in os.walk(sfpath):
+            for wfn in wfns:
+                wfnpath = os.path.join(wpath, wfn)
+                # path as inside zip fn e.g. "filename123.d/123.m/something.sqlite"
+                zip_fn = os.relpath(wfnpath, sfloc['path'])
+                ziplist.append(f'- {os.path.getsize(wfnpath)} {wfnpath} {zip_fn}')
         resp = HttpResponse('\n'.join(ziplist))
         resp['X-Archive-Files'] = 'zip'
     else:
-        print('raw file no dir')
-        # Normal file, just serve it
-        try:
-            resp = HttpResponse('hello')
-            resp['X-Accel-Redirect'] = sfpath
-        except Exception as e:
-            print(e)
-    print('whoop!')
-    print(resp.text)
-    print(resp.headers)
+        # Normal file, just serve it. Sfpath works since it contains the fss.path,
+        # which in webserver's case should be a URL path to nginx redirect,
+        # instead of a filesystem path as it would be on a storage controller or analysis server
+        resp = HttpResponse()
+        resp['X-Accel-Redirect'] = sfpath
     return resp
 
 
