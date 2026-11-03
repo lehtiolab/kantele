@@ -97,7 +97,8 @@ class TestCreateMzmls(MzmlTests):
         mzml_q = rm.StoredFileLoc.objects.filter(sfile=mzml_sf, servershare=self.ssnewstore,
                 active=True)
         self.assertTrue(mzml_q.filter(purged=True).exists())
-        md5sum = f'{mzml_sf.filename} md5 file'
+        # MD5 is done in test fixture script to mock pipeline: pwiz.py 
+        md5sum = f'79f0c47cd3822ea51e407742281de08e'
         self.assertNotEqual(mzml_sf.md5, md5sum)
         self.run_job() # rsync nfconfig
         self.run_job() # convert mzml
@@ -153,7 +154,7 @@ class TestCreateMzmls(MzmlTests):
         mzmlfn1 = os.path.join(dss2_fpath, mzmlfn)
         mzmlfn2 = os.path.join(self.f3path, mzmlfn)
         mzml_sf = rm.StoredFile.objects.get(rawfile=self.f3raw, mzmlfile__pwiz=self.pwiz.pk)
-        md5sum = f'{mzml_sf.filename} md5 file'
+        md5sum = f'c64c6ea876cdb5cd47d92f3230b384a3'
         self.assertNotEqual(mzml_sf.md5, md5sum)
         oldmzml_q = rm.StoredFileLoc.objects.filter(pk=self.f3mzsss.pk, active=False)
         self.assertTrue(oldmzml_q.filter(purged=False).exists())
@@ -216,12 +217,13 @@ class TestCreateMzmls(MzmlTests):
         self.anaprofile.delete()
         self.newstorctrl.delete()
 
-        # fake webserver for downloading storage raws
+        # webserver share for downloading storage raws, mounted on nginx
         webserver = rm.FileServer.objects.create(name='webserver', uri='web1.test',
-                fqdn='nginx', is_download_server=True)
+                fqdn='nginx', is_upload_server=True)
         websharestorage = rm.FileserverShare.objects.create(server=webserver,
-                share=self.ssnewstore, path='/task_downloads/storage')
-        # Data server which can only download:
+                share=self.ssnewstore, download_url='/task_downloads/storage')
+
+        # Data server which can only download and not rsync:
         dlserver = rm.FileServer.objects.create(name='download', uri='dl.test',
                 fqdn='dl_http_1', rsyncusername='', rsynckeyfile='')
         dlshare = rm.ServerShare.objects.create(name='dlshare', max_security=1,
@@ -232,6 +234,13 @@ class TestCreateMzmls(MzmlTests):
         # Setup dataset shares on ana server and download-to-server, e.g.
         # no-rsync for 2FA is in the way
         rawfn = os.path.join(self.f3path, self.f3raw.name)
+
+        # delete existing mzmlfn
+        mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}.mzML'
+        mzmlfn3 = os.path.join(self.f3path, mzmlfn)
+        os.unlink(mzmlfn3)
+        rm.StoredFile.objects.filter(rawfile=self.f3raw, mzmlfile__isnull=False).delete()
+
         dss2path = 'testdss2'
         dss2_fpath = os.path.join(self.oldstorctrl.path, dss2path)
         dss3_fpath = os.path.join(dlctrl.path, dss2path)
@@ -266,7 +275,6 @@ class TestCreateMzmls(MzmlTests):
                     ).values('pk')]}
         for k, val in exp_kw.items():
             self.assertEqual(j.kwargs[k], val)
-        mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}.mzML'
         runpath = f'{self.ds.pk}_convert_mzml_{j.kwargs["timestamp"]}' 
         f3sfmz = rm.StoredFile.objects.get(rawfile=self.f3raw, mzmlfile__isnull=False)
         mzmlfn1 = os.path.join(self.rootdir, 'oldstorage', dss2path, mzmlfn)
@@ -275,7 +283,6 @@ class TestCreateMzmls(MzmlTests):
         mzmlfn2 = os.path.join(self.inboxctrl.path, 'datasets', f'{self.ds.pk}', mzmlfn)
         m2q = rm.StoredFileLoc.objects.filter(sfile=f3sfmz, servershare=self.ssinbox,
                 path=f'datasets/{self.ds.pk}', active=True, purged=False)
-        mzmlfn3 = os.path.join(self.f3path, mzmlfn)
         m3q = rm.StoredFileLoc.objects.filter(sfile=f3sfmz, servershare=self.ssnewstore,
                 path=self.storloc, active=True, purged=False)
         mzmlfn4 = os.path.join(dss3_fpath, mzmlfn)
@@ -298,6 +305,9 @@ class TestCreateMzmls(MzmlTests):
         self.run_job() # download file to dss3 on download-only share
         self.assertTrue(os.path.exists(mzmlfn4))
         self.assertTrue(m4q.exists())
+        self.run_job() # Delete files from inbox
+        self.assertFalse(os.path.exists(mzmlfn2))
+        self.assertFalse(m2q.exists())
         self.run_job() # set to done
         j2 = jm.Job.objects.last()
         self.assertEqual(j2.state, 'done')
@@ -324,19 +334,24 @@ class TestCreateMzmls(MzmlTests):
         mzmlfn1 = os.path.join(dss2_fpath, mzmlfn)
         mzmlfn2 = os.path.join(self.inboxctrl.path, 'datasets', str(self.ds.pk),  mzmlfn)
         mzmlfn3 = os.path.join(self.f3path, mzmlfn)
+        mzmlfn4 = os.path.join(dss3_fpath, mzmlfn)
         self.assertFalse(os.path.exists(mzmlfn1))
         self.assertFalse(os.path.exists(mzmlfn2))
+        self.assertFalse(os.path.exists(mzmlfn3))
+        self.assertFalse(os.path.exists(mzmlfn4))
         self.run_job() # refining
-        #self.assertTrue(os.path.exists(mzmlfn0))
         self.assertTrue(os.path.exists(mzmlfn1))
         self.run_job() # rsync to inbox
         self.assertTrue(os.path.exists(mzmlfn2))
         self.run_job() # running rsync to first dss
         self.assertTrue(os.path.exists(mzmlfn3))
+        self.run_job() # downloading to dss3
+        self.assertTrue(os.path.exists(mzmlfn4))
+        self.run_job() # purging inbox
         self.run_job() # setting to done
         j2 = jm.Job.objects.last()
         self.assertEqual(j2.state, 'done')
-        self.assertTrue(os.path.exists(mzmlfn2))
+        self.assertFalse(os.path.exists(mzmlfn2))
 
     def test_create_mzml_tims_rsync_sameserver(self):
         '''Two datasetserver locations (one on ssnewstore, one on sstmp),
@@ -345,6 +360,13 @@ class TestCreateMzmls(MzmlTests):
         self.f3raw.producer = self.prodtims
         self.f3raw.save()
         rawfn = os.path.join(self.f3path, self.f3raw.name)
+
+        # delete existing mzmlfn
+        mzmlfn = f'{os.path.splitext(self.f3raw.name)[0]}.mzML'
+        mzmlfn1 = os.path.join(self.f3path, mzmlfn)
+        os.unlink(mzmlfn1)
+        rm.StoredFile.objects.filter(rawfile=self.f3raw, mzmlfile__isnull=False).delete()
+
         dss2path = 'testdss2'
         dss2_fpath = os.path.join(self.tmpctrl.path, dss2path)
         os.makedirs(dss2_fpath)
@@ -376,7 +398,6 @@ class TestCreateMzmls(MzmlTests):
                 path=dss2path, active=True)
         self.assertTrue(mzsfl_q_stor.filter(purged=True).exists())
         self.assertTrue(mzsfl_q_tmp.filter(purged=True).exists())
-        mzmlfn1 = os.path.join(self.f3path, mzmlfn)
         mzmlfn2 = os.path.join(dss2_fpath, mzmlfn)
         self.assertFalse(os.path.exists(mzmlfn1))
         self.assertFalse(os.path.exists(mzmlfn2))

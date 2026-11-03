@@ -1362,7 +1362,9 @@ def reactivate_dataset(dset, share_ids, project, experiment, dtype, prefrac, hrr
             dset.save()
             dset.runname.experiment.project.save()
             # retrieve to inbox - a guaranteed sensitive data share on the backup controller
-            inbox_share = filemodels.ServerShare.objects.get(function=filemodels.ShareFunction.INBOX)
+            inbox_share = filemodels.ServerShare.objects.get(function=filemodels.ShareFunction.INBOX,
+                    fileservershare__server__can_backup=True)
+
             buppath = filemodels.ServerShare.get_inbox_path(dset_id=dset.pk)
             upd_defaults = {'active': True, 'storage_loc_ui': buppath}
             bupdss, _ = models.DatasetServer.objects.update_or_create(dataset=dset,

@@ -237,8 +237,11 @@ class RemoveDatasetFilesFromServershare(DatasetJob):
         fields = ['servershare__name', 'path', 'sfile__filename', 'pk', 'sfile__mzmlfile',
                 'sfile__filetype__is_folder', 'servershare__pk']
         for sfl in srcsfs.values(*fields):
+            # Have to exclude is_upload_server since we dont run queue workers on the web
+            # node, but it has an inbox mounted for uploads (e.g. for delete files jobs from inbox)
             fss = FileserverShare.objects.filter(share=sfl['servershare__pk'], server__active=True,
-                    share__active=True).values('server__name', 'path').first()
+                    server__is_upload_server=False, share__active=True).values(
+                    'server__name', 'path').first()
             queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_FASTSTORAGE)
             if sfl['sfile__mzmlfile'] is not None:
                 is_folder = False

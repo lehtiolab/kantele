@@ -273,28 +273,26 @@ def download_files_to_servershare(self, dstbasepath, dstpath, src_dst_sfloc_ids_
     dstpath: storage path of file, e.g. project/experiment/file.raw
     src_dst_sfloc_ids_fns: [(srcpk, dstpk, md5 of file, is file a folder (unzip)), ...]
     '''
-    print('running download')
     upd_url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
     for src_sfl_pk, fname, dst_sfl_pk, md5_check, is_dir_stable_fn in src_dst_sfloc_ids_fns:
         urlpath = reverse("files:download_to_share", kwargs={'sfloc_id': src_sfl_pk, 'task_id': self.request.id})
         dl_url = urljoin(settings.KANTELEHOST, urlpath)
         dighash = hashlib.md5()
-        dst = os.path.join(dstbasepath, dstpath, fname)
-        print(dl_url)
+        dstpath = os.path.join(dstbasepath, dstpath, fname)
+        dst = os.path.join(dstpath, fname)
+        os.makedirs(dstpath, exist_ok=True)
         with requests.get(dl_url, stream=True) as req, NamedTemporaryFile(mode='wb') as wfp:
             if req.status_code == 500:
-                print(req.text)
+                taskfail_update_db(self.request.id, 'Server error 500. Could not download file '
+                                   f'{fname}, contact admin')
                 return
             elif req.status_code != 200:
-                print(req.text)
                 msg = req.json()
                 taskfail_update_db(self.request.id, f'Could not download file {fname}: {msg}')
                 return
             else:
-                print('thetext', req.text)
                 try:
                     for chunk in req.iter_content(chunk_size=8192):
-                        print('this', chunk)
                         if chunk:
                             wfp.write(chunk)
                         dighash.update(chunk)
@@ -307,13 +305,9 @@ def download_files_to_servershare(self, dstbasepath, dstpath, src_dst_sfloc_ids_
                                 'client_id': settings.APIKEY, 'task_id': self.request.id}
                         update_db(upd_url, json=postdata)
                     else:
-                        #self.retry
-                        pass
-                    print(dighash, md5_check)
-                    print(dst)
+                        self.retry(countdown=60)
                 except Exception as e:
                     # Possibly write or network error
-                    print(e)
                     taskfail_update_db(self.request.id, 'Could not download or write file '
                         f'{fname}: {e}')
                     raise
@@ -330,12 +324,12 @@ def upload_files_to_inbox(self, base_srcpath, inbox_fss, fn_dstsfls):
     dstpath: storage path of file, e.g. project/experiment/file.raw
     src_dst_sfloc_ids_fns: [(srcpk, dstpk, md5 of file, is file a folder (unzip)), ...]
     '''
-    for fname, src_sfl_pk, dst_sfl_pk, is_dir_stable_fn in fn_dstsfls:
+    for fname, src_sfl_pk, dst_sfl_pk, is_dir in fn_dstsfls:
         url = urljoin(settings.KANTELEHOST, reverse('files:upload_to_inbox'))
         stddata = {'task': self.request.id, 'srcsfl_id': f'{src_sfl_pk}', 'dstsfl_id': f'{dst_sfl_pk}', 'in_fss': f'{inbox_fss}'}
         fpath = os.path.join(base_srcpath, fname)
         session, headers = get_session_cookies()
-        if is_dir_stable_fn:
+        if is_dir:
             # Zip the file if it is a dir, like .d
             with TemporaryDirectory() as tmpdir:
                 archive = os.path.join(tmpdir, fname)

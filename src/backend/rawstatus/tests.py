@@ -296,6 +296,13 @@ class TestUploadScript(BaseIntegrationTest):
         os.makedirs(outbox, exist_ok=True)
         shutil.copytree(fullp, os.path.join(outbox, self.f3sf.filename))
         timestamp = os.path.getctime(os.path.join(outbox, self.f3sf.filename))
+
+        # Fix md5 since were going to upload an existing file
+        self.f3raw.source_md5 = 'tmp fake md5'
+        self.f3raw.save()
+        self.f3sf.md5 = self.f3raw.source_md5   
+        self.f3sf.save()
+
         with open(os.path.join(tmpdir, 'config.json'), 'w') as fp:
             json.dump({'client_id': self.prod.client_id, 'host': 'http://nginx',
 
@@ -340,6 +347,11 @@ class TestUploadScript(BaseIntegrationTest):
         self.get_token()
         fpath = os.path.join(self.rootdir, self.newstorctrl.path, self.f3sss.path)
         fullp = os.path.join(fpath, self.f3sf.filename)
+        # Fix md5 since were going to upload an existing file
+        self.f3raw.source_md5 = 'tmp fake md5'
+        self.f3raw.save()
+        self.f3sf.md5 = self.f3raw.source_md5   
+        self.f3sf.save()
         rawfn = rm.RawFile.objects.create(source_md5=self.actual_md5, name='fake_oldname',
                 producer=self.adminprod, size=123, date=timezone.now(), claimed=False,
                 usetype=rm.UploadFileType.RAWFILE)
@@ -543,6 +555,11 @@ class TestUploadScript(BaseIntegrationTest):
         self.user_token = b64encode(f'{self.token}|http://nginx|{need_desc}'.encode('utf-8')).decode('utf-8')
         self.actual_md5 = 'dee94af7703a5beb01e8fdc84da018bb'
         fpath = os.path.join(self.rootdir, self.newstorctrl.path, self.f3sss.path, self.f3sf.filename)
+        # Fix md5 since were going to upload an existing file
+        self.f3raw.source_md5 = 'tmp fake md5'
+        self.f3raw.save()
+        self.f3sf.md5 = self.f3raw.source_md5   
+        self.f3sf.save()
         self.f3sf.filename = 'analysis.tdf'
         fullp = os.path.join(fpath, self.f3sf.filename)
         old_raw = rm.RawFile.objects.last()
@@ -1278,6 +1295,12 @@ class TestFileTransfer(BaseFilesTest):
                 md5=other_raw.source_md5, filename=other_raw.name)
         rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.ssinbox, path=settings.TMPPATH,
                 purged=False, active=True)
+        # Fix md5 since were going to upload an existing file
+        self.f3raw.source_md5 = 'tmp fake md5'
+        self.f3raw.save()
+        self.f3sf.md5 = self.f3raw.source_md5   
+        self.f3sf.save()
+
         resp, upload_content = self.do_transfer_file()
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(resp.json(), {'error': 'Another file in the system has the same name '
@@ -1445,7 +1468,7 @@ class TestUpdateStorageFile(BaseFilesTest):
         self.assertTrue(sfls.filter(servershare=self.analocalstor).exists())
         srcsflid = self.f3sf.storedfileloc_set.filter(active=False, servershare=self.ssinbox).get().pk
         self.assertTrue(bupjobs.filter(kwargs__sfloc_id=srcsflid).exists())
-        self.assertTrue(rsjobs.filter(kwargs__sfloc_id=srcsflid).exists())
+        self.assertTrue(rsjobs.filter(kwargs__sfloc_ids=[srcsflid]).exists())
         self.assertTrue(jm.Job.objects.filter(funcname='purge_files', kwargs__sfloc_ids=[srcsflid]).exists())
         self.assertEqual(jm.Job.objects.count(), 3)
 

@@ -822,7 +822,7 @@ def upload_file_to_inbox(request):
     dighash = md5()
     basedst_path = os.path.join(share_path['path'], sfloc['path'])
     destfile = os.path.join(basedst_path, sfloc['sfile__filename'])
-    os.makedirs(basedst_path)
+    os.makedirs(basedst_path, exist_ok=True)
     isdir = not sfloc['sfile__mzmlfile'] and sfloc['sfile__filetype__is_folder']
     with TemporaryDirectory(dir=basedst_path) as tmp_unzip:
         # Do everything in a tmp workdir
@@ -831,8 +831,9 @@ def upload_file_to_inbox(request):
             # Unzip in case there is a file inside that we need the md5 of
             ch_to_mode = 0o755
             os.makedirs(tmp_result)
-            for file_name, file_size, unzipped_chunks in stream_unzip(chunk_zipfn(upfile)):
-                subfn = os.path.join(tmp_unzip, file_name)
+            for file_name_bytes, file_size, unzipped_chunks in stream_unzip(chunk_zipfn(upfile)):
+                file_name = file_name_bytes.decode('utf-8')
+                subfn = os.path.join(tmp_result, file_name)
                 with open(subfn, 'wb+') as fp:
                     for chunk in unzipped_chunks:
                         fp.write(chunk)
@@ -854,6 +855,7 @@ def upload_file_to_inbox(request):
             shutil.move(tmp_result, destfile)
             os.chmod(destfile, ch_to_mode)
         # Leave tmpdir context, tmpdir gets deleted
+    StoredFileLoc.objects.filter(pk=data['dstsfl_id']).update(purged=False)
     return JsonResponse({})
 
 
@@ -1529,8 +1531,8 @@ def delete_file(request):
         else:
             # First move file to inbox before doing a backup as it is not available
             sflocid = sfloc_q.values('pk').first()['pk']
-            inbox = ServerShare.objects.filter(function=ShareFunction.INBOX, active=True).values(
-                    'pk').first()
+            inbox = ServerShare.objects.filter(function=ShareFunction.INBOX, active=True,
+                    fileservershare__server__can_backup=True).values('pk').first()
             inboxpath = ServerShare.get_inbox_path(dset_id=dset_id, analysis_id=analysis_id)
             rsjob = create_job('rsync_files_to_servershare', sfloc_ids=[sflocid],
                     dstpath=inboxpath, dstshare_id=inbox['pk'])
