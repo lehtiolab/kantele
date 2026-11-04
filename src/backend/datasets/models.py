@@ -178,8 +178,8 @@ class DatasetServer(models.Model):
     # Dataset and storageshare should NEVER change (in case of change it will be deactivation)
     dataset = models.ForeignKey(Dataset, on_delete=models.CASCADE)
     storageshare = models.ForeignKey(ServerShare, on_delete=models.CASCADE)
-    # Storage loc can be renamed, the base one is used in jobs, the _ui one is
-    # updated by the UI immediately
+    # Storage loc can be renamed, the base one is used in jobs at processing stage, the _ui one is
+    # updated by the UI immediately and jobs use it in the creation steps
     storage_loc = models.TextField()
     storage_loc_ui = models.TextField()
     # Keep track of when dataset was on storage (startdate when instantiated, last_date_used

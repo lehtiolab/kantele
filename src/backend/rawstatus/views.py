@@ -653,10 +653,6 @@ def file_uploaded(request):
             # Only dump in sens OK data storage, 
             # so use inbox, then do backup, deliver to secure delivery, delete.
             # TODO
-            #rsjob = create_job('rsync_files_to_servershare', sfloc_id=sfl.pk,
-            #    dstshare_id=dstshare['pk'], dstpath=analysis.get_public_output_dir())
-            #create_job('create_pdc_archive', sfloc_id=rsjob['kwargs']['dstsfloc_id'],
-            #        isdir=sf.filetype.is_folder)
             pass
         else:
             # Rsync non-sensitive data to the public data storage
@@ -768,7 +764,7 @@ def mzml_uploaded(request):
     '''
     data =  json.loads(request.body.decode('utf-8'))
     try:
-        sflpk, md5, uploader_id = data['sflpk'], data['md5'], data['client_id']
+        sflpk, md5hash, uploader_id = data['sflpk'], data['md5'], data['client_id']
     except ValueError as error:
         return JsonResponse({'error': 'Date passed to registration incorrectly formatted'}, status=400)
     except KeyError as error:
@@ -780,7 +776,7 @@ def mzml_uploaded(request):
         sfl = StoredFileLoc.objects.get(pk=sflpk)
     except StoredFileLoc.DoesNotExist:
         return JsonResponse({'error': 'Cannot find pre-registered mzML file to update'}, status=404)
-    sfl.sfile.md5 = md5
+    sfl.sfile.md5 = md5hash
     sfl.sfile.checked = True
     sfl.sfile.save()
     sfl.purged = False
@@ -798,7 +794,8 @@ def upload_file_to_inbox(request):
             kwargs__sfloc_ids__contains=int(data['srcsfl_id']),
             state=jj.Jobstates.PROCESSING, task__asyncid=task_id)
         sfloc = StoredFileLoc.objects.values('servershare_id', 'path', 'sfile__filetype__is_folder',
-      'sfile__mzmlfile',      'sfile__filename', 'sfile__filetype__stablefiles', 'sfile__md5').get(pk=data['dstsfl_id'])
+                'sfile__mzmlfile', 'sfile__filename', 'sfile__filetype__stablefiles', 'sfile__md5'
+                ).get(pk=data['dstsfl_id'])
         share_path = FileserverShare.objects.filter(pk=data['in_fss']).values('path').get()
     except KeyError as error:
         print(f'POST request to transfer_file with missing parameter, {error}')
@@ -812,7 +809,6 @@ def upload_file_to_inbox(request):
         return JsonResponse({'error': 'Cannot find file being uploaded'}, status=403)
     except FileserverShare.DoesNotExist:
         return JsonResponse({'error': 'Cannot find upload destination share passed'}, status=403)
-
 
     # Write file from /tmp (or in memory if small) to its destination in upload folder
     def chunk_zipfn(upfile):
@@ -1534,6 +1530,7 @@ def delete_file(request):
             sflocid = sfl_q_bup.values('pk').first()['pk']
         else:
             # First move file to inbox before doing a backup as it is not available
+            # FIXME also consider it may need to be uploaded instead of rsynced
             sflocid = sfloc_q.values('pk').first()['pk']
             inbox = ServerShare.objects.filter(function=ShareFunction.INBOX, active=True,
                     fileservershare__server__can_backup=True).values('pk').first()

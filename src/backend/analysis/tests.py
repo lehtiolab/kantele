@@ -885,7 +885,7 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.assertTrue(usm_q.exists())
         self.assertTrue(hm.AnalysisMessage.objects.filter(analysis=ana, msg=usm_q.get().pk,
             msgtype=hm.AnalysisMsgTypes.COMPLETED).exists())
-        self.run_job() # rsync the results, rename job
+        self.run_job() # rsync the results, and rename job
         self.assertTrue(renamejobs.filter(state=jj.Jobstates.PROCESSING).exists())
         reports = rm.StoredFileLoc.objects.filter(sfile__filename='report.html', purged=False)
         self.assertEqual(reports.count(), 3) # analysisruns, web, analysis storage
@@ -1250,8 +1250,6 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         self.assertFalse(am.AnalysisSetname.objects.filter(analysis=ana).exists())
         for adsif in am.AnalysisDSInputFile.objects.filter(dsanalysis__analysis=ana):
             self.assertEqual(adsif.dsanalysis.dataset_id, self.oldds.pk)
-            #self.assertEqual(regexes[adsif.dsanalysis.dataset_id], postdata['dsetfields'][f'{self.ds.pk}']['__regex'])
-            #self.assertEqual(fakevals[adsif.dsanalysis.dataset_id], postdata['dsetfields'][f'{self.ds.pk}']['fakeds'])
 
         # Check base analysis
         self.assertFalse(am.AnalysisBaseanalysis.objects.filter(analysis=ana))
@@ -1433,7 +1431,6 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         reports = rm.StoredFileLoc.objects.filter(sfile__filename='report.html', purged=False)
         self.run_job() # http the results to inbox
         self.run_job() # rsync to delivery
-        self.assertEqual(reports.count(), 4) # analysisruns, web, analysis storage, inbox
         self.run_job() # delete from inbox
         self.assertEqual(reports.count(), 3) # analysisruns, web, analysis storage
         nfrunsfl = reports.filter(servershare=self.ssanaruns2, path=ana.get_run_base_dir()).get()

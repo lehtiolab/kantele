@@ -78,9 +78,10 @@ class FileServer(models.Model):
         'server? Almost always yes, except for web server')
     can_rsync_remote = models.BooleanField(default=False, help_text='Does the server have rsync private keys for other servers (aka is some kind of controller)')
     can_backup = models.BooleanField(default=False)
-    # username/keyfilename are for access TO this server 
     is_upload_server = models.BooleanField(default=False,
         help_text='This server is used for uploading data from over HTTP')
+    # username/keyfilename are for access TO this server, and will be used on a 
+    # server which is storage controller that can rsync
     rsyncusername = models.TextField(blank=True)
     rsynckeyfile = models.TextField(blank=True)
 
@@ -170,19 +171,21 @@ class ServerShare(models.Model):
             fss_src = FileserverShare.objects.filter(share_id=srcshareid)
 
             # shares local means, src and dstfiles on same server mounted, so no
-            # traffic over SSH needed
+            # traffic over SSH needed. They still need a check for rsync usernames to make sure
+            # there is actually a storage worker running there?
             localdstshares = [x['share_id'] for x in fss_dst.filter(
+                server__has_workers=True,
                 server__fileservershare__in=fss_src, share_id__in=dstshare_ids).distinct('share_id'
                 ).values('share_id')]
             rsync_ssh_dstshares, remote_shares, download_shares = [], [], []
 
             # Dst share is on server elsewhere, but source server can do rsync
-            # over SSH, prefer this as a second option
+            # to it over SSH, prefer this as a second option
             if fss_src.filter(server__can_rsync_remote=True) and fss_dst_rs:
                 rsync_ssh_dstshares = [x['share_id'] for x in fss_dst_rs.exclude(
                     share_id__in=localdstshares).distinct('share_id').values('share_id')
                                    ]
-            # Also reverse: pulling file from source to dst is in here
+            # Also the reverse: pulling file from source to dst with rsync over ssh:
             fss_dst_pull = fss_dst.filter(server__can_rsync_remote=True).exclude(
                     share_id__in=[*rsync_ssh_dstshares, *localdstshares])
             fss_src_pull = fss_src.exclude(server__rsyncusername='', server__rsynckeyfile='') 

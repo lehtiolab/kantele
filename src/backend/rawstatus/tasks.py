@@ -176,8 +176,7 @@ def rsync_files_to_servershares(self, src_user, srcserver_url, srcpath, dst_user
                 raise
     # Do not delete files afterwards, as that cannot be done when they live on a different
     # controller server
-
-    # report finished
+    # Now report task is finished
     fnpostdata = {'sfloc_ids': upd_sfl_ids, 'dst_path': dstpath, 'client_id': settings.APIKEY,
             'task': self.request.id}
     fnurl = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))

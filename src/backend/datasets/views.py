@@ -519,10 +519,6 @@ def distribute_dset_files(dset_pk, secclass, srcshares, existing_sfl, dstshare_i
         if http_inboxshare_q := filemodels.ServerShare.objects.filter(max_security__gte=secclass,
                 fileservershare__id=dstshare_classes['http_inbox_id']):
             http_inboxshare = http_inboxshare_q.values('pk').first()
-            upd_defaults = {'active': True,
-                    'storage_loc_ui': filemodels.ServerShare.get_inbox_path(dset_id=dset_pk),
-                    'storage_loc': filemodels.ServerShare.get_inbox_path(dset_id=dset_pk),
-            }
             src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
                     servershare_id=srcshare_id).values('pk')]
             http_inboxjob = create_job('http_upload_servershare',

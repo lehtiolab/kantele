@@ -70,7 +70,6 @@ services:
             TMP_UPLOADPATH: /storage/uploads
             QUEUE_QC_NXF: 'nextflow'
             HOST_UPLOADDIR: /storage/uploads
-            NGINX_DOWNLOAD_REDIRECT: /task_downloads
 
     nginx:
         image: nginx_dev

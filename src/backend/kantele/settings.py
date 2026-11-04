@@ -47,8 +47,6 @@ RSYNC_SSHUSER = os.environ.get('RSYNC_SSHUSER')
 RSYNC_SSHKEY = os.environ.get('RSYNC_SSHKEY')
 RSYNC_SSHPORT = os.environ.get('RSYNC_SSHPORT')
 
-UPLOAD_URL = 'uploads'
-
 # Nginx redirect URL for downloads and analysis report serving
 NGINX_ANALYSIS_REDIRECT = os.environ.get('NGINX_ANALYSIS_REDIRECT')
 SERVABLE_FILENAMES = ['qc.html', 'qc_full.html', 'qc_light.html', 'pipeline_report.html', 'report.html']

@@ -170,11 +170,9 @@ class HttpUploadFilesServershare(RsyncFilesServershare):
         for dstsfl in all_dstsfls.values('pk', 'sfile_id', 'sfile__filetype__is_folder',
                 'sfile__mzmlfile'):
             if dstsfl['sfile__mzmlfile']:
-                print('mzml is not folder')
                 isdir = False
             else:
                 isdir = dstsfl['sfile__filetype__is_folder']
-                print('folder:', isdir)
             src_dst_matched[dstsfl['sfile_id']].extend([dstsfl['pk'], isdir])
         src_dst_matched = [x for x in src_dst_matched.values()]
                 
@@ -204,14 +202,12 @@ class DownloadFilesToServerShare(RsyncFilesServershare):
             raise RuntimeError('Cannot find specified destination share with ID '
                     f'{kwargs["dstshare_id"]}, maybe it is not configured correctly')
 
-        srcvals = ['path', 'servershare_id', 'sfile_id', 'sfile__filename']
-        srcloc = srcsfs.distinct(*srcvals)
 
         # Error check too many src locations for dataset:
         # FIXME move to error checker
-        if srcloc.count() > 1:
+        if srcsfs.distinct('path', 'servershare_id').count() > 1:
             raise RuntimeError('Dataset source files are spread over more than one location, please '
-                    'contact admin to make sure files are consolicated before sync to a new location')
+                    'contact admin to make sure files are consolidated before sync to a new location')
         dstshare = rm.ServerShare.objects.values('pk', 'name').get(pk=kwargs['dstshare_id'])
         ## FIXME do this error check without dss_id
         #dst_dss = DatasetServer.objects.values('storage_loc', 'storageshare_id').get(pk=kwargs['dss_id'])
@@ -326,10 +322,8 @@ class CreatePDCArchive(SingleFileJob):
                     'servershare_id', 'sfile__filetype__is_folder').get()
             if fss := rm.FileserverShare.objects.filter(server__can_backup=True,
                     share=sfloc['servershare_id']).values('path').first():
-                isdir = (sfloc['sfile__rawfile__producer__msinstrument'] is not None and
-                        sfloc['sfile__filetype__is_folder'])
                 rm.PDCBackedupFile.objects.get_or_create(storedfile_id=sfloc['sfile_id'],
-                        is_dir=isdir, defaults={'pdcpath': '', 'success': False})
+                        is_dir=kwargs['isdir'], defaults={'pdcpath': '', 'success': False})
             else:
                 raise RuntimeError('Cannot find server to backup file from, please '
                         'configure system for backups')

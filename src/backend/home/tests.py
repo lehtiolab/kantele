@@ -195,7 +195,7 @@ class TestCreateMzmls(MzmlTests):
     def test_create_mzml_qe_rsyncpush_and_refine(self):
         '''Dset is on 
            - dss: ssnewstore
-           - dss2: analocalstor  converting to mzml on remoteanaserver)
+           - dss2: analocalstor, converting to mzml on remoteanaserver)
            - dss3: "dlshare"
 
         DLshare is mounted on DLserver, can only download, no rsync keys

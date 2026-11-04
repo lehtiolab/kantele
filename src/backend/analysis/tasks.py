@@ -383,9 +383,7 @@ def execute_normal_nf(run, params, baseoutdir, gitwfdir, taskid, nf_version, scr
                  f' cleaning. Full NF trace log: \n{nxf_log.stdout}')
     outfiles = [os.path.join(outdir, x) for x in os.listdir(outdir)]
     outfiles = [x for x in outfiles if not os.path.isdir(x)]
-    reportfile = os.path.join(outdir, 'Documentation', 'pipeline_report.html')
-    if os.path.exists(reportfile):
-        outfiles.append(reportfile)
+    # FIXME add quants dir, so we are to go into vgit
     return outfiles
 
 
