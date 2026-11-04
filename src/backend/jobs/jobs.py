@@ -131,18 +131,21 @@ class BaseJob:
         return []
 
     def _select_rsync_server(self, srcshare_id, dstshare_id):
-        '''Shares should already have been confirmed to be active?
+        '''For two given shares, find the server that can rsync between them.
+
+        Shares should already have been confirmed to be active?
         Or can we do that here?
         '''
         servers = FileserverShare.objects.filter(share_id__in=[srcshare_id, dstshare_id],
                 server__active=True)
         rsync_server_q = servers.filter(server__can_rsync_remote=True)
-        if singleserver := FileServer.objects.filter(fileservershare__in=servers, active=True,
-                fileservershare__share=dstshare_id).filter(fileservershare__share=srcshare_id):
+        if singleserver := FileServer.objects.filter(has_workers=True, fileservershare__in=servers,
+                active=True, fileservershare__share=dstshare_id).filter(
+                fileservershare__share=srcshare_id):
             # Try to get both shares from same server, rsync can skip SSH then
-            srcserver = servers.filter(server__in=singleserver,
-                    share=srcshare_id).values('server__fqdn', 'server__name', 'path').first()
-            dstserver = servers.filter(server__in=singleserver, share=dstshare_id
+            srcserver = servers.filter(server__in=singleserver, share=srcshare_id
+                    ).values('server__fqdn', 'server__name', 'path', 'server__pk').first()
+            dstserver = servers.filter(server=srcserver['server__pk'], share=dstshare_id
                     ).values('server__fqdn', 'server__name', 'path').first()
             src_user = dst_user = rskey = False
             rsyncservername = srcserver['server__name']

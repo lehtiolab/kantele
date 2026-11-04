@@ -17,9 +17,9 @@ alljobs = [
         dsjobs.RemoveDatasetFilesFromServershare,
         dsjobs.ConvertDatasetMzml,
         #dsjobs.DeleteDatasetPDCBackup,
-        dsjobs.DownloadDsetFilesToServerShare,
-        rsjobs.RsyncOtherFileServershare,
+        rsjobs.RsyncFilesServershare,
         rsjobs.HttpUploadFilesServershare,
+        rsjobs.DownloadFilesToServerShare,
         rsjobs.RsyncFileTransferFromWeb,
         rsjobs.RemoveFilesFromServershare,
         rsjobs.CreatePDCArchive,
@@ -133,8 +133,12 @@ def distribute_file_servershares(src_share_ids, existing_sfl, dstpaths):
     # delete jobs to remove stuff from inbox after were done with it
     if http_inboxjob:
         create_job('purge_files', sfloc_ids=http_inboxjob['kwargs']['dstsfloc_ids'])
+        rm.StoredFileLoc.objects.filter(pk__in=http_inboxjob['kwargs']['dstsfloc_ids']
+                    ).update(active=False)
     if rs_inboxjob:
         create_job('purge_files', sfloc_ids=rs_inboxjob['kwargs']['dstsfloc_ids'])
+        rm.StoredFileLoc.objects.filter(pk__in=rs_inboxjob['kwargs']['dstsfloc_ids']
+                    ).update(active=False)
     return src_share_ids
 
 

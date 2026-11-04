@@ -74,6 +74,8 @@ class FileServer(models.Model):
     uri = models.TextField(help_text='How users can find server')
     fqdn = models.TextField(help_text='controller URL for rsync SSH')
     active = models.BooleanField(default=True, help_text='Are we using this server?')
+    has_workers = models.BooleanField(default=True, help_text='Are storage workers running on this '
+        'server? Almost always yes, except for web server')
     can_rsync_remote = models.BooleanField(default=False, help_text='Does the server have rsync private keys for other servers (aka is some kind of controller)')
     can_backup = models.BooleanField(default=False)
     # username/keyfilename are for access TO this server 

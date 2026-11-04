@@ -296,56 +296,80 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
     def test_upload_directory_and_mzml(self):
         # Scenario: Dset is somehow only on an HPC share with 2FA ssh so we cant rsync it
         # - thus it will HTTP upload instead to ssanalocalstore
+        # - then it HTTP download back to ssnewstore
+        # One of the files to transfer is a directory, so it tests that too
 
         # webserver share for downloading storage raws, mounted on web
         uploadshare = rm.ServerShare.objects.create(name='uploads', max_security=1,
                 function=rm.ShareFunction.INBOX)
         webserver = rm.FileServer.objects.create(name='webserver', uri='web1.test',
-                fqdn='nginx', is_upload_server=True)
+                fqdn='nginx', is_upload_server=True, has_workers=False)
         uploadss = rm.FileserverShare.objects.create(server=webserver,
-                share=uploadshare, path='/storage/uploads')
+                share=uploadshare, path='/storage/uploads', download_url='/task_downloads/uploads')
+        downloadnewstore = rm.FileserverShare.objects.create(server=webserver,
+                share=self.ssnewstore, path='/storage/newstorage',
+                download_url='/task_downloads/storage')
         upload_ctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
-                share=uploadshare, path='/storage/uploads')
+                share=uploadshare, download_url='/task_downloads/uploads', path='/storage/uploads')
 
         # Make sure it wont rsync
         self.newstorctrl.delete()
-        self.anaserver.rsyncusername, self.anaserver.rsynckeyfile = '', ''
-        self.anaserver.save()
+        self.remoteanaserver.rsyncusername, self.remoteanaserver.rsynckeyfile = '', ''
+        self.remoteanaserver.save()
 
-        newdss = dm.DatasetServer.objects.filter(storageshare=self.analocalstor, dataset=self.ds)
-        newsfl = rm.StoredFileLoc.objects.filter(sfile=self.f3sf, servershare=self.analocalstor)
+        newdss = dm.DatasetServer.objects.filter(active=True, storageshare=self.analocalstor,
+                    dataset=self.ds)
+        newsfl = rm.StoredFileLoc.objects.filter(active=True, sfile=self.f3sf,
+                    servershare=self.analocalstor)
         self.assertFalse(newdss.exists())
         self.assertFalse(newsfl.exists())
         resp = self.post_json(data={'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
             'runname': self.run1.name, 'datatype_id': self.dtype.pk, 'prefrac_id': False,
-            'experiment_id': self.exp1.pk, 'storage_shares': [self.ssnewstore.pk, self.analocalstor.pk],
+            'experiment_id': self.exp1.pk, 'storage_shares': [self.analocalstor.pk],
             'externalcontact': '', 'secclass': 1})
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(newdss.exists())
         self.assertTrue(newsfl.exists())
 
+        resp = self.post_json(data={'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
+            'runname': self.run1.name, 'datatype_id': self.dtype.pk, 'prefrac_id': False,
+            'experiment_id': self.exp1.pk, 'storage_shares': [self.ssnewstore.pk],
+            'externalcontact': '', 'secclass': 1})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(newdss.exists())
+        self.assertFalse(newsfl.exists())
+
+        old_newstorepath = os.path.join(self.newstorctrl.path, self.dss.storage_loc_ui, self.f3sf.filename)
         uploadpath = os.path.join(uploadss.path, 'datasets', f'{self.ds.pk}', self.f3sf.filename)
         newdsspath = os.path.join(self.oldstorctrl.path, self.dss.storage_loc_ui, self.f3sf.filename)
         newmzmlpath = os.path.join(self.oldstorctrl.path, self.dss.storage_loc_ui, self.f3sfmz.filename)
-        print(newdsspath)
-        print(newmzmlpath)
         self.assertFalse(os.path.exists(uploadpath))
         self.assertFalse(os.path.exists(newdsspath))
         self.assertFalse(os.path.exists(newmzmlpath))
 
-        self.run_job() # http upload
-        self.assertTrue(os.path.exists(uploadpath))
+        # First download
         self.assertFalse(os.path.exists(newdsspath))
         self.assertFalse(os.path.exists(newmzmlpath))
-        self.run_job() # rsync to newstore
+        self.run_job() # download from newstore to analocalstor
+        self.assertTrue(os.path.exists(old_newstorepath))
         self.assertTrue(os.path.exists(newdsspath))
         self.assertTrue(os.path.exists(newmzmlpath))
+        self.run_job() # rm dset dss from newstore
+        self.assertFalse(os.path.exists(old_newstorepath))
+        self.assertTrue(os.path.exists(newdsspath))
+        self.assertTrue(os.path.exists(newmzmlpath))
+        
+        # Now upload to get it back
+        self.run_job() # upload http to inbox
+        self.assertTrue(os.path.exists(uploadpath))
+        self.run_job() # rsync to ssnewstore
+        self.assertTrue(os.path.exists(old_newstorepath))
         self.run_job() # purge from inbox
         self.assertFalse(os.path.exists(uploadpath))
-        self.assertTrue(os.path.exists(newdsspath))
-        self.assertTrue(os.path.exists(newmzmlpath))
-
-# FIXME download
+        self.run_job() # rm dss from analocalstor
+        self.assertTrue(os.path.exists(old_newstorepath))
+        self.assertFalse(os.path.exists(newdsspath))
+        self.assertFalse(os.path.exists(newmzmlpath))
 
 
 class FindFilesTest(BaseTest):

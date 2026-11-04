@@ -536,8 +536,12 @@ def distribute_dset_files(dset_pk, secclass, srcshares, existing_sfl, dstshare_i
     # delete jobs to remove stuff from inbox after were done with it
     if http_inboxjob:
         create_job('purge_files', sfloc_ids=http_inboxjob['kwargs']['dstsfloc_ids'])
+        filemodels.StoredFileLoc.objects.filter(pk__in=http_inboxjob['kwargs']['dstsfloc_ids']
+                    ).update(active=False)
     if rs_inboxjob:
         create_job('purge_files', sfloc_ids=rs_inboxjob['kwargs']['dstsfloc_ids'])
+        filemodels.StoredFileLoc.objects.filter(pk__in=rs_inboxjob['kwargs']['dstsfloc_ids']
+                    ).update(active=False)
 
 
 

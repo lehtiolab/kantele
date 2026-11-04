@@ -24,7 +24,7 @@ def get_host_upload_dst(web_dst):
     return web_dst.replace(settings.TMP_UPLOADPATH, settings.HOST_UPLOADDIR, 1)
 
 
-class RsyncOtherFileServershare(MultiFileJob):
+class RsyncFilesServershare(MultiFileJob):
     '''Does the same as rsync dset, but for when files are not in a dataset, or
     only part of a dataset (i.e. mzMLs) need syncing
     '''
@@ -121,7 +121,7 @@ class RsyncOtherFileServershare(MultiFileJob):
             kwargs['dstsfloc_ids']))
 
 
-class HttpUploadFilesServershare(RsyncOtherFileServershare):
+class HttpUploadFilesServershare(RsyncFilesServershare):
     '''When you cant rsync push/pull 
     through web/nginx
     '''
@@ -185,7 +185,7 @@ class HttpUploadFilesServershare(RsyncOtherFileServershare):
         self.run_tasks.append((os.path.join(srcserver['path'], srcloc['path']), kwargs['inbox_fss'], src_dst_matched))
 
 
-class DownloadFilesToServerShare(RsyncOtherFileServershare):
+class DownloadFilesToServerShare(RsyncFilesServershare):
     '''When you cant rsync push/pull between shares, but can download
     over HTTP through web/nginx
     '''
@@ -232,17 +232,17 @@ class DownloadFilesToServerShare(RsyncOtherFileServershare):
                 'sfile__filetype__stablefiles', 'sfile__mzmlfile'):
             if dstsfl['sfile__mzmlfile']:
                 isdir = False
+            elif dstsfl['sfile__filetype__is_folder']:
+                isdir = dstsfl['sfile__filetype__stablefiles']
             else:
-                isdir = dstsfl['sfile__filetype__is_folder']
+                isdir = False
             src_dst_matched[dstsfl['sfile_id']].extend([dstsfl['pk'], dstsfl['sfile__md5'], isdir])
         src_dst_matched = [x for x in src_dst_matched.values()]
                 
         dstserver = rm.FileserverShare.objects.filter(server__active=True, share_id=kwargs['dstshare_id']).values('path', 'server__name').first()
         # Now run job
         self.queue = self.get_server_based_queue(dstserver['server__name'], settings.QUEUE_STORAGE)
-        dstpath = os.path.join(dstserver['path'], kwargs['dstpath']) #dst_dss['storage_loc'])
-        self.run_tasks.append((dstserver['path'], kwargs['dstpath'], #dst_dss['storage_loc'],
-                               src_dst_matched))
+        self.run_tasks.append((dstserver['path'], kwargs['dstpath'], src_dst_matched))
 
 
 class RemoveFilesFromServershare(RemoveDatasetFilesFromServershare):
