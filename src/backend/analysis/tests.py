@@ -107,12 +107,6 @@ class AnalysisPageTest(BaseIntegrationTest):
         self.wf = am.UserWorkflow.objects.create(name='testwf', wftype=self.wftype, public=True)
         self.wf.nfwfversionparamsets.add(self.nfwf)
 
-        # Web server for reports
-        webserver = rm.FileServer.objects.create(name='web', uri='kantele.test',
-                fqdn='web', can_rsync_remote=False, rsyncusername='', rsynckeyfile='')
-        self.webshare = rm.FileserverShare.objects.create(server=webserver,
-                share=self.ssweb, path=os.path.join(self.rootdir, 'web'))
-
         # Create analysis for isoquant:
         self.ana = am.Analysis.objects.create(user=self.user, name='testana_iso',
                 base_rundir='testdir_iso', securityclass=rm.DataSecurityClass.NOSECURITY)
@@ -888,7 +882,7 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.run_job() # rsync the results, and rename job
         self.assertTrue(renamejobs.filter(state=jj.Jobstates.PROCESSING).exists())
         reports = rm.StoredFileLoc.objects.filter(sfile__filename='report.html', purged=False)
-        self.assertEqual(reports.count(), 3) # analysisruns, web, analysis storage
+        self.assertEqual(reports.count(), 2) # analysisruns, analysis storage
         nfrunsfl = reports.filter(servershare=self.ssanaruns, path=ana.get_run_base_dir()).get()
         nfrunfn = os.path.join(self.nfrunshare.path, nfrunsfl.path, 'report.html')
         # NF run dumps inputdef.txt into report.html
@@ -911,11 +905,6 @@ class TestStoreAnalysis(AnalysisPageTest):
         anafn = os.path.join(anadir, 'report.html')
         self.assertTrue(os.path.exists(anafn))
 
-        websfl = reports.filter(servershare=self.ssweb, path=ana.get_run_base_dir()).get()
-        webdir = os.path.join(self.webshare.path, websfl.path)
-        webfn = os.path.join(webdir, 'report.html')
-        self.assertTrue(os.path.exists(webfn))
-
         self.run_job() # Queue backup (no task for it)
         j = jm.Job.objects.last()
         self.assertEqual(j.kwargs, {'sfloc_id': anasfl.pk, 'isdir': False})
@@ -928,7 +917,6 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.user.save()
         resp = self.cl.post('/analysis/delete/', content_type='application/json', data={'item_id': ana.pk})
         self.assertEqual(resp.status_code, 200)
-        self.assertFalse(os.path.exists(webfn))
         self.assertTrue(os.path.exists(anafn))
         self.assertTrue(os.path.exists(nfrunfn))
         rmdirjobs = jm.Job.objects.filter(funcname='delete_empty_directory')
@@ -1288,7 +1276,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         self.run_job() # rsync the results, rename job
         self.assertTrue(renamejobs.filter(state=jj.Jobstates.PROCESSING).exists())
         reports = rm.StoredFileLoc.objects.filter(sfile__filename='report.html', purged=False)
-        self.assertEqual(reports.count(), 3) # analysisruns, web, analysis storage
+        self.assertEqual(reports.count(), 2) # analysisruns, analysis storage
         nfrunsfl = reports.filter(servershare=self.ssanaruns, path=ana.get_run_base_dir()).get()
         nfrunfn = os.path.join(self.nfrunshare.path, nfrunsfl.path, 'report.html')
         # NF run dumps inputdef.txt into report.html
@@ -1305,11 +1293,6 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         anafn = os.path.join(anadir, 'report.html')
         self.assertTrue(os.path.exists(anafn))
 
-        websfl = reports.filter(servershare=self.ssweb, path=ana.get_run_base_dir()).get()
-        webdir = os.path.join(self.webshare.path, websfl.path)
-        webfn = os.path.join(webdir, 'report.html')
-        self.assertTrue(os.path.exists(webfn))
-
         self.run_job() # Queue backup (no task for it)
         j = jm.Job.objects.last()
         self.assertEqual(j.kwargs, {'sfloc_id': anasfl.pk, 'isdir': False})
@@ -1322,7 +1305,6 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         self.user.save()
         resp = self.cl.post('/analysis/delete/', content_type='application/json', data={'item_id': ana.pk})
         self.assertEqual(resp.status_code, 200)
-        self.assertFalse(os.path.exists(webfn))
         self.assertTrue(os.path.exists(anafn))
         self.assertTrue(os.path.exists(nfrunfn))
         rmdirjobs = jm.Job.objects.filter(funcname='delete_empty_directory')
@@ -1432,7 +1414,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         self.run_job() # http the results to inbox
         self.run_job() # rsync to delivery
         self.run_job() # delete from inbox
-        self.assertEqual(reports.count(), 3) # analysisruns, web, analysis storage
+        self.assertEqual(reports.count(), 2) # analysisruns, analysis storage
         nfrunsfl = reports.filter(servershare=self.ssanaruns2, path=ana.get_run_base_dir()).get()
         nfrunfn = os.path.join(self.nfrunshare2.path, nfrunsfl.path, 'report.html')
 
@@ -1440,11 +1422,6 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         anadir = os.path.join(self.anashare.path, anasfl.path)
         anafn = os.path.join(anadir, 'report.html')
         self.assertTrue(os.path.exists(anafn))
-
-        websfl = reports.filter(servershare=self.ssweb, path=ana.get_run_base_dir()).get()
-        webdir = os.path.join(self.webshare.path, websfl.path)
-        webfn = os.path.join(webdir, 'report.html')
-        self.assertTrue(os.path.exists(webfn))
 
         self.run_job() # Queue backup (no task for it)
         j = jm.Job.objects.last()

@@ -193,16 +193,6 @@ def run_nextflow_workflow(self, run, params, stagefiles, nf_version, scratchbase
             raise RuntimeError('An error occurred trying to register analysis result file: '
                     f'{regresp["error"]}')
             continue
-        checksrvurl = urljoin(settings.KANTELEHOST, reverse('analysis:checkfileupload'))
-        resp = reg_session.get(checksrvurl, json={'fname': fn, 'client_id': settings.APIKEY})
-        if resp.status_code == 200:
-            # Servable file found, upload also to web server
-            # Somewhat complex POST to get JSON and files in same request
-            postdata = {'client_id': settings.APIKEY, 'sfid': regresp['sfid'], 'fname': fn,
-                    'path': os.path.basename(rundir)}
-            response = reg_session.put(checksrvurl, headers=reg_headers, files={
-                'ana_file': (fn, open(ofile, 'rb'), 'application/octet-stream'),
-                'json': (None, json.dumps(postdata), 'application/json')})
     reporturl = urljoin(settings.KANTELEHOST, reverse('jobs:analysisdone'))
     postdata = {'client_id': settings.APIKEY, 'analysis_id': run['analysis_id'],
             'task': self.request.id}

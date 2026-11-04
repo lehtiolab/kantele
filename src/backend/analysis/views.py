@@ -1599,75 +1599,16 @@ def unfreeze_analysis(request):
 
 
 @login_required
-def serve_analysis_file(request, arf_id):
-    # FIXME old report files have sfloc, so they cannot be deleted
+def serve_analysis_file(request, sfl_id):
+    fss_download = filemodels.FileserverShare.objects.exclude(download_url='')
     try:
-        arf = get_servable_files(am.AnalysisResultFile.objects.filter(pk=arf_id,
-            sfile__deleted=False)).values('sfile__storedfileloc__path',
-                    'sfile__filename').distinct('sfile').get()
-    except am.AnalysisResultFile.DoesNotExist:
+        sfl = rm.StoredFileLoc.objects.filter(pk=sfl_id, active=True, purged=False,
+            servershare__fileservershare__in=fss_download).values('path', 'sfile__filename').get()
+    except rm.StoredFileLoc.DoesNotExist:
         return HttpResponseForbidden()
     resp = HttpResponse()
-    resp['X-Accel-Redirect'] = os.path.join(settings.NGINX_ANALYSIS_REDIRECT, arf['sfile__storedfileloc__path'], arf['sfile__filename'])
+    resp['X-Accel-Redirect'] = os.path.join(settings.NGINX_ANALYSIS_REDIRECT, sfl['path'], sfl['sfile__filename'])
     return resp
-
-
-def upload_servable_file(request):
-    '''
-    View to check if file can be uploaded to webserver REPORTS, to enable this with CSRF
-    middleware we need to do PUT instead of post, or we get the
-    "Cannot access body after reading from datastream" error. To use PUT we need some
-    convoluted shit to get the data AND the files out.
-    '''
-    if request.method == "PUT":
-        # Copied this from https://thihara.github.io/Django-Req-Parsing/
-        # Dont need the try/except there.
-        # The fix is to check for the presence of the _post field which is set
-        # the first time _load_post_and_files is called.
-        # If it's set, the request has to be 'reset' to redo
-        # the query value parsing in POST mode.
-        if hasattr(request, '_post'):
-            del request._post
-            del request._files
-        request.method = "POST"
-        request._load_post_and_files()
-        request.method = "PUT"
-        request.PUT = request.POST
-        data =  json.loads(request.PUT['json'])
-        if 'client_id' not in data or data['client_id'] !=settings.ANALYSISCLIENT_APIKEY:
-            return JsonResponse({'msg': 'Forbidden'}, status=403)
-        # store any potential servable file on share on web server
-        webshare = rm.ServerShare.objects.filter(function=rm.ShareFunction.REPORTS).first()
-        sfloc, _ = rm.StoredFileLoc.objects.get_or_create(sfile_id=data['sfid'], servershare=webshare,
-                path=data['path'])
-        # FIXME servershare path webshare does not have fileservershare interface
-        srvpath = os.path.join(settings.WEBSHARE, sfloc.path)
-        srvdst = os.path.join(srvpath, sfloc.sfile.filename)
-        try:
-            os.makedirs(srvpath, exist_ok=True)
-        except FileExistsError:
-            pass
-        with NamedTemporaryFile(mode='wb+') as fp:
-            for chunk in request.FILES['ana_file']:
-                fp.write(chunk)
-            fp.flush()
-            os.fsync(fp.fileno())
-            shutil.copy(fp.name, srvdst)
-            os.chmod(srvdst, 0o644)
-        sfloc.purged = False
-        sfloc.save()
-        return JsonResponse({})
-
-    elif request.method == 'GET':
-        data = json.loads(request.body.decode('utf-8'))
-        if 'client_id' not in data or data['client_id'] !=settings.ANALYSISCLIENT_APIKEY:
-            return JsonResponse({'msg': 'Forbidden'}, status=403)
-        elif 'fname' not in data or data['fname'] not in settings.SERVABLE_FILENAMES:
-            return JsonResponse({'msg': 'File is not servable'}, status=406)
-        else:
-            return JsonResponse({'msg': 'File can be uploaded and served'}, status=200)
-    else:
-        return JsonResponse({'msg': 'Forbidden'}, status=403)
 
 
 @require_GET
@@ -1685,10 +1626,6 @@ def find_datasets(request):
         dsets[d.pk] = {'id': d.pk, 'name': tag, 'locked': d.locked, 'secclass': d.securityclass}
     return JsonResponse(dsets)
     
-
-def get_servable_files(ana_resultfiles):
-    return ana_resultfiles.filter(sfile__filename__in=settings.SERVABLE_FILENAMES)
-
 
 # Have csrf exempt as this view is called by nextflow which cannot
 # login and get a csrf cookie

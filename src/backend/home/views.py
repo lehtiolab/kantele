@@ -788,8 +788,11 @@ def get_analysis_info(request, anid):
     dsicount = anmodels.AnalysisDSInputFile.objects.filter(dsanalysis__analysis=ana).count()
     storeloc = filemodels.StoredFileLoc.objects.filter(sfile__analysisresultfile__analysis=ana
             ).values('servershare__name', 'path')
-    linkedfiles = [(x.id, x.sfile.filename) for x in av.get_servable_files(
-        ana.analysisresultfile_set.select_related('sfile'))]
+    fss_download = filemodels.FileserverShare.objects.exclude(download_url='')
+    linkedfiles = [(x['pk'], x['sfile__filename']) for x in
+        filemodels.StoredFileLoc.objects.filter(sfile__filename__in=settings.SERVABLE_FILENAMES,
+        sfile__analysisresultfile__analysis=ana,
+        purged=False, servershare__fileservershare__in=fss_download).values('pk', 'sfile__filename')]
     resp = {'nrdsets': len(dsets),
             'nrfiles': dsicount,
             'storage_locs': [{'share': x['servershare__name'], 'path': x['path']} for x in storeloc],
