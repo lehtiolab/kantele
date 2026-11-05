@@ -492,6 +492,9 @@ def update_dataset(data, user_id):
 
 def distribute_dset_files(dset_pk, secclass, srcshares, existing_sfl, dstshare_ids_paths):
     rsync_shares = set(dstshare_ids_paths.keys())
+    if not existing_sfl.exists():
+        # Empty dataset gets updated, no jobs queued
+        return
     # First rounds of distributing mzML through rsync or download
     _jc, src_share_ids, rsync_shares, dstshare_classes, srcshare_id = queue_rsync_and_update_sharestate(
             srcshares, rsync_shares, dstshare_ids_paths, existing_sfl)
@@ -502,10 +505,6 @@ def distribute_dset_files(dset_pk, secclass, srcshares, existing_sfl, dstshare_i
         if rsync_inboxshare_q := filemodels.ServerShare.objects.filter(max_security__gte=secclass,
                 fileservershare__id=dstshare_classes['rsync_inbox_id']):
             rsync_inboxshare = rsync_inboxshare_q.values('pk').first()
-            upd_defaults = {'storage_loc_ui': filemodels.ServerShare.get_inbox_path(dset_id=dset_pk),
-                    'storage_loc': filemodels.ServerShare.get_inbox_path(dset_id=dset_pk),
-                    'active': True,
-            }
             src_sfloc_ids = [x['pk'] for x in existing_sfl.filter(
                     servershare_id=srcshare_id).values('pk')]
             rs_inboxjob = create_job('rsync_files_to_servershare',

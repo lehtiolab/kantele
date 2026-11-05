@@ -281,8 +281,9 @@ class TestCreateMzmls(MzmlTests):
         m1q = rm.StoredFileLoc.objects.filter(sfile=f3sfmz, servershare=self.analocalstor,
                 path=dss2path, active=True, purged=False)
         mzmlfn2 = os.path.join(self.inboxctrl.path, 'datasets', f'{self.ds.pk}', mzmlfn)
+        # m2q not active as it gets queued for deleted directly
         m2q = rm.StoredFileLoc.objects.filter(sfile=f3sfmz, servershare=self.ssinbox,
-                path=f'datasets/{self.ds.pk}', active=True, purged=False)
+                path=f'datasets/{self.ds.pk}', purged=False)
         m3q = rm.StoredFileLoc.objects.filter(sfile=f3sfmz, servershare=self.ssnewstore,
                 path=self.storloc, active=True, purged=False)
         mzmlfn4 = os.path.join(dss3_fpath, mzmlfn)

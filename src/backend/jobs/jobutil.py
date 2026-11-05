@@ -40,10 +40,8 @@ alljobs = [
 jobmap = {job.refname: job for job in alljobs}
 
 
-
 def check_job_error(name, **kwargs):
-    jwrap = jobmap[name](False)
-    return jwrap.check_error(**kwargs)
+    return jobmap[name](False).check_error_on_creation(**kwargs)
 
 
 def create_job(name, state=False, check_errors=True, **kwargs):
@@ -51,8 +49,7 @@ def create_job(name, state=False, check_errors=True, **kwargs):
     if not state:
         state = Jobstates.PENDING
     jwrap = jobmap[name](False)
-    if check_errors:
-        if error := check_job_error(name, **kwargs):
+    if check_errors and (error := check_job_error(name, **kwargs)):
             return {'id': False, 'kwargs': kwargs, 'error': error}
     # Fall through if no errors or no checking    
     # addkwargs should be here, after error check, otehrwise

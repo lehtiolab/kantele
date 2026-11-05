@@ -95,10 +95,6 @@ class BaseJob:
             for rf_id in self.get_rf_ids_for_filejobs()])
         return {'id': self.job.id, 'kwargs': kwargs, 'error': False}
 
-    def check_error(self, **kwargs):
-        # FIXME check_error will be used differently when creating vs when running, please fix!
-        return self.check_error_on_creation(**kwargs)
-
     def check_error_on_creation(self, **kwargs):
         return False
 
@@ -310,6 +306,7 @@ class SingleFileJob(BaseJob):
 class MultiFileJob(BaseJob):
     '''Job class to specify any job on a number of files on a specific share.
     '''
+
     def oncreate_getfiles_query(self, **kwargs):
         return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'], servershare__active=True)
 
