@@ -178,6 +178,7 @@ function newPepsetBlank() {
 function addServer() {
   const server = {pk: false, name: '', uri: '', fqdn: '', active: true, can_backup: false,
     can_rsync_remote: false, rsyncusername: '', rsynckeyfile: '', mounted: [], analysisprofiles: [],
+    has_workers: true,
   }
   servers = [server, ...servers];
 }
@@ -190,7 +191,7 @@ function addStorageShare() {
 }
 
 function addStorageShareToServer(server) {
-  server.mounted = [...server.mounted, {share: false, path: ''}];
+  server.mounted = [...server.mounted, {share: false, path: '', url: ''}];
   servers = servers;
 }
 
@@ -411,6 +412,11 @@ async function saveShare(share) {
               <input bind:checked={server.can_backup} type="checkbox"> Backup controller
             </label>
           </span>
+          <span class="field ml-3 mr-3 mt-2">
+            <label class="checkbox">
+              <input bind:checked={server.has_workers} type="checkbox"> Has workers
+            </label>
+          </span>
         </div>
     
         <div class="field is-horizontal">
@@ -552,17 +558,31 @@ async function saveShare(share) {
                 </div>
               </div>
             </div>
+            <h7 class="title is-7">
+              Mount is physical mount on filesystem of web API, URL is for serving download
+              files from proxy server. If you change mount path or urlpath, make sure it is 
+              changed in the filesystem or proxyserver config!
+            </h7>
             <div class="field is-horizontal">
               <div class="field-label is-normal">
-
-                <label class="label">Mount or URL path</label>
+                <label class="label">Mount path</label>
               </div>
               <div class="field-body">
                 <div class="field">
-                  <p class="control is-size-7">
-                    If you change mount path or urlpath, make sure it is changed in the filesystem
-                    or proxyserver config!
+                  <p class="control">
                     <input class="input" placeholder="Empty, /mnt/to/storage, or urlpath e.g. /downloads" bind:value="{fss.path}" />
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div class="field is-horizontal">
+              <div class="field-label is-normal">
+                <label class="label">URL path</label>
+              </div>
+              <div class="field-body">
+                <div class="field">
+                  <p class="control">
+                    <input class="input" placeholder="Empty, /mnt/to/storage, or urlpath e.g. /downloads" bind:value="{fss.url}" />
                   </p>
                 </div>
               </div>
