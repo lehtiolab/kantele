@@ -6,7 +6,7 @@ from datetime import timedelta
 from unittest import TestCase
 
 from django.contrib.auth.models import User
-from django.test import TestCase, LiveServerTestCase, Client
+from django.test.testcases import TestCase, LiveServerTestCase, Client, LiveServerThread, QuietWSGIRequestHandler
 from django.utils import timezone
 from django.core.management import call_command
 from django.test import tag
@@ -311,6 +311,20 @@ class ProcessJobTest(BaseTest):
             self.assertIn(t, expected_tasks)
 
 
+class LiveServerThreadWithReuse(LiveServerThread):
+    """ _create_server with port reuse, to try and not have "address already in use"
+    problem in tests
+    See: https://stackoverflow.com/questions/20619846/djangos-liveservertestcase-always-fails-due-to-conflicting-address-despite-a
+    """
+    def _create_server(self, connections_override=None):
+        return self.server_class(
+            (self.host, self.port),
+            QuietWSGIRequestHandler,
+            allow_reuse_address=True,
+            connections_override=connections_override,
+        )
+
+
 @tag('slow')
 class BaseIntegrationTest(LiveServerTestCase):
     # use a live server so that jobrunner can interface with it (otherwise only dummy
@@ -318,8 +332,12 @@ class BaseIntegrationTest(LiveServerTestCase):
     port = 8010 ## 8009 is already used in container CMD, and this is an exec that runs django manage.py
     host = '0.0.0.0'
     jobrun_timeout = 2
+    maxDiff = None
+    server_thread_class = LiveServerThreadWithReuse
 
     def setUp(self):
+        # Do all setup work of DB stuff as in BaseTest
+        # live server stuff is done in setUpClass
         BaseTest.setUp(self)
 
     def post_json(self, data):
