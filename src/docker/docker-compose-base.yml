@@ -25,7 +25,6 @@ services:
             RABBITPASS: "${RABBITPASS:-guest}"
             TMP_UPLOADPATH: "${CONTAINER_UPLOADPATH}"
             HOST_UPLOADDIR: "${HOST_UPLOADPATH}"
-            SERVABLE_FILE_PATH: "${CONTAINER_ANALYSISPATH}"
         healthcheck:
             test: ["CMD-SHELL", "pgrep -f 'uwsgi' || exit 1"]
             interval: 10s
@@ -76,8 +75,6 @@ services:
             RABBIT_VHOST: "${RABBIT_VHOST}"
             RABBITUSER: "${RABBITUSER:-guest}"
             RABBITPASS: "${RABBITPASS:-guest}"
-            TMP_UPLOADPATH: "${CONTAINER_UPLOADPATH}"
-            HOST_UPLOADDIR: "${HOST_UPLOADPATH}"
         healthcheck:
             test: ["CMD-SHELL", "pgrep -f 'manage.py runjobs' || exit 1"]
             interval: 30s

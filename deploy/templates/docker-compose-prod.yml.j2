@@ -16,8 +16,7 @@ services:
             RABBITHOST: "${HOST_FQDN}"
             KANTELEHOST: "${HOST_FQDN}"
         volumes:
-            - "${HOST_UPLOADPATH}:${CONTAINER_UPLOADPATH}"
-            - "${HOST_ANALYSISFILES}:${CONTAINER_ANALYSISPATH}"
+            - "{{ host_uploadpath }}:${CONTAINER_UPLOADPATH}"
     
     nginx:
         network_mode: host
@@ -25,11 +24,12 @@ services:
             - web
         image: kantele_nginx # in prod-bake.yml
         volumes:
-            - "${HOST_UPLOADPATH}:${CONTAINER_UPLOADPATH}"
-            - "${HOST_ANALYSISFILES}:${CONTAINER_ANALYSISPATH}"
             - "${HOST_CERTBOT_PATH}/conf:/etc/letsencrypt"
             - "${HOST_CERTBOT_PATH}/www:/var/www/certbot"
-            - "${HOST_DOWNLOADFILES}:${CONTAINER_DOWLOADPATH}"
+          # here go the volumes from which we can task_download
+{% for hostpath, mountpath, _url in nginx_download_mounts %}
+          - "{{ hostpath }}:{{ mountpath }}:ro"
+{% endfor %}
         logging:
             driver: syslog
             options:
@@ -49,7 +49,7 @@ services:
                 syslog-address: "${SYSLOG_ADDRESS}"
         volumes:
             - "${PG_DATA_PATH}:/var/lib/postgresql/data"
-            - "${HOST_PG_BACKUPS}:${CONTAINER_BACKUPPATH}"
+              #- "${HOST_PG_BACKUPS}:${CONTAINER_BACKUPPATH}"
 
 
     mq:

@@ -16,13 +16,10 @@ services:
         environment:
             PROTOCOL: http
             DB_HOST: db
-            #DB_HOST: "${HOST_FQDN}"
             RABBITHOST: mq
         volumes:
             - ./src/backend:/kantele
             - ./static:/kantele/static
-            - "${HOST_UPLOADPATH}:${CONTAINER_UPLOADPATH}"
-            - ./data/analysisfiles:/analysisfiles
     
     nginx:
         image: nginx_dev
@@ -42,8 +39,6 @@ services:
             - ./static:/static
             - ./src/docker/uwsgi_params:/etc/nginx/uwsgi_params
             - ./src/docker/nginx_stage.conf:/etc/nginx/nginx.conf
-            - "${HOST_UPLOADPATH}:${CONTAINER_UPLOADPATH}"
-            - ./data/analysisfiles:/analysisfiles
 
     db: 
         extends:
@@ -76,7 +71,6 @@ services:
         environment:
             DB_HOST: db
             RABBITHOST: mq
-            HOST_UPLOADDIR: "${CONTAINER_UPLOADPATH}"
 
     storage_mvfiles:
         depends_on:
@@ -137,7 +131,6 @@ services:
             - "${RSYNC_SSHPORT}:22"
         volumes:
             - ./src/docker/test_rsync_sshkey.pub:/home/kantele/.ssh/authorized_keys
-            - "${HOST_UPLOADPATH}:${CONTAINER_UPLOADPATH}"
 
             #    analysis:
             #        image: nextflow
