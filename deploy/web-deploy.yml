@@ -44,7 +44,7 @@
             state: mounted
             fstype: cifs
             opts: "credentials={{ mount_cred }},uid={{ kanteleuser }},domain={{ mount_domain }},iocharset=utf8,vers=3.0,_netdev,ro"
-       loop: "{{ storagedirs | zip(storageservers) | list }}"
+        loop: "{{ storagedirs | zip(storageservers) | list }}"
       
       - name: Build compose images
         ansible.builtin.command:

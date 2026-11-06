@@ -31,3 +31,5 @@ queue_web_rsync: web_rsync
 queue_dl: file_download
 queue_backup: backup_archive
 queue_scan: scaninbox
+
+syslog_adress: 'udp://{{ kantele_host }}:514'
