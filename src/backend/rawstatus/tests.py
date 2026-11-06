@@ -1595,7 +1595,7 @@ class TestDownloadUploadScripts(BaseFilesTest):
             'upload.py': 30523,
             'transfer.bat': 177,
             'transfer_config.json': 202,
-            'setup.bat': 738,
+            'setup.bat': 734,
             }
 
     def setUp(self):
@@ -1658,10 +1658,10 @@ class TestDownloadUploadScripts(BaseFilesTest):
             with zipfn.open('transfer_config.json') as tcfp:
                 tfconfig = json.load(tcfp)
         self.assertEqual(len(names), 11)
-        for fn in ['requests-2.32.3-py3-none-any.whl', 'certifi-2025.1.31-py3-none-any.whl', 
-                'requests_toolbelt-1.0.0-py2.py3-none-any.whl', 'idna-3.10-py3-none-any.whl',
-                'charset_normalizer-3.4.1-py3-none-any.whl', 'urllib3-2.4.0-py3-none-any.whl',
-                'psutil-7.0.0-cp37-abi3-win_amd64.whl',
+        for fn in ['requests-2.34.2-py3-none-any.whl', 'certifi-2026.10.23-py3-none-any.whl', 
+                'requests_toolbelt-1.0.0-py2.py3-none-any.whl', 'idna-3.20-py3-none-any.whl',
+                'charset_normalizer-3.5.2-py3-none-any.whl', 'urllib3-2.8.0-py3-none-any.whl',
+                'psutil-7.2.2-cp37-abi3-win_amd64.whl',
                 ]:
             self.assertIn(fn, names)
         for key,val in {'outbox': f'{datadisk}\\outbox',
