@@ -70,14 +70,12 @@ http {
             alias /static; 
         }
 
-        location {{ upload_path_url }} {
-            alias {{ container_uploadpath }};
-        }
-
-        location {{ analysis_path_url }} {
+        {% for _hostpath, path, url in nginx_download_mounts %}
+        location {{ url }} {
             internal;
-            alias {{ container_analysispath }};
+            alias {{ path }};
         }
+        {% endfor %}
 
         # Finally, send all non-media requests to the Django server
         location / {

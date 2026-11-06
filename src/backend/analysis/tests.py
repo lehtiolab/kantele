@@ -107,12 +107,6 @@ class AnalysisPageTest(BaseIntegrationTest):
         self.wf = am.UserWorkflow.objects.create(name='testwf', wftype=self.wftype, public=True)
         self.wf.nfwfversionparamsets.add(self.nfwf)
 
-        # Web server for reports
-        webserver = rm.FileServer.objects.create(name='web', uri='kantele.test',
-                fqdn='web', can_rsync_remote=False, rsyncusername='', rsynckeyfile='')
-        self.webshare = rm.FileserverShare.objects.create(server=webserver,
-                share=self.ssweb, path=os.path.join(self.rootdir, 'web'))
-
         # Create analysis for isoquant:
         self.ana = am.Analysis.objects.create(user=self.user, name='testana_iso',
                 base_rundir='testdir_iso', securityclass=rm.DataSecurityClass.NOSECURITY)
@@ -591,13 +585,13 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
                     'qtype': {'name': self.oldds.quantdataset.quanttype.name,
                         'short': self.oldds.quantdataset.quanttype.shortname,
                         'is_isobaric': False},
-                    'nrstoredfiles': [1, self.ft.name],
+                    'nrstoredfiles': [1, self.fileft.name],
                     'channels': False,
-                    'ft_files': {self.ft.name: [{'ft_name': self.ft.name, 'id': self.oldsf.pk, 'name': self.oldsf.filename, 'fr': '', 'fields': {'__sample': self.oldqsf.projsample.sample, 'fakeds': '',
+                    'ft_files': {self.fileft.name: [{'ft_name': self.fileft.name, 'id': self.oldsf.pk, 'name': self.oldsf.filename, 'fr': '', 'fields': {'__sample': self.oldqsf.projsample.sample, 'fakeds': '',
                         'fakefn': ''}, 'dsetsample': self.oldqsf.projsample.sample}],
                         },
                     'incomplete_files': [],
-                    'picked_ftype': self.ft.name,
+                    'picked_ftype': self.fileft.name,
                     'allfilessamesample': True,
                     }},
                 # Only fakefn, fakeds, rest is solved differently
@@ -636,12 +630,12 @@ class TestGetDatasetsLF(AnalysisLabelfreeSamples):
                     'qtype': {'name': self.oldds.quantdataset.quanttype.name,
                         'short': self.oldds.quantdataset.quanttype.shortname,
                         'is_isobaric': False},
-                    'nrstoredfiles': [1, self.ft.name],
+                    'nrstoredfiles': [1, self.fileft.name],
                     'channels': False,
-                    'ft_files': {self.ft.name: [{'ft_name': self.ft.name, 'id': self.oldsf.pk, 'name': self.oldsf.filename, 'fr': '', 'fields': {'__sample': self.afs2.value, 'fakeds': '', 'fakefn': ''}, 'dsetsample': self.oldqsf.projsample.sample}],
+                    'ft_files': {self.fileft.name: [{'ft_name': self.fileft.name, 'id': self.oldsf.pk, 'name': self.oldsf.filename, 'fr': '', 'fields': {'__sample': self.afs2.value, 'fakeds': '', 'fakefn': ''}, 'dsetsample': self.oldqsf.projsample.sample}],
                         },
                     'incomplete_files': [],
-                    'picked_ftype': self.ft.name,
+                    'picked_ftype': self.fileft.name,
                     'allfilessamesample': False,
                     }},
                 'field_order': self.inputdef.value[-2:],
@@ -779,7 +773,6 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.assertEqual(startresp.json(), {'error': 'This job does not exist (anymore), '
             'it may have been deleted'})
 
-# FIX need test analysis w base ana which is NOT set-based/fractionated
     def test_new_analysis_and_run_and_purge(self):
         # First create saved values for base analysis to populate the oldfiles input.txt
         am.AnalysisFileValue.objects.create(adsfile=self.adsif, field='__sample',
@@ -886,10 +879,10 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.assertTrue(usm_q.exists())
         self.assertTrue(hm.AnalysisMessage.objects.filter(analysis=ana, msg=usm_q.get().pk,
             msgtype=hm.AnalysisMsgTypes.COMPLETED).exists())
-        self.run_job() # rsync the results, rename job
+        self.run_job() # rsync the results, and rename job
         self.assertTrue(renamejobs.filter(state=jj.Jobstates.PROCESSING).exists())
         reports = rm.StoredFileLoc.objects.filter(sfile__filename='report.html', purged=False)
-        self.assertEqual(reports.count(), 3) # analysisruns, web, analysis storage
+        self.assertEqual(reports.count(), 2) # analysisruns, analysis storage
         nfrunsfl = reports.filter(servershare=self.ssanaruns, path=ana.get_run_base_dir()).get()
         nfrunfn = os.path.join(self.nfrunshare.path, nfrunsfl.path, 'report.html')
         # NF run dumps inputdef.txt into report.html
@@ -912,11 +905,6 @@ class TestStoreAnalysis(AnalysisPageTest):
         anafn = os.path.join(anadir, 'report.html')
         self.assertTrue(os.path.exists(anafn))
 
-        websfl = reports.filter(servershare=self.ssweb, path=ana.get_run_base_dir()).get()
-        webdir = os.path.join(self.webshare.path, websfl.path)
-        webfn = os.path.join(webdir, 'report.html')
-        self.assertTrue(os.path.exists(webfn))
-
         self.run_job() # Queue backup (no task for it)
         j = jm.Job.objects.last()
         self.assertEqual(j.kwargs, {'sfloc_id': anasfl.pk, 'isdir': False})
@@ -929,7 +917,6 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.user.save()
         resp = self.cl.post('/analysis/delete/', content_type='application/json', data={'item_id': ana.pk})
         self.assertEqual(resp.status_code, 200)
-        self.assertFalse(os.path.exists(webfn))
         self.assertTrue(os.path.exists(anafn))
         self.assertTrue(os.path.exists(nfrunfn))
         rmdirjobs = jm.Job.objects.filter(funcname='delete_empty_directory')
@@ -950,6 +937,8 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
     url = '/analysis/store/'
 
     def test_existing_analysis(self):
+        # Save analysis to run on remote ana server, so this will also create jobs to transfer
+        # config files and param files
         am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwf, config_commit='123jkl')
         nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf, repolocation=self.nfw.repo)
         nfcv = am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwf,
@@ -1052,8 +1041,9 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
               'singlefiles': {f'{self.pfn2.nfparam}': self.sflib.pk, '-c': self.sfnfc.pk}},
           'platenames': {self.ds.pk: f'{self.hirief.start}-{self.hirief.end}'}, 'wfv_id': self.nfwf.pk}
 
-        self.assertTrue(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
-            kwargs__sfloc_id=self.sflibloc.pk, kwargs__dstshare_id=self.analocalstor.pk).exists())
+        # Check libfile upload
+        self.assertTrue(jm.Job.objects.filter(funcname='rsync_files_to_servershare',
+            kwargs__sfloc_ids=[self.sflibloc.pk], kwargs__dstshare_id=self.analocalstor.pk).exists())
         self.assertJSONEqual(json.dumps(self.anajob.kwargs), json.dumps(job_check_kwargs))
         checkjson = {'errmsg': False, 'multierror': [], 'analysis_id': self.ana.pk, 'token': False}
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
@@ -1082,7 +1072,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
             'upload_external': False,
             'analysis_id': self.analf.pk,
             'infiles': {self.oldsf.pk: {'fr': 23}},
-            'picked_ftypes': {self.oldds.pk: self.ft.name},
+            'picked_ftypes': {self.oldds.pk: self.fileft.name},
             'nfwfvid': self.nfwf.pk,
             'dssetnames': {},
             'components': {'ISOQUANT_SAMPLETABLE': False,
@@ -1133,7 +1123,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
             'analysis_id': self.analf.pk,
             # Fake fraction nr
             'infiles': {self.oldsf.pk: {'fr': 23}},
-            'picked_ftypes': {self.oldds.pk: self.ft.name},
+            'picked_ftypes': {self.oldds.pk: self.fileft.name},
             'nfwfvid': self.nfwf.pk,
             'dssetnames': {},
             'components': {'ISOQUANT_SAMPLETABLE': False,
@@ -1199,6 +1189,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         self.assertJSONEqual(json.dumps(ba.shadow_dssetnames), {})
 
     def test_existing_analysis_and_run_and_purge_lf(self):
+        # TODO add a base analysis complement
         afs3 = am.AnalysisFileValue.objects.create(adsfile=self.adsi2, value='something',
                 field='afield')
         # Make sure files are on server
@@ -1216,7 +1207,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
             'upload_external': False,
             'analysis_id': self.analf.pk,
             'infiles': {self.oldsf.pk: {'fr': ''}},
-            'picked_ftypes': {self.oldds.pk: self.ft.name},
+            'picked_ftypes': {self.oldds.pk: self.fileft.name},
             'nfwfvid': nfwf.pk,
             'dssetnames': {},
             'components': {'ISOQUANT_SAMPLETABLE': False,
@@ -1247,8 +1238,6 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         self.assertFalse(am.AnalysisSetname.objects.filter(analysis=ana).exists())
         for adsif in am.AnalysisDSInputFile.objects.filter(dsanalysis__analysis=ana):
             self.assertEqual(adsif.dsanalysis.dataset_id, self.oldds.pk)
-            #self.assertEqual(regexes[adsif.dsanalysis.dataset_id], postdata['dsetfields'][f'{self.ds.pk}']['__regex'])
-            #self.assertEqual(fakevals[adsif.dsanalysis.dataset_id], postdata['dsetfields'][f'{self.ds.pk}']['fakeds'])
 
         # Check base analysis
         self.assertFalse(am.AnalysisBaseanalysis.objects.filter(analysis=ana))
@@ -1287,7 +1276,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         self.run_job() # rsync the results, rename job
         self.assertTrue(renamejobs.filter(state=jj.Jobstates.PROCESSING).exists())
         reports = rm.StoredFileLoc.objects.filter(sfile__filename='report.html', purged=False)
-        self.assertEqual(reports.count(), 3) # analysisruns, web, analysis storage
+        self.assertEqual(reports.count(), 2) # analysisruns, analysis storage
         nfrunsfl = reports.filter(servershare=self.ssanaruns, path=ana.get_run_base_dir()).get()
         nfrunfn = os.path.join(self.nfrunshare.path, nfrunsfl.path, 'report.html')
         # NF run dumps inputdef.txt into report.html
@@ -1304,11 +1293,6 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         anafn = os.path.join(anadir, 'report.html')
         self.assertTrue(os.path.exists(anafn))
 
-        websfl = reports.filter(servershare=self.ssweb, path=ana.get_run_base_dir()).get()
-        webdir = os.path.join(self.webshare.path, websfl.path)
-        webfn = os.path.join(webdir, 'report.html')
-        self.assertTrue(os.path.exists(webfn))
-
         self.run_job() # Queue backup (no task for it)
         j = jm.Job.objects.last()
         self.assertEqual(j.kwargs, {'sfloc_id': anasfl.pk, 'isdir': False})
@@ -1321,7 +1305,6 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         self.user.save()
         resp = self.cl.post('/analysis/delete/', content_type='application/json', data={'item_id': ana.pk})
         self.assertEqual(resp.status_code, 200)
-        self.assertFalse(os.path.exists(webfn))
         self.assertTrue(os.path.exists(anafn))
         self.assertTrue(os.path.exists(nfrunfn))
         rmdirjobs = jm.Job.objects.filter(funcname='delete_empty_directory')
@@ -1336,6 +1319,115 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         self.assertEqual(rmdirjobs.filter(state=jj.Jobstates.PROCESSING).count(), 1)
         self.assertFalse(os.path.exists(anafn))
         self.assertFalse(os.path.exists(nfrunfn))
+
+        # TODO add a base analysis complement
+    def test_run_and_http_upload_output(self):
+        self.remoteanaserver.rsyncusername, self.remoteanaserver.rsynckeyfile = '', ''
+        self.remoteanaserver.save()
+        # webserver share for downloading storage raws, mounted on web
+        uploadshare = rm.ServerShare.objects.create(name='uploads', max_security=1,
+                function=rm.ShareFunction.INBOX)
+        webserver = rm.FileServer.objects.create(name='webserver', uri='web1.test',
+                fqdn='nginx', is_upload_server=True)
+        uploadss = rm.FileserverShare.objects.create(server=webserver,
+                share=uploadshare, path='/storage/uploads', download_url='/task_downloads/uploads')
+        upload_ctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
+                share=uploadshare, path='/storage/uploads')
+
+        afs3 = am.AnalysisFileValue.objects.create(adsfile=self.adsi2, value='something',
+                field='afield')
+        # Make sure files are on server
+        sfl_remote = rm.StoredFileLoc.objects.create(sfile=self.f3sf, servershare=self.analocalstor,
+                path=self.storloc, active=True, purged=False)
+        dss_remote = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.analocalstor,
+                storage_loc_ui=self.storloc, storage_loc=self.storloc, startdate=timezone.now())
+        nfwf = am.NextflowWfVersionParamset.objects.create(update='nf workflow',
+                commit='master', filename='nf.py', nfworkflow=self.nfw,
+                paramset=self.pset, nfversion='', active=True)
+        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2,
+                nfrepo=self.nfw, configincluder=self.nfc_lf, repolocation=self.nfw.repo)
+        am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=nfwf, config_commit='123jkl')
+        params = {'flags': {}, 'inputparams': {self.param3.pk: 42}, 
+                'multicheck': {self.param2.pk: [self.popt2.pk]}}
+        postdata = {'dsids': [f'{self.ds.pk}'],
+            'upload_external': False,
+            'analysis_id': '',
+            'infiles': {self.f3sf.pk: {'fr': ''}},
+            'picked_ftypes': {self.ds.pk: self.ft.name},
+            'nfwfvid': nfwf.pk,
+            'dssetnames': {},
+            'components': {'ISOQUANT_SAMPLETABLE': False,
+                'INPUTDEF': 'hej',
+                'ISOQUANT': {},
+                },
+            'analysisname': 'Test existing analysis LF run',
+            'dsetfields': {f'{self.ds.pk}': {'__regex': ''}},
+            'fnfields': {self.f3sf.pk: {'__sample': 'testsample', 'fakefn': 'testff', 'fakeds': 'test_fds'}},
+            'params': params,
+            'singlefiles': {}, #{self.pfn2.pk: self.sflib.pk},
+            'multifiles': {}, #{self.pfn1.pk: [self.sfusr.pk]},
+            'wfid': self.wf.pk,
+            'base_analysis': {'isComplement': True,
+                'runFromPSM': False,
+                'dsets_identical': False,
+                'selected': self.baseanalf.pk,
+                'typedname': '',
+                'fetched': {},
+                'resultfiles': [],
+                },
+            'analysisprofile_id': self.anaprofile2.pk,
+            }
+        resp = self.cl.post(self.url, content_type='application/json', data=postdata)
+        self.assertEqual(resp.status_code, 200)
+        ana = am.Analysis.objects.last()
+        self.assertFalse(am.AnalysisSampletable.objects.filter(analysis=ana).exists())
+        self.assertFalse(am.AnalysisSetname.objects.filter(analysis=ana).exists())
+        for adsif in am.AnalysisDSInputFile.objects.filter(dsanalysis__analysis=ana):
+            self.assertEqual(adsif.dsanalysis.dataset_id, self.ds.pk)
+
+        # Check base analysis
+        self.assertTrue(am.AnalysisBaseanalysis.objects.filter(analysis=ana))
+
+        PT = am.Param.PTypes
+        for ap in ana.analysisparam_set.all():
+            pt = {PT.MULTI: 'multicheck', PT.TEXT: 'inputparams', PT.NUMBER: 'inputparams',
+                    PT.FLAG: 'flags'}[ap.param.ptype]
+            self.assertEqual(ap.value, params[pt][ap.param_id])
+        self.assertEqual(ana.name, postdata['analysisname'])
+        self.assertEqual(ana.base_rundir, ana.get_run_base_dir())
+        checkjson = {'errmsg': False, 'multierror': [], 'analysis_id': ana.pk, 'token': False}
+        self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
+        self.cl.post('/analysis/start/', content_type='application/json',
+                data={'analysis_id': resp.json()['analysis_id']})
+        self.run_job() # rsync extra files to inbox
+        self.run_job() # download extra files
+        self.run_job() # delete from inbox
+        self.run_job() # run the analysis
+        ana.refresh_from_db()
+        self.assertFalse(ana.editable)
+        usm_q = hm.UserMessage.objects.filter(user=ana.user, txt='Your analysis '
+                f'{ana.pk} / {ana.name} has finished running')
+        self.assertTrue(usm_q.exists())
+        self.assertTrue(hm.AnalysisMessage.objects.filter(analysis=ana, msg=usm_q.get().pk,
+            msgtype=hm.AnalysisMsgTypes.COMPLETED).exists())
+        reports = rm.StoredFileLoc.objects.filter(sfile__filename='report.html', purged=False)
+        self.run_job() # http the results to inbox
+        self.run_job() # rsync to delivery
+        self.run_job() # delete from inbox
+        self.assertEqual(reports.count(), 2) # analysisruns, analysis storage
+        nfrunsfl = reports.filter(servershare=self.ssanaruns2, path=ana.get_run_base_dir()).get()
+        nfrunfn = os.path.join(self.nfrunshare2.path, nfrunsfl.path, 'report.html')
+
+        anasfl = reports.filter(servershare=self.ssana, path=ana.get_public_output_dir()).get()
+        anadir = os.path.join(self.anashare.path, anasfl.path)
+        anafn = os.path.join(anadir, 'report.html')
+        self.assertTrue(os.path.exists(anafn))
+
+        self.run_job() # Queue backup (no task for it)
+        j = jm.Job.objects.last()
+        self.assertEqual(j.kwargs, {'sfloc_id': anasfl.pk, 'isdir': False})
+        self.assertEqual(j.funcname, 'create_pdc_archive')
+        self.assertEqual(j.state, jj.Jobstates.PROCESSING)
 
     def test_failing(self):
         # no sample annotations

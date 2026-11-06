@@ -17,7 +17,6 @@ services:
             KANTELEHOST: "${HOST_FQDN}"
         volumes:
             - "${HOST_UPLOADPATH}:${CONTAINER_UPLOADPATH}"
-            - "${HOST_ANALYSISFILES}:${CONTAINER_ANALYSISPATH}"
     
     nginx:
         network_mode: host
@@ -25,14 +24,16 @@ services:
             - web
         image: kantele_nginx # in prod-bake.yml
         volumes:
-            - "${HOST_UPLOADPATH}:${CONTAINER_UPLOADPATH}"
-            - "${HOST_ANALYSISFILES}:${CONTAINER_ANALYSISPATH}"
             - "${HOST_CERTBOT_PATH}/conf:/etc/letsencrypt"
             - "${HOST_CERTBOT_PATH}/www:/var/www/certbot"
+          # here go the volumes from which we can task_download
+{% for hostpath, mountpath, _url in nginx_download_mounts %}
+          - "{{ hostpath }}:{{ mountpath }}:ro"
+{% endfor %}
         logging:
             driver: syslog
             options:
-                syslog-address: "${SYSLOG_ADDRESS}"
+                syslog-address: "{{ syslog_adress }}"
 
     certbot:
       image: certbot/certbot
@@ -45,10 +46,10 @@ services:
         logging:
             driver: syslog
             options:
-                syslog-address: "${SYSLOG_ADDRESS}"
+                syslog-address: "{{ syslog_adress }}"
         volumes:
-            - "${PG_DATA_PATH}:/var/lib/postgresql/data"
-            - "${HOST_PG_BACKUPS}:${CONTAINER_BACKUPPATH}"
+            - "{{ pgdatadir }}:/var/lib/postgresql/data"
+            - "{{ host_pgbackup_path }}:{{ container_backuppath }}"
 
 
     mq:
@@ -56,10 +57,10 @@ services:
         logging:
             driver: syslog
             options:
-                syslog-address: "${SYSLOG_ADDRESS}"
+                syslog-address: "{{ syslog_adress }}"
         volumes:
           - type: bind
-            source: "${HOST_KANTELEPATH}/src/docker/rabbitmq-timeout.conf"
+            source: "{{ kanteledir }}/src/docker/rabbitmq-timeout.conf"
             target: /etc/rabbitmq/conf.d/30-timeout.conf
 
 
@@ -73,7 +74,7 @@ services:
         logging:
             driver: syslog
             options:
-                syslog-address: "${SYSLOG_ADDRESS}"
+                syslog-address: "{{ syslog_adress }}"
         environment:
             DB_HOST: "${HOST_FQDN}"
             RABBITHOST: "${HOST_FQDN}"

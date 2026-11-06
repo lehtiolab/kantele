@@ -2,6 +2,7 @@ import requests
 
 from celery import states
 from django.utils import timezone
+from django.db.models import Q
 
 from kantele import settings
 from jobs.models import Task, Job, JobError
@@ -71,6 +72,11 @@ class BaseJob:
     # as long as we dont have proper on_delete cleanup - this is needed
     # to avoid having created file entries that are needed downstream
     can_be_canceled = False
+
+    # is this a job on a dataset? Runner will know and wait for dset, if it is
+    # not but still has sfloc_ids it will wait for those
+    is_dset_job = False
+
     # FIXME in most cases, kwargs is passed as a **dict, since we dont know what is in it
     # except inside the specific job, and on instantiation. This means it's not necessary
     # to pass AND receive with ** - may as well be a dict. It's a bit dirty though,
@@ -88,10 +94,6 @@ class BaseJob:
         FileJob.objects.bulk_create([FileJob(rawfile_id=rf_id, job_id=self.job.pk)
             for rf_id in self.get_rf_ids_for_filejobs()])
         return {'id': self.job.id, 'kwargs': kwargs, 'error': False}
-
-    def check_error(self, **kwargs):
-        # FIXME check_error will be used differently when creating vs when running, please fix!
-        return self.check_error_on_creation(**kwargs)
 
     def check_error_on_creation(self, **kwargs):
         return False
@@ -125,18 +127,21 @@ class BaseJob:
         return []
 
     def _select_rsync_server(self, srcshare_id, dstshare_id):
-        '''Shares should already have been confirmed to be active?
+        '''For two given shares, find the server that can rsync between them.
+
+        Shares should already have been confirmed to be active?
         Or can we do that here?
         '''
         servers = FileserverShare.objects.filter(share_id__in=[srcshare_id, dstshare_id],
                 server__active=True)
         rsync_server_q = servers.filter(server__can_rsync_remote=True)
-        if singleserver := FileServer.objects.filter(fileservershare__in=servers, active=True,
-                fileservershare__share=dstshare_id).filter(fileservershare__share=srcshare_id):
+        if singleserver := FileServer.objects.filter(has_workers=True, fileservershare__in=servers,
+                active=True, fileservershare__share=dstshare_id).filter(
+                fileservershare__share=srcshare_id):
             # Try to get both shares from same server, rsync can skip SSH then
-            srcserver = servers.filter(server__in=singleserver,
-                    share=srcshare_id).values('server__fqdn', 'server__name', 'path').first()
-            dstserver = servers.filter(server__in=singleserver, share=dstshare_id
+            srcserver = servers.filter(server__in=singleserver, share=srcshare_id
+                    ).values('server__fqdn', 'server__name', 'path', 'server__pk').first()
+            dstserver = servers.filter(server=srcserver['server__pk'], share=dstshare_id
                     ).values('server__fqdn', 'server__name', 'path').first()
             src_user = dst_user = rskey = False
             rsyncservername = srcserver['server__name']
@@ -162,10 +167,7 @@ class BaseJob:
             raise RuntimeError('Could not get file share on any rsync capable controller server')
         return srcserver, dstserver, rsyncservername, src_user, dst_user, rskey
 
-    def on_create_prep_rsync_jobs(self, **kwargs):
-        '''If needed, rsync the DB and other singlefiles which is not on the analysis share,
-        this function provides a dict with the job name and kwargs for that'''
-        newjobs = []
+    def _find_extrafiles_to_rsync(self, **kwargs):
         if all_exfiles_sfpk := self._get_extrafiles_to_rsync(**kwargs):
             extra_sfl_q = StoredFileLoc.objects.filter(sfile_id__in=all_exfiles_sfpk, active=True)
             if extra_sfl_q.distinct('sfile').count() < len(all_exfiles_sfpk):
@@ -186,6 +188,8 @@ class BaseJob:
                     else:
                         raise RuntimeError('Cannot find raw data share on server to run job on, '
                                 'while there are files to sync to there. Please contact admin')
+                else:
+                    return [], False, False
 
             elif self.oncreate_getfiles_query(**kwargs).count():
                 # Job with sfloc_ids input (e.g. analysis job). Use this sfloc which is on
@@ -199,50 +203,31 @@ class BaseJob:
             else:
                 raise RuntimeError('Cannot determine if extra files for job need syncing to target '
                         'file server. Contact admin')
+            extra_sfs = StoredFile.objects.filter(pk__in=all_exfiles_sfpk).exclude(
+                        pk__in=[x['sfile_id'] for x in ready_sfls.values('sfile_id')])
+            return extra_sfs, dstshare_id, dstsharefun
+        else:
+            return [], False, False
 
-            
-            # Make rsync jobs for those extrafiles which there is no sfl in the servershare we want:
-            # Loop over files not already in servershare
-            for extra_sf in StoredFile.objects.filter(pk__in=all_exfiles_sfpk).exclude(
-                        pk__in=[x['sfile_id'] for x in ready_sfls.values('sfile_id')]):
-                extra_sf_sfl_q = extra_sf.storedfileloc_set.filter(active=True,
-                        servershare__active=True, servershare__fileservershare__server__active=True)
-                if rs_extra_sfl := extra_sf_sfl_q.filter(
-                        servershare__fileservershare__server__can_rsync_remote=True):
-                    # either the extra sfl is on an rsync-capable server:
-                    # .first() since it can be on multiple mounts on that server
-                    extra_sfl = rs_extra_sfl.values('pk', 'servershare__function', 'path').first()
-                elif FileserverShare.objects.filter(share_id=dstshare_id,
-                        share__active=True, server__active=True, server__can_rsync_remote=True):
-                    # or the target server is rsync capable
-                    extra_sfl = extra_sf_sfl_q.values('pk', 'servershare__function', 'path').first()
-                else:
-                    raise RuntimeError('Could not find a source file to upload to analysis server for '
-                        f'{extra_sf.filename}')
-                blankpathshares = [ShareFunction.LIBRARY, ShareFunction.INBOX]
-                if extra_sfl['servershare__function'] in blankpathshares and dstsharefun not in blankpathshares:
-                    # e.g. libfile from path '' needs a path in the dst if that is rawdata!
-                    path = settings.LIBRARY_FILE_PATH_INBOX
-                else:
-                    path = extra_sfl['path']
-                newjobs.append({'name': 'rsync_otherfiles_to_servershare',
-                    'kwargs': {'sfloc_id': extra_sfl['pk'], 'dstshare_id': dstshare_id,
-                        'dstpath': path}})
-        return newjobs
 
     def get_jobs_with_single_sfloc_to_wait_for(self, **kwargs):
         '''Need to wait for non-dataset jobs on files involved in this job. One could
         add those to the get_sf_ids_for_filejobs but then you wouldnt be able to run two
         analyses in parallel if theyd use the same DB or server config file.
         '''
+        # FIXME now it looks for hits in kwargs__sfloc_ids in , and from kwargs__singlefiles etc,
+        # so it is pretty specific to analysis and rsync_files_to_servershare, can we make it more general?
         if sfpks := self._get_extrafiles_to_rsync(**kwargs):
             # This is run for any job that has extrafiles (i.e. analysis jobs)
-            all_sfl = StoredFileLoc.objects.filter(sfile_id__in=sfpks, active=True).values('pk')
-            return Job.objects.filter(kwargs__sfloc_id__in=[x['pk'] for x in all_sfl])
-        elif sfl := kwargs.get('sfloc_id'):
-            jobs_to_wait = []
+            sfl_q = Q()
+            for sfl in StoredFileLoc.objects.filter(sfile_id__in=sfpks, active=True).values('pk'):
+                sfl_q = sfl_q | Q(kwargs__sfloc_ids__contains=sfl['pk'])
+            return Job.objects.filter(sfl_q)
+
+        elif not self.is_dset_job and (sfls := kwargs.get('sfloc_id')):
             # Other way around, this single file job has to wait for analysis jobs
-            sf = StoredFile.objects.filter(storedfileloc__id=sfl).values('pk').get()
+            jobs_to_wait = []
+            sf = StoredFile.objects.filter(storedfileloc__id=sfls).values('pk').get()
             for job in Job.objects.filter(state__in=JOBSTATES_RUNNER_WAIT, kwargs__inputs__has_any_keys=[
                         'singlefiles', 'multifiles']).values('pk', 'kwargs', 'timestamp', 'state'):
                 extrafn_sfpk = [
@@ -253,7 +238,6 @@ class BaseJob:
                     jobs_to_wait.append(job['pk'])
             return Job.objects.filter(pk__in=jobs_to_wait)
         else:
-            # Dset jobs etc are expected to wait via sfloc_ids anyway
             return Job.objects.none()
 
     def get_rf_ids_for_filejobs(self):
@@ -322,6 +306,7 @@ class SingleFileJob(BaseJob):
 class MultiFileJob(BaseJob):
     '''Job class to specify any job on a number of files on a specific share.
     '''
+
     def oncreate_getfiles_query(self, **kwargs):
         return StoredFileLoc.objects.filter(pk__in=kwargs['sfloc_ids'], servershare__active=True)
 
@@ -337,6 +322,7 @@ class DatasetJob(BaseJob):
     then, not only for the files-to-be-added, which is good since otherwise you could start
     an analysis on the dataset without those files, for example.
     '''
+    is_dset_job = True
 
     def get_dsids_jobrunner(self, **kwargs):
         return [x.pk for x in dm.Dataset.objects.filter(datasetserver__pk=kwargs['dss_id'])]
@@ -366,6 +352,8 @@ class DatasetJob(BaseJob):
 
 class MultiDatasetJob(BaseJob):
     '''For jobs on multiple datasets, currently NF search job'''
+
+    is_dset_job = True
 
     def get_dss_ids(self, **kwargs):
         return kwargs['dss_ids']

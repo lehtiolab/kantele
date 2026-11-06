@@ -55,7 +55,7 @@ class BaseFilesTest(BaseTest):
 class TestBrowserUpload(BaseIntegrationTest):
 
     def test_libfile(self):
-        url = f'{self.live_server_url}/files/upload/userfile/'
+        url = f'http://nginx/files/upload/userfile/'
         libfn = os.path.join(self.newstorctrl.path, 'libfiles', 'db.fa')
         data = {'ftype_id': self.lft.pk, 'uploadtype': rm.UploadFileType.LIBRARY, 'desc': 'abc',
                 'file': open(libfn, 'r')}
@@ -75,7 +75,7 @@ class TestBrowserUpload(BaseIntegrationTest):
         self.assertTrue(os.path.exists(os.path.join(self.libctrl.path, fn.filename)))
 
     def test_userfile(self):
-        url = f'{self.live_server_url}/files/upload/userfile/'
+        url = f'http://nginx/files/upload/userfile/'
         upfn = os.path.join(self.newstorctrl.path, 'libfiles', 'db.fa')
         data = {'ftype_id': self.lft.pk, 'uploadtype': rm.UploadFileType.USERFILE, 'desc': 'abc',
                 'file': open(upfn, 'r')}
@@ -107,7 +107,7 @@ class TestUploadScript(BaseIntegrationTest):
                 producer=self.adminprod, filetype=self.ft, uploadtype=rm.UploadFileType.RAWFILE)
         need_desc = 0
         #need_desc = int(self.uploadtype in [ufts.LIBRARY, ufts.USERFILE])
-        self.user_token = b64encode(f'{self.token}|{self.live_server_url}|{need_desc}'.encode('utf-8')).decode('utf-8')
+        self.user_token = b64encode(f'{self.token}|http://nginx|{need_desc}'.encode('utf-8')).decode('utf-8')
         self.actual_md5 = '1eab409e2965943f52df8e3c63874d5b'
 
     def tearDown(self):
@@ -162,7 +162,7 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertEqual(cmsjobs.count(), 1)
 
     def get_token(self, *, uploadtype=False):
-        resp = self.cl.post(f'{self.live_server_url}/files/token/', content_type='application/json',
+        resp = self.cl.post(f'http://nginx/files/token/', content_type='application/json',
                 data={'ftype_id': self.ft.pk, 'archive_only': False,
                     'uploadtype': uploadtype or rm.UploadFileType.RAWFILE})
         self.assertEqual(resp.status_code, 200)
@@ -216,7 +216,7 @@ class TestUploadScript(BaseIntegrationTest):
         explines = [f'Token OK, expires on {self.token["expires"]}',
                 'Registering 1 new file(s)', 
                 f'File {new_raw.name} has ID {new_raw.pk}, instruction: transfer',
-                f'Uploading {zipboxpath} to {self.live_server_url}',
+                    f'Uploading {zipboxpath} to http://nginx',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
         outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
@@ -272,7 +272,7 @@ class TestUploadScript(BaseIntegrationTest):
         explines = [f'Token OK, expires on {self.token["expires"]}',
                 'Registering 1 new file(s)', 
                 f'File {self.f3raw.name} has ID {self.f3raw.pk}, instruction: transfer',
-                f'Uploading {zipboxpath} to {self.live_server_url}',
+                    f'Uploading {zipboxpath} to http://nginx',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
         outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
@@ -296,8 +296,15 @@ class TestUploadScript(BaseIntegrationTest):
         os.makedirs(outbox, exist_ok=True)
         shutil.copytree(fullp, os.path.join(outbox, self.f3sf.filename))
         timestamp = os.path.getctime(os.path.join(outbox, self.f3sf.filename))
+
+        # Fix md5 since were going to upload an existing file
+        self.f3raw.source_md5 = 'tmp fake md5'
+        self.f3raw.save()
+        self.f3sf.md5 = self.f3raw.source_md5   
+        self.f3sf.save()
+
         with open(os.path.join(tmpdir, 'config.json'), 'w') as fp:
-            json.dump({'client_id': self.prod.client_id, 'host': self.live_server_url,
+            json.dump({'client_id': self.prod.client_id, 'host': 'http://nginx',
 
                 'token': self.token, 'outbox': outbox, 'raw_is_folder': True,
                 'filetype_id': self.ft.pk, 'acq_process_names': ['TEST'],
@@ -319,7 +326,7 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Found new file: {os.path.join(outbox, newraw.name)} produced {timestamp}',
                 'Registering 1 new file(s)',
                 f'File {newraw.name} has ID {newraw.pk}, instruction: transfer',
-                f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to {self.live_server_url}',
+                    f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to http://nginx',
                 f'Moving file {newraw.name} to skipbox',
                 f'Another file in the system has the same name and is stored in the same path '
                 f'({self.f3sssinbox.path}/{self.f3sf.filename}). Please '
@@ -340,6 +347,11 @@ class TestUploadScript(BaseIntegrationTest):
         self.get_token()
         fpath = os.path.join(self.rootdir, self.newstorctrl.path, self.f3sss.path)
         fullp = os.path.join(fpath, self.f3sf.filename)
+        # Fix md5 since were going to upload an existing file
+        self.f3raw.source_md5 = 'tmp fake md5'
+        self.f3raw.save()
+        self.f3sf.md5 = self.f3raw.source_md5   
+        self.f3sf.save()
         rawfn = rm.RawFile.objects.create(source_md5=self.actual_md5, name='fake_oldname',
                 producer=self.adminprod, size=123, date=timezone.now(), claimed=False,
                 usetype=rm.UploadFileType.RAWFILE)
@@ -441,7 +453,7 @@ class TestUploadScript(BaseIntegrationTest):
         lastraw = rm.RawFile.objects.last()
         lastsf = rm.StoredFile.objects.last()
         with open(os.path.join(tmpdir, 'config.json'), 'w') as fp:
-            json.dump({'client_id': self.prod.client_id, 'host': self.live_server_url,
+            json.dump({'client_id': self.prod.client_id, 'host': 'http://nginx',
 
                 'token': self.token, 'outbox': outbox, 'raw_is_folder': True,
                 'filetype_id': self.ft.pk, 'acq_process_names': ['TEST'],
@@ -460,10 +472,10 @@ class TestUploadScript(BaseIntegrationTest):
         classifyjob = jm.Job.objects.filter(funcname='classify_msrawfile', kwargs={
             'sfloc_id': newsfloc.pk, 'token': self.token})
         classifytask = jm.Task.objects.filter(job__funcname='classify_msrawfile', job__kwargs__sfloc_id=newsfloc.pk)
-        rsjobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare', kwargs__sfloc_id=newsfloc.pk, kwargs__dstshare_id=self.ssnewstore.pk,
+        rsjobs = jm.Job.objects.filter(funcname='rsync_files_to_servershare', kwargs__sfloc_ids=[newsfloc.pk], kwargs__dstshare_id=self.ssnewstore.pk,
             kwargs__dstpath=os.path.join(settings.QC_STORAGE_DIR, self.prod.name))
-        nfrsjobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
-                kwargs__sfloc_id=self.nfc_loc.pk, kwargs__dstshare_id=self.ssnewstore.pk)
+        nfrsjobs = jm.Job.objects.filter(funcname='rsync_files_to_servershare',
+                kwargs__sfloc_ids=[self.nfc_loc.pk], kwargs__dstshare_id=self.ssnewstore.pk)
         self.assertEqual(classifyjob.count(), 1)
         self.assertEqual(classifytask.count(), 0)
         self.assertEqual(rsjobs.count(), 0)
@@ -511,7 +523,7 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Found new file: {os.path.join(outbox, newraw.name)} produced {timestamp}',
                 'Registering 1 new file(s)',
                 f'File {newraw.name} has ID {newraw.pk}, instruction: transfer',
-                f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to {self.live_server_url}',
+                    f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to http://nginx',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
         # Remove warnings for upload.py ascii art
@@ -540,9 +552,14 @@ class TestUploadScript(BaseIntegrationTest):
                 securityclass=rm.DataSecurityClass.NOSECURITY)
         exta = am.ExternalAnalysis.objects.create(analysis=ana, description='bla', last_token=self.uploadtoken)
         need_desc = 0
-        self.user_token = b64encode(f'{self.token}|{self.live_server_url}|{need_desc}'.encode('utf-8')).decode('utf-8')
+        self.user_token = b64encode(f'{self.token}|http://nginx|{need_desc}'.encode('utf-8')).decode('utf-8')
         self.actual_md5 = 'dee94af7703a5beb01e8fdc84da018bb'
         fpath = os.path.join(self.rootdir, self.newstorctrl.path, self.f3sss.path, self.f3sf.filename)
+        # Fix md5 since were going to upload an existing file
+        self.f3raw.source_md5 = 'tmp fake md5'
+        self.f3raw.save()
+        self.f3sf.md5 = self.f3raw.source_md5   
+        self.f3sf.save()
         self.f3sf.filename = 'analysis.tdf'
         fullp = os.path.join(fpath, self.f3sf.filename)
         old_raw = rm.RawFile.objects.last()
@@ -580,7 +597,7 @@ class TestUploadScript(BaseIntegrationTest):
         explines = [f'Token OK, expires on {datetime.strftime(self.uploadtoken.expires, "%Y-%m-%d, %H:%M")}',
                 'Registering 1 new file(s)', 
                 f'File {new_raw.name} has ID {new_raw.pk}, instruction: transfer',
-                f'Uploading {fullp} to {self.live_server_url}',
+                    f'Uploading {fullp} to http://nginx',
                 f'Succesful transfer of file {fullp}',
                 ]
         outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
@@ -610,7 +627,7 @@ class TestUploadScript(BaseIntegrationTest):
         lastraw = rm.RawFile.objects.last()
         lastsf = rm.StoredFile.objects.last()
         with open(os.path.join(tmpdir, 'config.json'), 'w') as fp:
-            json.dump({'client_id': self.prod.client_id, 'host': self.live_server_url,
+            json.dump({'client_id': self.prod.client_id, 'host': 'http://nginx',
 
                 'token': self.token, 'outbox': outbox, 'raw_is_folder': True,
                 'filetype_id': self.ft.pk, 'acq_process_names': ['flock'],
@@ -630,7 +647,7 @@ class TestUploadScript(BaseIntegrationTest):
         classifyjob = jm.Job.objects.filter(funcname='classify_msrawfile', kwargs={
             'sfloc_id': newsf.pk, 'token': self.token})
         classifytask = jm.Task.objects.filter(job__funcname='classify_msrawfile', job__kwargs__sfloc_id=newsf.pk)
-        rsjobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare')
+        rsjobs = jm.Job.objects.filter(funcname='rsync_files_to_servershare')
         qcjobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow')
         # Run classify
         sleep(1)
@@ -659,7 +676,7 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Found new file: {os.path.join(outbox, newraw.name)} produced {timestamp}',
                 'Registering 1 new file(s)',
                 f'File {newraw.name} has ID {newraw.pk}, instruction: transfer',
-                f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to {self.live_server_url}',
+                    f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to http://nginx',
                 f'Succesful transfer of file {zipboxpath}',
                 # This is enough, afterwards the 'Checking new files in outbox' starts
                 ]
@@ -696,7 +713,7 @@ class TestUploadScript(BaseIntegrationTest):
         lastraw = rm.RawFile.objects.last()
         lastsf = rm.StoredFile.objects.last()
         with open(os.path.join(tmpdir, 'config.json'), 'w') as fp:
-            json.dump({'client_id': self.prod.client_id, 'host': self.live_server_url,
+            json.dump({'client_id': self.prod.client_id, 'host': 'http://nginx',
 
                 'token': self.token, 'outbox': outbox, 'raw_is_folder': True,
                 'filetype_id': self.ft.pk, 'acq_process_names': ['TEST'],
@@ -710,7 +727,7 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertFalse(newraw.claimed)
         # Run rsync from web
         self.run_job()
-        mvjobs = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare', kwargs__dss_id=self.olddss.pk,
+        mvjobs = jm.Job.objects.filter(funcname='rsync_addfiles_dset', kwargs__dss_id=self.olddss.pk,
                 kwargs__sfloc_ids=[self.newsf.sfile.storedfileloc_set.first().pk])
 
         qcjobs = jm.Job.objects.filter(funcname='run_longit_qc_workflow', kwargs__sfloc_id=self.newsf.pk,
@@ -748,7 +765,7 @@ class TestUploadScript(BaseIntegrationTest):
                 f'Found new file: {os.path.join(outbox, newraw.name)} produced {timestamp}',
                 'Registering 1 new file(s)',
                 f'File {newraw.name} has ID {newraw.pk}, instruction: transfer',
-                f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to {self.live_server_url}',
+                    f'Uploading {os.path.join(tmpdir, "zipbox", newraw.name)}.zip to http://nginx',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
         outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
@@ -784,7 +801,7 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertEqual(resp.status_code, 200)
         backupjobs = jm.Job.objects.filter(funcname='create_pdc_archive',
                 kwargs__sfloc_id=self.newsf.sfile.storedfileloc_set.first().pk)
-        mvjobs = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare',
+        mvjobs = jm.Job.objects.filter(funcname='rsync_addfiles_dset',
                 kwargs__dss_id=self.olddss.pk, kwargs__sfloc_ids=[self.newsf.sfile.storedfileloc_set.first().pk])
         mzmljobs = jm.Job.objects.filter(funcname='convert_dataset_mzml',
                 kwargs__dss_id=self.olddss.pk, kwargs__pwiz_id=self.pwiz.pk)
@@ -872,7 +889,7 @@ class TestUploadScript(BaseIntegrationTest):
         explines = [f'Token OK, expires on {self.token["expires"]}',
                 'Registering 1 new file(s)', 
                 f'File {new_raw.name} has ID {new_raw.pk}, instruction: transfer',
-                f'Uploading {zipboxpath} to {self.live_server_url}',
+                    f'Uploading {zipboxpath} to http://nginx',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
         outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
@@ -930,7 +947,7 @@ class TestUploadScript(BaseIntegrationTest):
         explines = [f'Token OK, expires on {self.token["expires"]}',
                 'Registering 1 new file(s)', 
                 f'File {new_raw.name} has ID {new_raw.pk}, instruction: transfer',
-                f'Uploading {zipboxpath} to {self.live_server_url}',
+                    f'Uploading {zipboxpath} to http://nginx',
                 f'Succesful transfer of file {zipboxpath}',
                 ]
         outlines = [x for x in sperr.decode('utf-8').strip().split('\n')
@@ -1017,8 +1034,8 @@ class TransferStateTest(BaseFilesTest):
         jobs = jm.Job.objects.filter(funcname='rename_file', kwargs={'sfloc_id': sfloc.pk,
             'oldname': sflib.filename, 'newname': f'libfile_{lf.pk}_{sflib.filename}'})
         self.assertEqual(jobs.count(), 1)
-        jobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
-                kwargs__sfloc_id=sfloc.pk, kwargs__dstshare_id=remotesslib.pk,
+        jobs = jm.Job.objects.filter(funcname='rsync_files_to_servershare',
+                kwargs__sfloc_ids=[sfloc.pk], kwargs__dstshare_id=remotesslib.pk,
                 kwargs__dstpath=settings.LIBRARY_FILE_PATH)
         self.assertEqual(jobs.count(), 1)
         pdcjobs = jm.Job.objects.filter(funcname='create_pdc_archive', kwargs={
@@ -1278,6 +1295,12 @@ class TestFileTransfer(BaseFilesTest):
                 md5=other_raw.source_md5, filename=other_raw.name)
         rm.StoredFileLoc.objects.create(sfile=sf, servershare=self.ssinbox, path=settings.TMPPATH,
                 purged=False, active=True)
+        # Fix md5 since were going to upload an existing file
+        self.f3raw.source_md5 = 'tmp fake md5'
+        self.f3raw.save()
+        self.f3sf.md5 = self.f3raw.source_md5   
+        self.f3sf.save()
+
         resp, upload_content = self.do_transfer_file()
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(resp.json(), {'error': 'Another file in the system has the same name '
@@ -1368,7 +1391,7 @@ class TestUpdateStorageFile(BaseFilesTest):
                 data={'item_id': self.anasfile.pk, 'share_ids': [self.ssanaruns.pk]})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(jm.Job.objects.filter(funcname='restore_from_pdc_archive').exists())
-        self.assertEqual(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare').count(), 1)
+        self.assertEqual(jm.Job.objects.filter(funcname='rsync_files_to_servershare').count(), 1)
 
         # Analysis file on rundir back to delivery, is on remote and will go to an rsync-ok server
         self.anasfile_sfl.active, self.anasfile_sfl.purged = False, True
@@ -1379,7 +1402,7 @@ class TestUpdateStorageFile(BaseFilesTest):
                 data={'item_id': self.anasfile.pk, 'share_ids': [self.ssana.pk, self.ssanaruns.pk]})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(jm.Job.objects.filter(funcname='restore_from_pdc_archive').exists())
-        self.assertEqual(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare').count(), 1)
+        self.assertEqual(jm.Job.objects.filter(funcname='rsync_files_to_servershare').count(), 1)
 
         # Analysis file on rundir to other rundir, is on remote and will go through inbox
         # set anasfile_sfl on self.ssana to active=False, so it is only on ssanaruns
@@ -1391,18 +1414,18 @@ class TestUpdateStorageFile(BaseFilesTest):
                 data={'item_id': self.anasfile.pk, 'share_ids': [self.ssanaruns2.pk]})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(jm.Job.objects.filter(funcname='restore_from_pdc_archive').exists())
-        self.assertEqual(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare').count(), 2)
-        inboxjob = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
+        self.assertEqual(jm.Job.objects.filter(funcname='rsync_files_to_servershare').count(), 2)
+        inboxjob = jm.Job.objects.filter(funcname='rsync_files_to_servershare',
             kwargs__dstshare_id=self.ssinbox.pk)
         self.assertTrue(inboxjob.exists())
-        secondjob = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
+        secondjob = jm.Job.objects.filter(funcname='rsync_files_to_servershare',
             kwargs__dstshare_id=self.ssanaruns2.pk)
         self.assertTrue(secondjob.exists())
         self.assertEqual(secondjob.get().pk, inboxjob.get().pk + 1)
 
     def test_dset(self):
         # Between shares on storagecontroller (first retrieve, then rsync)
-        rsjobs = jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare')
+        rsjobs = jm.Job.objects.filter(funcname='rsync_files_to_servershare')
         bupjobs = jm.Job.objects.filter(funcname='restore_from_pdc_archive')
         self.assertFalse(rsjobs.exists())
         self.assertFalse(bupjobs.exists())
@@ -1445,7 +1468,7 @@ class TestUpdateStorageFile(BaseFilesTest):
         self.assertTrue(sfls.filter(servershare=self.analocalstor).exists())
         srcsflid = self.f3sf.storedfileloc_set.filter(active=False, servershare=self.ssinbox).get().pk
         self.assertTrue(bupjobs.filter(kwargs__sfloc_id=srcsflid).exists())
-        self.assertTrue(rsjobs.filter(kwargs__sfloc_id=srcsflid).exists())
+        self.assertTrue(rsjobs.filter(kwargs__sfloc_ids=[srcsflid]).exists())
         self.assertTrue(jm.Job.objects.filter(funcname='purge_files', kwargs__sfloc_ids=[srcsflid]).exists())
         self.assertEqual(jm.Job.objects.count(), 3)
 
@@ -1502,8 +1525,8 @@ class TestDeleteFile(BaseFilesTest):
         resp = self.cl.post(self.url, content_type='application/json',
                 data={'item_id': self.oldsf.pk, 'force': True})
         self.assertEqual(resp.status_code, 200)
-        self.assertTrue(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare',
-            kwargs__sfloc_id=self.oldsss.pk, kwargs__dstshare_id=self.ssinbox.pk).exists())
+        self.assertTrue(jm.Job.objects.filter(funcname='rsync_files_to_servershare',
+            kwargs__sfloc_ids=[self.oldsss.pk], kwargs__dstshare_id=self.ssinbox.pk).exists())
         self.assertTrue(jm.Job.objects.filter(funcname='create_pdc_archive',
             kwargs__sfloc_id=self.oldsf.storedfileloc_set.get(servershare=self.ssinbox).pk).exists())
         self.assertTrue(jm.Job.objects.filter(funcname='purge_files',
@@ -1547,7 +1570,7 @@ class TestDeleteFile(BaseFilesTest):
         am.MzmlFile.objects.create(sfile=self.sfile, pwiz=self.pwiz)
         resp = self.cl.post(self.url, content_type='application/json', data={'item_id': self.sfile.pk})
         self.assertEqual(resp.status_code, 200)
-        self.assertFalse(jm.Job.objects.filter(funcname='rsync_otherfiles_to_servershare').exists())
+        self.assertFalse(jm.Job.objects.filter(funcname='rsync_files_to_servershare').exists())
         self.assertFalse(jm.Job.objects.filter(funcname='create_pdc_archive').exists())
 
     def test_analysisfile(self):
@@ -1572,7 +1595,7 @@ class TestDownloadUploadScripts(BaseFilesTest):
             'upload.py': 30523,
             'transfer.bat': 177,
             'transfer_config.json': 202,
-            'setup.bat': 738,
+            'setup.bat': 734,
             }
 
     def setUp(self):
@@ -1635,10 +1658,10 @@ class TestDownloadUploadScripts(BaseFilesTest):
             with zipfn.open('transfer_config.json') as tcfp:
                 tfconfig = json.load(tcfp)
         self.assertEqual(len(names), 11)
-        for fn in ['requests-2.32.3-py3-none-any.whl', 'certifi-2025.1.31-py3-none-any.whl', 
-                'requests_toolbelt-1.0.0-py2.py3-none-any.whl', 'idna-3.10-py3-none-any.whl',
-                'charset_normalizer-3.4.1-py3-none-any.whl', 'urllib3-2.4.0-py3-none-any.whl',
-                'psutil-7.0.0-cp37-abi3-win_amd64.whl',
+        for fn in ['requests-2.34.2-py3-none-any.whl', 'certifi-2026.10.23-py3-none-any.whl', 
+                'requests_toolbelt-1.0.0-py2.py3-none-any.whl', 'idna-3.20-py3-none-any.whl',
+                'charset_normalizer-3.5.2-py3-none-any.whl', 'urllib3-2.8.0-py3-none-any.whl',
+                'psutil-7.2.2-cp37-abi3-win_amd64.whl',
                 ]:
             self.assertIn(fn, names)
         for key,val in {'outbox': f'{datadisk}\\outbox',

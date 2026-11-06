@@ -15,12 +15,13 @@ import re
 import json
 import shutil
 import zipfile
-from tempfile import NamedTemporaryFile, mkstemp
+from tempfile import NamedTemporaryFile, TemporaryDirectory, mkstemp
 import requests
 from hashlib import md5
 from urllib.parse import urlsplit
 from Bio import SeqIO
 from celery import states as taskstates
+from stream_unzip import stream_unzip
 
 from kantele import settings
 from rawstatus.models import (RawFile, Producer, StoredFile, FileServer, ServerShare, StoredFileLoc,
@@ -35,7 +36,7 @@ from datasets import models as dsmodels
 from dashboard import models as dashmodels
 from jobs import models as jm
 from jobs import jobs as jj
-from jobs.jobutil import create_job, create_job_without_check, check_job_error, jobmap
+from jobs.jobutil import create_job, create_job_without_check, check_job_error, jobmap, queue_rsync_and_update_sharestate, distribute_file_servershares
 from home import models as hm
 
 
@@ -523,28 +524,27 @@ def classified_rawfile_treatment(request):
             for dss in dss_q.values('pk', 'storage_loc', 'storageshare_id'):
                 mvjob_kw = {'dss_id': dss['pk'], 'sfloc_ids': [sfloc.pk],
                         'dstshare_id': dss['storageshare_id']}
-                if rsjob_error := check_job_error('rsync_dset_files_to_servershare', **mvjob_kw):
+                if rsjob_error := check_job_error('rsync_addfiles_dset', **mvjob_kw):
                     # TODO this needs logging
                     print(f'Classify task error for task {data["task_id"]} trying to queue '
-                            f'rsync_dset_files_to_servershare - {rsjob_error}')
+                            f'rsync_addfiles_dset - {rsjob_error}')
                 else:
                     dss_mvjobs.append(mvjob_kw)
 
             if not rsjob_error:
-                jname = 'rsync_dset_files_to_servershare'
                 for mvkw in dss_mvjobs:
                     # Create job here instead of in jobs.py, because we should not create this
                     # job multiple times, esp not if user manages to put another job in 
                     # between, so filter first to see if exists
                     # get_or_create is harder since you also need to do addkwargs before
-                    if not jm.Job.objects.filter(funcname=jname,
+                    if not jm.Job.objects.filter(funcname='rsync_addfiles_dset',
                             kwargs__sfloc_ids=mvkw['sfloc_ids'], kwargs__dss_id=mvkw['dss_id'],
                             kwargs__dstshare_id=mvkw['dstshare_id']):
-                        jwrap = jobmap['rsync_dset_files_to_servershare'](False)
+                        jwrap = jobmap['rsync_addfiles_dset'](False)
                         mvkw.update(jwrap.on_create_addkwargs(**mvkw))
                         jwrap.update_sourcefns_lastused(**mvkw)
-                        job = jm.Job.objects.create(funcname=jname, timestamp=timezone.now(),
-                                state=jj.Jobstates.HOLD, kwargs=mvkw)
+                        job = jm.Job.objects.create(funcname='rsync_addfiles_dset',
+                                timestamp=timezone.now(), state=jj.Jobstates.HOLD, kwargs=mvkw)
                         FileJob.objects.create(rawfile_id=sfloc.sfile.rawfile.pk,
                                 job_id=job.pk)
             # Make sure users cant use this file for something else:
@@ -653,10 +653,6 @@ def file_uploaded(request):
             # Only dump in sens OK data storage, 
             # so use inbox, then do backup, deliver to secure delivery, delete.
             # TODO
-            #rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sfl.pk,
-            #    dstshare_id=dstshare['pk'], dstpath=analysis.get_public_output_dir())
-            #create_job('create_pdc_archive', sfloc_id=rsjob['kwargs']['dstsfloc_id'],
-            #        isdir=sf.filetype.is_folder)
             pass
         else:
             # Rsync non-sensitive data to the public data storage
@@ -665,9 +661,13 @@ def file_uploaded(request):
             # Only rsync new files (most cases) or multi-analyses-shared files which are
             # not existing in dstshare yet
             if raw_created:
-                rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sfl.pk,
-                    dstshare_id=dstshare['pk'], dstpath=analysis.get_public_output_dir())
-                create_job('create_pdc_archive', sfloc_id=rsjob['kwargs']['dstsfloc_id'],
+                src_shares = distribute_file_servershares([share_id],
+                        StoredFileLoc.objects.filter(sfile=sf, active=True),
+                        {dstshare['pk']: analysis.get_public_output_dir()})
+
+                delivered_sfl = StoredFileLoc.objects.values('pk').get(sfile=sf,
+                        servershare_id=dstshare['pk'])
+                create_job('create_pdc_archive', sfloc_id=delivered_sfl['pk'],
                         isdir=sf.filetype.is_folder)
     elif data.get('is_library', False):
         # Library files at this URL arrive in inbox, go to their respective shares
@@ -684,7 +684,7 @@ def file_uploaded(request):
         dbmodel.objects.create(**kwargs)
         rs_kwargs = []
         for dstshare in ServerShare.objects.filter(function=ShareFunction.LIBRARY).values('pk'):
-            kwargs = {'name': 'rsync_otherfiles_to_servershare', 'sfloc_id': sfl.pk,
+            kwargs = {'name': 'rsync_files_to_servershare', 'sfloc_ids': [sfl.pk],
                     'dstshare_id': dstshare['pk'], 'dstpath': settings.LIBRARY_FILE_PATH}
             if rsjoberr := check_job_error(**kwargs):
                 return JsonResponse({'error': rsjoberr}, status=401)
@@ -742,8 +742,8 @@ def process_file_confirmed_ready(rfn, sfn, sfloc, upload, desc):
             create_job('rename_file', sfloc_id=sfloc.pk, newname=newname, oldname=sfn.filename)
             for ss in ServerShare.objects.exclude(pk=sfloc.servershare_id).filter(
                     function=ShareFunction.LIBRARY):
-                create_job('rsync_otherfiles_to_servershare', sfloc_id=sfloc.id, dstshare_id=ss.pk,
-                        dstpath=settings.LIBRARY_FILE_PATH)
+                create_job('rsync_files_to_servershare', sfloc_ids=[sfloc.id],
+                        dstshare_id=ss.pk, dstpath=settings.LIBRARY_FILE_PATH)
         elif upload.uploadtype == UploadFileType.ANALYSIS:
             # TODO which analysis uploads go to Kantele? Skip any sens data
             # results, so possibly only reports (aggregates)
@@ -764,7 +764,7 @@ def mzml_uploaded(request):
     '''
     data =  json.loads(request.body.decode('utf-8'))
     try:
-        sflpk, md5, uploader_id = data['sflpk'], data['md5'], data['client_id']
+        sflpk, md5hash, uploader_id = data['sflpk'], data['md5'], data['client_id']
     except ValueError as error:
         return JsonResponse({'error': 'Date passed to registration incorrectly formatted'}, status=400)
     except KeyError as error:
@@ -776,12 +776,83 @@ def mzml_uploaded(request):
         sfl = StoredFileLoc.objects.get(pk=sflpk)
     except StoredFileLoc.DoesNotExist:
         return JsonResponse({'error': 'Cannot find pre-registered mzML file to update'}, status=404)
-    sfl.sfile.md5 = md5
+    sfl.sfile.md5 = md5hash
     sfl.sfile.checked = True
     sfl.sfile.save()
     sfl.purged = False
     sfl.save()
     return JsonResponse({'error': False})
+
+
+@require_POST
+def upload_file_to_inbox(request):
+    data = request.POST
+    # Authenticate by job/task/file
+    try:
+        task_id = data['task']
+        jm.Job.objects.get(funcname='http_upload_servershare',
+            kwargs__sfloc_ids__contains=int(data['srcsfl_id']),
+            state=jj.Jobstates.PROCESSING, task__asyncid=task_id)
+        sfloc = StoredFileLoc.objects.values('servershare_id', 'path', 'sfile__filetype__is_folder',
+                'sfile__mzmlfile', 'sfile__filename', 'sfile__filetype__stablefiles', 'sfile__md5'
+                ).get(pk=data['dstsfl_id'])
+        share_path = FileserverShare.objects.filter(pk=data['in_fss']).values('path').get()
+    except KeyError as error:
+        print(f'POST request to transfer_file with missing parameter, {error}')
+        return JsonResponse({'error': 'Bad request'}, status=400)
+    except ValueError:
+        print(f'POST request to transfer_file with incorrect fn_id, {error}')
+        return JsonResponse({'error': 'Bad request'}, status=400)
+    except jm.Job.DoesNotExist:
+        return JsonResponse({'error': 'Cannot authenticate file upload'}, status=403)
+    except StoredFileLoc.DoesNotExist:
+        return JsonResponse({'error': 'Cannot find file being uploaded'}, status=403)
+    except FileserverShare.DoesNotExist:
+        return JsonResponse({'error': 'Cannot find upload destination share passed'}, status=403)
+
+    # Write file from /tmp (or in memory if small) to its destination in upload folder
+    def chunk_zipfn(upfile):
+        yield from upfile.chunks(chunk_size=65536)
+
+    upfile = request.FILES['file']
+    dighash = md5()
+    basedst_path = os.path.join(share_path['path'], sfloc['path'])
+    destfile = os.path.join(basedst_path, sfloc['sfile__filename'])
+    os.makedirs(basedst_path, exist_ok=True)
+    isdir = not sfloc['sfile__mzmlfile'] and sfloc['sfile__filetype__is_folder']
+    with TemporaryDirectory(dir=basedst_path) as tmp_unzip:
+        # Do everything in a tmp workdir
+        tmp_result = os.path.join(tmp_unzip, sfloc['sfile__filename'])
+        if isdir and len(sfloc['sfile__filetype__stablefiles']):
+            # Unzip in case there is a file inside that we need the md5 of
+            ch_to_mode = 0o755
+            os.makedirs(tmp_result)
+            for file_name_bytes, file_size, unzipped_chunks in stream_unzip(chunk_zipfn(upfile)):
+                file_name = file_name_bytes.decode('utf-8')
+                subfn = os.path.join(tmp_result, file_name)
+                with open(subfn, 'wb+') as fp:
+                    for chunk in unzipped_chunks:
+                        fp.write(chunk)
+                        if file_name in sfloc['sfile__filetype__stablefiles']:
+                            dighash.update(chunk)
+        else:
+            # No predictable file inside zipped folder if any, so we instead do MD5 on
+            # entire zipped folder or non-zipped file which is uploaded.
+            ch_to_mode = 0o644
+            with open(tmp_result, 'wb+') as fp:
+                for chunk in upfile.chunks():
+                    fp.write(chunk)
+                    dighash.update(chunk)
+        if dighash.hexdigest() != sfloc['sfile__md5']:
+            return JsonResponse({'error': f'Failed to upload file, checksum {dighash.hexdigest()} differs from '
+                f'expected {sfloc["sfile__md5"]}, possibly corrupted in transfer or changed on local disk',
+                'state': 'error'}, status=409)
+        else:
+            shutil.move(tmp_result, destfile)
+            os.chmod(destfile, ch_to_mode)
+        # Leave tmpdir context, tmpdir gets deleted
+    StoredFileLoc.objects.filter(pk=data['dstsfl_id']).update(purged=False)
+    return JsonResponse({})
 
 
 @require_POST
@@ -951,18 +1022,18 @@ def rsync_qc_to_analysis(sfl_q, nfwfvid):
         srcsfl = sfl_q.first()
         dstpath = os.path.join(settings.QC_STORAGE_DIR, srcsfl.sfile.rawfile.producer.name)
         # FIXME path!
-        qc_mvjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=srcsfl.pk,
+        qc_mvjob = create_job('rsync_files_to_servershare', sfloc_ids=[srcsfl.pk],
             dstshare_id=fss['share_id'], dstpath=dstpath)
-        sfloc = StoredFileLoc.objects.get(pk=qc_mvjob['kwargs']['dstsfloc_id'])
+        sfloc = StoredFileLoc.objects.get(pk=qc_mvjob['kwargs']['dstsfloc_ids'][0])
 
     elif srcsfloc := sfl_q.filter(servershare__fileservershare__server__can_rsync_remote=True):
         # We can push file to analysis server with QC
         fss = fss_q.values('share_id', 'pk', 'server_id').first()
         srcsfl = srcsfloc.first()
         dstpath = os.path.join(settings.QC_STORAGE_DIR, srcsfl.sfile.rawfile.producer.name)
-        qc_mvjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=srcsfl.pk,
+        qc_mvjob = create_job('rsync_files_to_servershare', sfloc_ids=[srcsfl.pk],
             dstshare_id=fss['share_id'], dstpath=dstpath)
-        sfloc = StoredFileLoc.objects.get(pk=qc_mvjob['kwargs']['dstsfloc_id'])
+        sfloc = StoredFileLoc.objects.get(pk=qc_mvjob['kwargs']['dstsfloc_ids'][0])
     else:
         msg = (f'Queued file {sfl_q.values("storedfile__filename").get()["storedfile__filename"]} '
                 'for QC run could not be found on any share with either analysis or rsync transfer '
@@ -1170,6 +1241,50 @@ def show_old_new_projects(request):
     pass
 
 
+def download_file_to_share(request, sfloc_id, task_id):
+    '''View to download files over HTTP to new servershares, using a job'''
+    # Authenticate with task id
+    if job := jm.Job.objects.filter(funcname__in=['download_files_to_servershare',
+                                                  'download_files_to_servershare'],
+            state=jj.Jobstates.PROCESSING, task__asyncid=task_id):
+        job = job.values().get()
+    else:
+        return JsonResponse({'msg': 'Not authenticated to download file'}, status=403)
+    if sfloc_q := StoredFileLoc.objects.filter(pk=sfloc_id, purged=False,
+                servershare__fileservershare__in=FileserverShare.objects.exclude(download_url='')):
+        # It needs not active=True (i.e. it can have been deleted after this job),
+        # but should not be purged
+        sfloc = sfloc_q.values('sfile__filename', 'pk', 'path', 'servershare__fileservershare__download_url',
+            'servershare__fileservershare__path', 'sfile__filetype__is_folder', 'sfile__mzmlfile').get()
+    else:
+        return JsonResponse({'msg': 'Cannot find file to download, maybe it is deleted?'}, status=403)
+    sfpath = os.path.join(sfloc['path'], sfloc['sfile__filename'])
+    if sfloc['sfile__filetype__is_folder'] and not sfloc['sfile__mzmlfile']:
+        # .d file, walk it and create list to give to nginx for mod_zip module
+        fs_webpath = os.path.join(sfloc['servershare__fileservershare__path'], sfpath)
+        url_path = os.path.join(sfloc['servershare__fileservershare__download_url'], sfpath)
+        ziplist = []
+        # Use the download mountpath
+        for wpath, _subdirs, wfns in os.walk(fs_webpath):
+            for wfn in wfns:
+                wfnpath = os.path.join(wpath, wfn)
+                # path as inside zip fn e.g. "filename123.d/123.m/something.sqlite"
+                zip_fn = os.path.relpath(wfnpath, fs_webpath)
+                downloadpath = wfnpath.replace(sfloc['servershare__fileservershare__path'],
+                    sfloc['servershare__fileservershare__download_url'])
+                ziplist.append(f'- {os.path.getsize(wfnpath)} {downloadpath} {zip_fn}')
+        resp = HttpResponse('\n'.join(ziplist))
+        resp['X-Archive-Files'] = 'zip'
+    else:
+        # Normal file, just serve it. Sfpath works since it contains the fss.path,
+        # which in webserver's case should be a URL path to nginx redirect,
+        # instead of a filesystem path as it would be on a storage controller or analysis server
+        fullsfpath = os.path.join(sfloc['servershare__fileservershare__download_url'], sfpath)
+        resp = HttpResponse()
+        resp['X-Accel-Redirect'] = fullsfpath
+    return resp
+
+
 @login_required
 def download_px_project(request):
     # FIXME check if pxacc exists on pride and here, before creating dset
@@ -1336,49 +1451,15 @@ def update_sfile_storage(request):
         remaining_share_ids = [x for x in share_ids if x != src_sfl.servershare_id]
         sfile.deleted = False
         sfile.save()
-
-    elif src_sfl_q := sfile.storedfileloc_set.filter(active=True, servershare__active=True, 
-            servershare__fileservershare__server__can_rsync_remote=True,
-            servershare__fileservershare__server__active=True):
-        # We have an accessible file to distribute on rsync-capable server
-        src_sfl = src_sfl_q.values('pk', 'servershare_id').first()
-        src_sfl_id = src_sfl['pk']
-        remaining_share_ids = [x for x in share_ids if x != src_sfl['servershare_id']]
-
     else:
-        # File only on remote, rsync to first rsync capable server
-        src_sfl = sfile.storedfileloc_set.filter(active=True, servershare__active=True, 
-            servershare__fileservershare__server__active=True).values('servershare_id').first()
-        srcserver = FileserverShare.objects.filter(share_id=src_sfl['servershare_id'],
-                ).values('server_id').first()
-        dstshare_classes = ServerShare.classify_shares_by_rsync_reach([x for x in share_ids],
-                srcserver['server_id'])
-        if dstshare_classes['rsync_sourcable']:
-            rs_src_dstshare_id = dstshare_classes['rsync_sourcable'][0]
-            rs_src_dstpath = get_path(sfile, rs_src_dstshare_id, dss, analysis)
+        remaining_share_ids = share_ids
 
-        elif dstshare_classes['remote']:
-            # need to rsync to INBOX (as it is guaranteed to be on an rsyncing capable
-            # controller (and sensitive classed)
-            rs_src_dstshare_id = ServerShare.objects.filter(function=ShareFunction.INBOX
-                    ).values('pk').first()['pk']
-            rs_src_dstpath = get_path(sfile, rs_src_dstshare_id, dss, analysis)
-
-        else:
-            return JsonResponse({'error': 'There is no copy of a file on a storage server which '
-                'can be reached, or maybe the servers are not correctly registered'}, status=400)
-
-        rs_src_job = create_job('rsync_otherfiles_to_servershare', sfloc_id=existing_shares[0][0],
-                    dstshare_id=rs_src_dstshare_id, dstpath=rs_src_dstpath)
-        src_sfl_id = rs_src_job['kwargs']['dstsfloc_id']
-        remaining_share_ids = [x for x in share_ids if x != rs_src_job['kwargs']['dstshare_id']]
-
-    # Now distribute to remaining dst shares
-    rsync_shares =  [x for x in remaining_share_ids if x not in [x[1] for x in existing_shares]]
-    for share_id in rsync_shares:
-        dstpath = get_path(sfile, share_id, dss, analysis)
-        create_job('rsync_otherfiles_to_servershare', sfloc_id=src_sfl_id, dstshare_id=share_id,
-                dstpath=dstpath)
+    # Rsync/up/download file to destinations
+    existing_sfl = sfile.storedfileloc_set.filter(active=True, servershare__active=True)
+    src_share_ids = [x['servershare_id'] for x in existing_sfl.values('servershare_id')]
+    dstpaths = {dpk: get_path(sfile, dpk, dss, analysis) for dpk in remaining_share_ids}
+    if remaining_share_ids:
+        distribute_file_servershares(src_share_ids, existing_sfl, dstpaths)
 
     # Delete files from excluded shares
     if rm_sfls := sfile.storedfileloc_set.filter(active=True).exclude(servershare__in=share_ids):
@@ -1388,7 +1469,7 @@ def update_sfile_storage(request):
     # del_count is for user, do subtract the "deleted from inbox after retrieve from backup"
 
     return JsonResponse({'state': 'ok', 'msg': f'File with ID {data["item_id"]} queued for syncing '
-        f'to {len(rsync_shares) + retrieve_count} shares, and deletion from {del_count} shares'})
+        f'to {len(set(remaining_share_ids)) + retrieve_count} shares, and deletion from {del_count} shares'})
 
 
 @login_required
@@ -1449,13 +1530,14 @@ def delete_file(request):
             sflocid = sfl_q_bup.values('pk').first()['pk']
         else:
             # First move file to inbox before doing a backup as it is not available
+            # FIXME also consider it may need to be uploaded instead of rsynced
             sflocid = sfloc_q.values('pk').first()['pk']
-            inbox = ServerShare.objects.filter(function=ShareFunction.INBOX, active=True).values(
-                    'pk').first()
+            inbox = ServerShare.objects.filter(function=ShareFunction.INBOX, active=True,
+                    fileservershare__server__can_backup=True).values('pk').first()
             inboxpath = ServerShare.get_inbox_path(dset_id=dset_id, analysis_id=analysis_id)
-            rsjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflocid,
+            rsjob = create_job('rsync_files_to_servershare', sfloc_ids=[sflocid],
                     dstpath=inboxpath, dstshare_id=inbox['pk'])
-            sflocid = rsjob['kwargs']['dstsfloc_id']
+            sflocid = rsjob['kwargs']['dstsfloc_ids'][0]
         create_job('create_pdc_archive', sfloc_id=sflocid, isdir=sfile.filetype.is_folder)
     # sfloc is set to purged=True in the post-job-view for purge
     sfile.deleted = True
