@@ -1600,7 +1600,7 @@ def unfreeze_analysis(request):
 
 @login_required
 def serve_analysis_file(request, sfl_id):
-    fss_download = filemodels.FileserverShare.objects.exclude(download_url='')
+    fss_download = rm.FileserverShare.objects.exclude(download_url='')
     try:
         sfl = rm.StoredFileLoc.objects.filter(pk=sfl_id, active=True, purged=False,
             servershare__fileservershare__in=fss_download).values('path', 'sfile__filename').get()
