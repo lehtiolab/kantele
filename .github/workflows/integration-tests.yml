@@ -66,7 +66,7 @@ jobs:
                 docker compose --env-file  src/docker/.compose.testing.env -f src/docker/docker-compose-testing.yml \
                   up --detach --wait db mq nginx web
                 docker compose --env-file  src/docker/.compose.testing.env -f src/docker/docker-compose-testing.yml \
-                  exec --use-aliases web python manage.py test --tag slow --exclude-tag mstulos --exclude-tag analysis --exclude-tag datasets --exclude-tag storage
+                  exec web python manage.py test --tag slow --exclude-tag mstulos --exclude-tag analysis --exclude-tag datasets --exclude-tag storage
 
     integration-tests-rest:
         runs-on: ubuntu-latest
@@ -98,7 +98,7 @@ jobs:
                 docker compose --env-file  src/docker/.compose.testing.env -f src/docker/docker-compose-testing.yml \
                   up --detach --wait db mq nginx web
                 docker compose --env-file  src/docker/.compose.testing.env -f src/docker/docker-compose-testing.yml \
-                  exec --use-aliases web python manage.py test --tag slow --exclude-tag home --exclude-tag mstulos
+                  exec web python manage.py test --tag slow --exclude-tag home --exclude-tag mstulos
 
     unit-tests:
         runs-on: ubuntu-latest

@@ -31,8 +31,8 @@ services:
                 condition: service_started
             storage_web_rsync:
                 condition: service_started
-            tulos_ingester:
-                condition: service_started
+                  #tulos_ingester:
+                  #    condition: service_started
             upload_bay_rsync:
                 condition: service_started
         extends:
@@ -111,7 +111,7 @@ services:
     # Storage controller actual SSH port lives in different container,
     # storage_ssh_1 since we need CMD service ssh start -D for that
     # this container and that one together represent the storage controller.
-    # Same goes for controller 2
+    # Same goes for controller 2, analysis storage controllers
     storage_queue_1:
         extends:
             file: ./docker-compose-dev.yml

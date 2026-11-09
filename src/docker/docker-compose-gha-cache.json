@@ -14,21 +14,24 @@
 		"cache-to": ["type=registry,ref=ghcr.io/lehtiolab/kantele-mq:cache"],
 		"output": ["type=docker"]
 	},
-	"storage_mvfiles": {
+	"nginx": {
+		"cache-from": ["type=registry,ref=ghcr.io/lehtiolab/kantele-nginx:cache"],
+		"cache-to": ["type=registry,ref=ghcr.io/lehtiolab/kantele-nginx:cache"],
+		"output": ["type=docker"]
+	},
+
+	"storage_queue_1": {
 		"cache-from": ["type=registry,ref=ghcr.io/lehtiolab/kantele-stor:cache"],
 		"cache-to": ["type=registry,ref=ghcr.io/lehtiolab/kantele-stor:cache"],
 		"output": ["type=docker"]
 	},
-	"tulos_ingester": {
-		"cache-from": ["type=registry,ref=ghcr.io/lehtiolab/kantele-stor:cache"],
-		"cache-to": ["type=registry,ref=ghcr.io/lehtiolab/kantele-stor:cache"],
+
+	"analysis1": {
+		"cache-from": ["type=registry,ref=ghcr.io/lehtiolab/kantele-analysis:cache"],
+		"cache-to": ["type=registry,ref=ghcr.io/lehtiolab/kantele-analysis:cache"],
 		"output": ["type=docker"]
 	},
-	"storage_downloads": {
-		"cache-from": ["type=registry,ref=ghcr.io/lehtiolab/kantele-stor:cache"],
-		"cache-to": ["type=registry,ref=ghcr.io/lehtiolab/kantele-stor:cache"],
-		"output": ["type=docker"]
-	},
+
 	"upload_bay_rsync": {
 		"cache-from": ["type=registry,ref=ghcr.io/lehtiolab/kantele-rsync:cache"],
 		"cache-to": ["type=registry,ref=ghcr.io/lehtiolab/kantele-rsync:cache"],
