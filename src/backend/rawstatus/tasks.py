@@ -13,13 +13,15 @@ from urllib.parse import urljoin, urlsplit
 from time import sleep
 from datetime import datetime
 from tempfile import NamedTemporaryFile, TemporaryDirectory
+from requests_toolbelt.multipart.encoder import MultipartEncoder
+from stream_unzip import stream_unzip
 
 from django.urls import reverse
 
 from kantele import settings
-from celery import shared_task
+from celery import shared_task, states
 from celery.exceptions import MaxRetriesExceededError
-from jobs.post import update_db, taskfail_update_db
+from jobs.post import update_db, taskfail_update_db, get_session_cookies
 
 
 def calc_sha1(fnpath):
@@ -174,8 +176,7 @@ def rsync_files_to_servershares(self, src_user, srcserver_url, srcpath, dst_user
                 raise
     # Do not delete files afterwards, as that cannot be done when they live on a different
     # controller server
-
-    # report finished
+    # Now report task is finished
     fnpostdata = {'sfloc_ids': upd_sfl_ids, 'dst_path': dstpath, 'client_id': settings.APIKEY,
             'task': self.request.id}
     fnurl = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
@@ -262,6 +263,122 @@ def rsync_transfer_file_web(self, sfloc_id, srcpath, dstsharepath, dstpath, dsts
             #update_db(url, json=postdata, msg=msg)
             raise
     print(msg)
+
+
+@shared_task(bind=True)
+def download_files_to_servershare(self, dstbasepath, dstpath, src_dst_sfloc_ids_fns):
+    '''Download file over HTTP to some server share that we cannot rsync-push to
+
+    dstbasepath: mount path of share on server, e.g. /mnt/storage
+    dstpath: storage path of file, e.g. project/experiment/file.raw
+    src_dst_sfloc_ids_fns: [(srcpk, dstpk, md5 of file, is file a folder (unzip)), ...]
+    '''
+    upd_url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
+    for src_sfl_pk, fname, dst_sfl_pk, md5_check, is_dir_stable_fn in src_dst_sfloc_ids_fns:
+        urlpath = reverse("files:download_to_share", kwargs={'sfloc_id': src_sfl_pk, 'task_id': self.request.id})
+        dl_url = urljoin(settings.KANTELEHOST, urlpath)
+        dighash = hashlib.md5()
+        basedst_path = os.path.join(dstbasepath, dstpath)
+        dst = os.path.join(basedst_path, fname)
+        os.makedirs(basedst_path, exist_ok=True) # e.g path/to/dset
+        with requests.get(dl_url, stream=True) as req, TemporaryDirectory(dir=basedst_path) as tmp_unzip:
+            if req.status_code == 500:
+                taskfail_update_db(self.request.id, 'Server error 500. Could not download file '
+                                   f'{fname}, contact admin')
+                return
+            elif req.status_code != 200:
+                msg = req.json()
+                taskfail_update_db(self.request.id, f'Could not download file {fname}: {msg}')
+                return
+            else:
+                # Do everything in a tmp workdir
+                tmp_result = os.path.join(tmp_unzip, fname)
+                if is_dir_stable_fn: # is False, [], or e.g ['analysis_tdf.bin']
+                    # Unzip in case there is a file inside that we need the md5 of
+                    ch_to_mode = 0o755
+                    os.makedirs(tmp_result)
+                    for file_name_bytes, file_size, unzipped_chunks in stream_unzip(req.iter_content(chunk_size=65536)):
+                        file_name = file_name_bytes.decode('utf-8')
+                        subfn = os.path.join(tmp_result, file_name)
+                        with open(subfn, 'wb+') as fp:
+                            for chunk in unzipped_chunks:
+                                fp.write(chunk)
+                                if file_name in is_dir_stable_fn[0]:
+                                    dighash.update(chunk)
+                else:
+                    # No predictable file inside zipped folder if any, so we instead do MD5 on
+                    # entire zipped folder or non-zipped file which is downloaded.
+                    ch_to_mode = 0o644
+                    with open(tmp_result, 'wb+') as fp:
+                        for chunk in req.iter_content(chunk_size=65536):
+                            if chunk:
+                                fp.write(chunk)
+                            dighash.update(chunk)
+                dighash = dighash.hexdigest() 
+                if dighash == md5_check:
+                    shutil.move(tmp_result, dst)
+                    os.chmod(dst, ch_to_mode)
+                    postdata = {'sfloc_id': dst_sfl_pk, 'dst_path': dstpath,
+                            'client_id': settings.APIKEY, 'task_id': self.request.id}
+                    update_db(upd_url, json=postdata)
+                else:
+                    try:
+                        self.retry(countdown=60)
+                    except MaxRetriesExceededError as e:
+                        # Possibly write or network error
+                        taskfail_update_db(self.request.id, 'Could not download or write file '
+                            f'{fname}: {e}')
+                        raise
+    taskurl = urljoin(settings.KANTELEHOST, reverse('jobs:settask'))
+    update_db(taskurl, json={'client_id': settings.APIKEY, 'task_id': self.request.id,
+        'state': states.SUCCESS})
+
+
+@shared_task(bind=True)
+def upload_files_to_inbox(self, base_srcpath, inbox_fss, fn_dstsfls):
+    '''Upload file over HTTP to inbox share
+
+    dstbasepath: mount path of share on server, e.g. /mnt/storage
+    dstpath: storage path of file, e.g. project/experiment/file.raw
+    src_dst_sfloc_ids_fns: [(srcpk, dstpk, md5 of file, is file a folder (unzip)), ...]
+    '''
+    for fname, src_sfl_pk, dst_sfl_pk, is_dir in fn_dstsfls:
+        url = urljoin(settings.KANTELEHOST, reverse('files:upload_to_inbox'))
+        stddata = {'task': self.request.id, 'srcsfl_id': f'{src_sfl_pk}', 'dstsfl_id': f'{dst_sfl_pk}', 'in_fss': f'{inbox_fss}'}
+        fpath = os.path.join(base_srcpath, fname)
+        session, headers = get_session_cookies()
+        if is_dir:
+            # Zip the file if it is a dir, like .d
+            with TemporaryDirectory() as tmpdir:
+                archive = os.path.join(tmpdir, fname)
+                zipfile = shutil.make_archive(archive, 'zip', fpath)
+                with open(zipfile, 'rb') as fp:
+                    stddata['file'] = (zipfile, fp)
+                    mpedata = MultipartEncoder(fields=stddata)
+                    headers['Content-Type'] = mpedata.content_type
+                    req = session.post(url, data=mpedata, headers=headers)
+        else:
+            with open(fpath, 'rb') as fp:
+                stddata['file'] = (fname, fp)
+                # MultipartEncoder from requests_toolbelt can stream large files, unlike requests (2024)
+                mpedata = MultipartEncoder(fields=stddata)
+                headers['Content-Type'] = mpedata.content_type
+                req = session.post(url, data=mpedata, headers=headers)
+
+        if req.status_code == 500:
+            taskfail_update_db(self.request.id, 'Server error 500. Could not upload file '
+                               f'{fname}, contact admin')
+            return
+        elif req.status_code != 200:
+            msg = req.json()
+            try:
+                self.retry(countdown=60)
+            except MaxRetriesExceededError:
+                taskfail_update_db(self.request.id, f'Could not upload file {fname}: {msg}')
+                return
+    taskurl = urljoin(settings.KANTELEHOST, reverse('jobs:settask'))
+    update_db(taskurl, json={'client_id': settings.APIKEY, 'task_id': self.request.id,
+        'state': states.SUCCESS})
 
 
 @shared_task(bind=True)

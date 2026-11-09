@@ -21,4 +21,7 @@ urlpatterns = [
    path('datainflow/', views.inflow_page, name='inflow'),
    path('datainflow/download/', views.download_instrument_package),
    path('classifiedraw/', views.classified_rawfile_treatment, name='classifiedraw'),
+   path('downloadfile/<int:sfloc_id>/<str:task_id>/', views.download_file_to_share,
+        name='download_to_share'),
+   path('upload/inbox/', views.upload_file_to_inbox, name='upload_to_inbox'),
 ]

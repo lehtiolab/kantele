@@ -6,7 +6,7 @@ from datetime import timedelta
 from unittest import TestCase
 
 from django.contrib.auth.models import User
-from django.test import TestCase, LiveServerTestCase, Client
+from django.test.testcases import TestCase, LiveServerTestCase, Client, LiveServerThread, QuietWSGIRequestHandler
 from django.utils import timezone
 from django.core.management import call_command
 from django.test import tag
@@ -159,7 +159,7 @@ class BaseTest(TestCase):
         # Important, the md5 here is fake, since the raw fn3 is also used in actual transfer
         # of a new file in tests
         self.f3raw = rm.RawFile.objects.create(name=fn3, producer=self.prod,
-                source_md5='f3_fakemd5',
+                source_md5='1eab409e2965943f52df8e3c63874d5b',
                 size=f3size, date=timezone.now(), claimed=True, usetype=rm.UploadFileType.RAWFILE)
         self.f3dsr = dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=self.f3raw)
         self.f3sf = rm.StoredFile.objects.create(rawfile=self.f3raw, filename=fn3,
@@ -188,7 +188,7 @@ class BaseTest(TestCase):
         self.pwiz = am.Proteowizard.objects.create(version_description='pwversion desc1',
                 params={'mzmltool': 'msconvert'}, nf_version=self.nfwv)
         self.f3sfmz = rm.StoredFile.objects.create(rawfile=self.f3raw, filename=f'{os.path.splitext(fn3)[0]}.mzML',
-                md5='md5_for_f3sf_mzml', filetype=self.ft, checked=True)
+                md5='c279f7cbdb49e089e662abd334ee201a', filetype=self.ft, checked=True)
         self.f3mzsss = rm.StoredFileLoc.objects.create(sfile=self.f3sfmz, servershare=self.ssnewstore,
                 path=self.storloc, active=True, purged=False)
         self.f3mzml = am.MzmlFile.objects.create(sfile=self.f3sfmz, pwiz=self.pwiz)
@@ -197,7 +197,7 @@ class BaseTest(TestCase):
         nfc_ft = rm.StoredFileType.objects.create(name='nfconfig', filetype='txt',
                 is_rawdata=False, user_uploadable=True)
         nfcraw = rm.RawFile.objects.create(name='nf.config', producer=self.adminprod,
-                source_md5='nfcfilemd5', size=100, claimed=True, date=timezone.now(), usetype=rm.UploadFileType.LIBRARY)
+                source_md5='d41d8cd98f00b204e9800998ecf8427e', size=100, claimed=True, date=timezone.now(), usetype=rm.UploadFileType.LIBRARY)
         self.sfnfc = rm.StoredFile.objects.create(rawfile=nfcraw, md5=nfcraw.source_md5,
                 filetype=nfc_ft, checked=True, filename=nfcraw.name)
         self.nfc_loc = rm.StoredFileLoc.objects.create(sfile=self.sfnfc, servershare=self.sslib,
@@ -238,15 +238,16 @@ class BaseTest(TestCase):
         self.olddsuser = dm.DatasetOwner.objects.create(dataset=self.oldds, user=self.user)
         self.oldfpath = os.path.join(self.oldstorctrl.path, self.oldstorloc)
         oldsize = os.path.getsize(os.path.join(self.oldfpath, oldfn))
+        self.fileft = rm.StoredFileType.objects.create(name='testft_thermo', filetype='tstraw',
+                is_rawdata=True, is_folder=False, stablefiles=[])
         self.oldraw = rm.RawFile.objects.create(name=oldfn, producer=self.prod,
-                source_md5='old_to_new_fakemd5', size=oldsize, date=timezone.now(), claimed=True, usetype=rm.UploadFileType.RAWFILE)
+                source_md5='52416cc60390c66e875ee6ed8e03103a', size=oldsize, date=timezone.now(), claimed=True, usetype=rm.UploadFileType.RAWFILE)
         self.olddsr = dm.DatasetRawFile.objects.create(dataset=self.oldds, rawfile=self.oldraw)
         self.oldsf = rm.StoredFile.objects.create(rawfile=self.oldraw, filename=oldfn,
-                    md5=self.oldraw.source_md5, filetype=self.ft, checked=True)
+                    md5=self.oldraw.source_md5, filetype=self.fileft, checked=True)
         self.oldsss = rm.StoredFileLoc.objects.create(sfile=self.oldsf, servershare=self.analocalstor,
                 path=self.oldstorloc, active=True, purged=False)
         self.oldqsf = dm.QuantSampleFile.objects.create(rawfile=self.olddsr, projsample=self.projsam2)
-
         # Tmp rawfile inbox
         tmpfn = 'raw2'
         tmpfpathfn = os.path.join(self.inboxctrl.path, tmpfn)
@@ -310,15 +311,33 @@ class ProcessJobTest(BaseTest):
             self.assertIn(t, expected_tasks)
 
 
+class LiveServerThreadWithReuse(LiveServerThread):
+    """ _create_server with port reuse, to try and not have "address already in use"
+    problem in tests
+    See: https://stackoverflow.com/questions/20619846/djangos-liveservertestcase-always-fails-due-to-conflicting-address-despite-a
+    """
+    def _create_server(self, connections_override=None):
+        return self.server_class(
+            (self.host, self.port),
+            QuietWSGIRequestHandler,
+            allow_reuse_address=True,
+            connections_override=connections_override,
+        )
+
+
 @tag('slow')
 class BaseIntegrationTest(LiveServerTestCase):
     # use a live server so that jobrunner can interface with it (otherwise only dummy
     # test client can do that)
-    port = 80
+    port = 8010 ## 8009 is already used in container CMD, and this is an exec that runs django manage.py
     host = '0.0.0.0'
     jobrun_timeout = 2
+    maxDiff = None
+    server_thread_class = LiveServerThreadWithReuse
 
     def setUp(self):
+        # Do all setup work of DB stuff as in BaseTest
+        # live server stuff is done in setUpClass
         BaseTest.setUp(self)
 
     def post_json(self, data):

@@ -19,6 +19,16 @@ services:
                 USER_ID: "${USER_ID:-You must run export USER_ID}"
                 GROUP_ID: "${GROUP_ID:-You must run export GROUP_ID}"
 
+    nginx:
+        image: kantele_nginx
+        build:
+            context: ./src
+            dockerfile: ./docker/Dockerfile
+            target: nginx_build
+            args:
+                USER_ID: "${USER_ID:-You must run export USER_ID}"
+                GROUP_ID: "${GROUP_ID:-You must run export GROUP_ID}"
+
     db:
         image: postgres:17.5
 

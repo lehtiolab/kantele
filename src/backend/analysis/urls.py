@@ -20,7 +20,6 @@ urlpatterns = [
     path('workflow/', views.get_workflow_versioned),
     path('logappend/', views.append_analysis_log, name='appendlog'),
     path('nflogappend/', views.nextflow_analysis_log, name='nflog'),
-    path('upload/', views.upload_servable_file, name='checkfileupload'),
     path('log/<int:ana_id>', views.show_analysis_log),
     path('showfile/<int:arf_id>', views.serve_analysis_file),
     path('find/datasets/', views.find_datasets),

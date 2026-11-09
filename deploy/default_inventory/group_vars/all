@@ -17,6 +17,10 @@ host_pgbackup_path: "{{ homedir }}/pgbackups"
 container_backuppath: /pgbackups
 compose_env_file: '{{ homedir }}/kantele/.compose.prod.env'
 
+# These are defined as "local storage" for non-external analysis node
+# and are also mounted read-only on web server 
+# storagedirs:
+# storageservers: 
 
 celeryenv_file: "{{ kanteledir }}/celery.env"
 kantelelogdir: "{{ kanteledir }}/log"
@@ -27,3 +31,5 @@ queue_web_rsync: web_rsync
 queue_dl: file_download
 queue_backup: backup_archive
 queue_scan: scaninbox
+
+syslog_adress: 'udp://{{ kantele_host }}:514'

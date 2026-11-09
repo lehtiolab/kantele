@@ -73,7 +73,7 @@
             # read content of file
             key: "{{ lookup('file', 'ssh_key_rsync.pub') }}"
 
-      - name: Create necessary folders for analysis serving, uploads
+      - name: Create necessary folders for uploads
         ansible.builtin.file:
             path: "{{ item }}"
             state: directory

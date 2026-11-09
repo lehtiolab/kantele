@@ -1,16 +1,17 @@
 # Upload paths in nginx container
-container_uploadpath: /uploads
+web_container_uploadpath: /uploads
 host_uploadpath: "{{ kanteledir }}/uploads"
-upload_path_url: /uploads
-
-# Analysis paths in nginx container
-container_analysispath: /analysisfiles
-host_analysispath: "{{ kanteledir }}/srv_analysis"
-analysis_path_url: /analysisfiles
 
 # Certbot
 host_certbot_path: "{{ kanteledir }}/certbot"
 rsa_key_size: 4096
+
+# Examples downloading raw files path in nginx container
+# format is - [path_on_host, path_on_nginx, url_on_nginx]
+# nginx_download_mounts:
+#   - ['/path/to/storage', '/downloads/storage', '/download_url/storage']
+#   - ['{{ host_uploadpath }}', '/downloads/uploads', '/download_url/up'] # first item is variable!
+#   - ['/path/to/library', '/downloads/library', '/download_url/lib']
 
 # For restoring backups
 pgdatadir: "{{ homedir }}/pgdata"

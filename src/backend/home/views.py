@@ -23,7 +23,7 @@ from analysis import views as av
 from analysis import jobs as aj
 from datasets import models as dm
 from datasets import jobs as dsjobs
-from datasets.views import check_ownership, get_dset_storestate, fill_sampleprepparam, populate_proj
+from datasets.views import check_ownership, get_dset_storestate, fill_sampleprepparam, populate_proj, distribute_dset_files
 from rawstatus import models as filemodels
 from jobs import jobs as jj
 from jobs import views as jv
@@ -788,8 +788,11 @@ def get_analysis_info(request, anid):
     dsicount = anmodels.AnalysisDSInputFile.objects.filter(dsanalysis__analysis=ana).count()
     storeloc = filemodels.StoredFileLoc.objects.filter(sfile__analysisresultfile__analysis=ana
             ).values('servershare__name', 'path')
-    linkedfiles = [(x.id, x.sfile.filename) for x in av.get_servable_files(
-        ana.analysisresultfile_set.select_related('sfile'))]
+    fss_download = filemodels.FileserverShare.objects.exclude(download_url='')
+    linkedfiles = [(x['pk'], x['sfile__filename']) for x in
+        filemodels.StoredFileLoc.objects.filter(sfile__filename__in=settings.SERVABLE_FILENAMES,
+        sfile__analysisresultfile__analysis=ana,
+        purged=False, servershare__fileservershare__in=fss_download).values('pk', 'sfile__filename')]
     resp = {'nrdsets': len(dsets),
             'nrfiles': dsicount,
             'storage_locs': [{'share': x['servershare__name'], 'path': x['path']} for x in storeloc],
@@ -1179,31 +1182,17 @@ def create_mzmls(request):
             nfconfig_sfid=nfconfigver['nfservercfg__configincluder__sfile_id'])
     if mzjob['error']:
         pass
-    elif mzjob['kwargs'].get('dstsfloc_ids', False):
-        dstshare_ids_dss = {x.storageshare_id: x.pk for x in  dsmodels.DatasetServer.objects.filter(
-            dataset=dset, active=True)}
-        share_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
-                dstshare_ids_dss.keys(), anaprofile['server_id'])
-        # First put result in rsync-accessible share
-        for dstshare_id in share_classes['rsync_sourcable']:
-            srcjob = create_job('rsync_dset_files_to_servershare', dstshare_id=dstshare_id,
-                    dss_id=dstshare_ids_dss[dstshare_id],
-                    sfloc_ids=mzjob['kwargs']['dstsfloc_ids'])
-            src_sflids_for_remote = srcjob['kwargs']['dstsfloc_ids']
-        if share_classes['remote'] and not share_classes['rsync_sourcable']:
-            # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
-            # controller (and sensitive classed)
-            dstshare = filemodels.ServerShare.objects.filter(function=filemodels.ShareFunction.INBOX
-                    ).values('pk').first()
-            src_sflids_for_remote = []
-            for sflpk in mzjob['kwargs']['dstsfloc_ids']:
-                srcjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflpk,
-                        dstshare_id=dstshare['pk'], dstpath=filemodels.ServerShare.get_inbox_path(
-                            dset_id=dset.pk))
-                src_sflids_for_remote.append(srcjob['kwargs']['dstsfloc_id'])
-        for dstshare_id in share_classes['remote']:
-            create_job('rsync_dset_files_to_servershare', dss_id=dstshare_ids_dss[dstshare_id],
-                    sfloc_ids=src_sflids_for_remote, dstshare_id=dstshare_id)
+    elif produced_mzml := mzjob['kwargs'].get('dstsfloc_ids', False):
+        # Job outputs in analysis source data share, so rsync after if needed to datasets
+        # other active shares
+        existing_sfl = filemodels.StoredFileLoc.objects.filter(
+                sfile__storedfileloc__id__in=produced_mzml, active=True)
+        src_share_ids = [x['servershare_id'] for x in existing_sfl.values('servershare_id')]
+        # FIXME sotrgae_loc_ui or storage_loc
+        dstshare_ids_paths = {x.storageshare_id: x.storage_loc_ui for x in  dsmodels.DatasetServer.objects.filter(
+                dataset_id=dset.pk, active=True).exclude(storageshare__id__in=src_share_ids)}
+        distribute_dset_files(dset.pk, dset.securityclass, [source_ssid], existing_sfl, dstshare_ids_paths)
+
     return JsonResponse({})
 
 
@@ -1303,36 +1292,16 @@ def refine_mzmls(request):
         analysis.delete()
         return JsonResponse({'error': 'Error trying to create a refine dataset job: {job["error"]}'},
             status=400) 
-    elif job['kwargs'].get('dstsfloc_ids', False):
-        dstshare_ids_dss = {x.storageshare_id: x.pk for x in  dsmodels.DatasetServer.objects.filter(
-            dataset=dset, active=True)}
-        share_classes = filemodels.ServerShare.classify_shares_by_rsync_reach(
-                dstshare_ids_dss.keys(), anaprofile['server_id'])
-#        # First put result in local-to-analysis-server share
-#        for dstshare_id in share_classes['local']:
-#            local_rsjob = create_job('rsync_dset_files_to_servershare',
-#                    dss_id=dstshare_ids_dss[dstshare_id],
-#                    sfloc_ids=job['kwargs']['dstsfloc_ids'], dstshare_id=dstshare_id)
-        # Then put result in rsync-accessible share
-        for dstshare_id in share_classes['rsync_sourcable']:
-            srcjob = create_job('rsync_dset_files_to_servershare', dstshare_id=dstshare_id,
-                    dss_id=dstshare_ids_dss[dstshare_id], sfloc_ids=job['kwargs']['dstsfloc_ids'])
-            src_sflids_for_remote = srcjob['kwargs']['dstsfloc_ids']
-        if share_classes['remote'] and not share_classes['rsync_sourcable']:
-            # need to rsync to non-dset INBOX (as it is guaranteed to be on an rsyncing capable
-            # controller (and sensitive classed)
-            dstshare = filemodels.ServerShare.objects.filter(function=filemodels.ShareFunction.INBOX
-                    ).values('pk').first()
-            src_sflids_for_remote = []
-            for sflpk in job['kwargs']['dstsfloc_ids']:
-                srcjob = create_job('rsync_otherfiles_to_servershare', sfloc_id=sflpk,
-                        dstshare_id=dstshare['pk'], dstpath=filemodels.ServerShare.get_inbox_path(
-                            dset_id=dset.pk))
-                src_sflids_for_remote.append(srcjob['kwargs']['dstsfloc_id'])
-        for dstshare_id in share_classes['remote']:
-            create_job('rsync_dset_files_to_servershare', dss_id=dstshare_ids_dss[dstshare_id],
-                    sfloc_ids=src_sflids_for_remote, dstshare_id=dstshare_id)
-
+    elif produced_mzml := job['kwargs'].get('dstsfloc_ids', False):
+        # Job outputs in analysis source data share, so rsync after if needed to datasets
+        # other active shares
+        existing_sfl = filemodels.StoredFileLoc.objects.filter(
+                sfile__storedfileloc__id__in=produced_mzml, active=True)
+        src_share_ids = [x['servershare_id'] for x in existing_sfl.values('servershare_id')]
+        # FIXME sotrgae_loc_ui or storage_loc
+        dstshare_ids_paths = {x.storageshare_id: x.storage_loc_ui for x in  dsmodels.DatasetServer.objects.filter(
+                dataset_id=dset.pk, active=True).exclude(storageshare__id__in=src_share_ids)}
+        distribute_dset_files(dset.pk, dset.securityclass, [source_ssid], existing_sfl, dstshare_ids_paths)
     uwf = anmodels.UserWorkflow.objects.get(nfwfversionparamsets=data['wfid'],
             wftype=anmodels.UserWorkflow.WFTypeChoices.SPEC)
     anmodels.NextflowSearch.objects.update_or_create(analysis=analysis, defaults={

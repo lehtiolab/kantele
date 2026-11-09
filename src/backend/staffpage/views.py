@@ -42,7 +42,7 @@ def show_staffpage(request):
 
     # Populate servers
     servers = {x.pk: {f: getattr(x, f) for f in ['pk', 'name', 'uri', 'fqdn', 'active',
-        'can_backup', 'can_rsync_remote', 'rsyncusername', 'rsynckeyfile']}
+        'has_workers', 'can_backup', 'can_rsync_remote', 'rsyncusername', 'rsynckeyfile']}
         for x in rm.FileServer.objects.all()}
     [servers[x].update({'mounted': [], 'analysisprofiles': []}) for x in servers.keys()]
     for asp in rm.AnalysisServerProfile.objects.all():
@@ -50,9 +50,10 @@ def show_staffpage(request):
             'nfparams': json.dumps(asp.nfparams), 'queue_name': asp.queue_name, 'scratchdir': asp.scratchdir,
             'analysisoutshare_id': asp.analysisoutshare_id})
     for fss in rm.FileserverShare.objects.all().values('pk', 'share__name', 'share_id', 'path',
-            'server_id'):
+            'download_url', 'server_id'):
         servers[fss['server_id']]['mounted'].append({'fssid': fss['pk'],
-            'sharename': fss['share__name'], 'share': fss['share_id'], 'path': fss['path']})
+            'sharename': fss['share__name'], 'share': fss['share_id'], 'path': fss['path'],
+            'url': fss['download_url']})
 
     # Populate shares
     shares = [{f: getattr(x, f) for f in ['pk', 'name', 'max_security', 'description', 'active',
@@ -336,7 +337,7 @@ def save_server(request):
 
     for mount in data['mounted']:
         rm.FileserverShare.objects.update_or_create(server=fs, share_id=mount['share'],
-                defaults={'path': mount['path']})
+                    defaults={'path': mount['path'], 'download_url': mount['url']})
     rm.FileserverShare.objects.filter(server=fs).exclude(
             share_id__in=[x['share'] for x in data['mounted']]).delete()
 
@@ -368,6 +369,8 @@ def save_share(request):
         return JsonResponse({'state': 'error', 'msg': 'Invalid params passed'}, status=400)
     if data['pk']:
         # Deactivation does not save other attributes
+        # We do not mass-deactivate files on that servershare, since if the user clicks by mistake,
+        # or we take the share temporarily offline, we will not know which files to reactivate again.
         if not (ss := rm.ServerShare.objects.filter(pk=data['pk'])):
             return JsonResponse({'state': 'error', 'msg': 'No share for that query exists'}, status=404)
         if not data['active'] and ss.filter(active=True):

@@ -3,6 +3,7 @@ import sys
 from glob import glob
 import shutil
 from argparse import ArgumentParser
+from hashlib import md5
 
 p = ArgumentParser()
 p.add_argument('--raws')
@@ -27,10 +28,14 @@ with open('.nextflow.log', 'w') as fp:
 os.makedirs(args.outdir, exist_ok=True)
 
 # raws is a fn, or '*'
-for fn in glob(args.raws):
-    newfn = os.path.basename(f'{os.path.splitext(fn)[0]}.mzML')
-    newfnmd5 = f'{os.path.splitext(newfn)[0]}.md5'
-    with open(os.path.join(args.outdir, newfn), 'w') as fp:
-        fp.write(f'{newfn} mzML file')
-    with open(os.path.join(args.outdir, newfnmd5), 'w') as fp:
-        fp.write(f'{newfn} md5 file')
+for fnglob in args.raws.split(';'):
+    for fn in glob(fnglob):
+        newfn = os.path.basename(f'{os.path.splitext(fn)[0]}.mzML')
+        newfnmd5 = f'{os.path.splitext(newfn)[0]}.md5'
+        contents = f'{newfn} mzML file'
+        with open(os.path.join(args.outdir, newfn), 'w') as fp:
+            fp.write(contents)
+        dighash = md5(contents.encode('utf-8'))
+        with open(os.path.join(args.outdir, newfnmd5), 'w') as fp:
+            fp.write(dighash.hexdigest())
+            print(dighash.hexdigest())

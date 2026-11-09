@@ -170,7 +170,7 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertTrue(self.tmpraw.claimed)
         # execute dataset move on disk, should not move the added files on tmp (nor update their DB)
         self.run_job()
-        mvjob = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare').last()
+        mvjob = jm.Job.objects.filter(funcname='rsync_addfiles_dset').last()
         self.assertEqual(mvjob.state, Jobstates.PENDING)
         self.ds.refresh_from_db()
         self.dss.refresh_from_db()
@@ -232,10 +232,10 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertTrue(newdss.exists())
         newdss = newdss.get()
         self.assertTrue(dm.ProjectLog.objects.filter(message=f'User {self.user.pk} transferred dataset '
-                f'{self.ds.pk} to {self.analocalstor.name}({self.analocalstor.pk})').exists())
+                f'{self.ds.pk} to {self.analocalstor.name} ({self.analocalstor.pk})').exists())
 
         # execute dataset move on disk, should not move the added files on tmp (nor update their DB)
-        mvjob = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare').last()
+        mvjob = jm.Job.objects.filter(funcname='rsync_files_to_servershare').last()
         self.assertEqual(mvjob.state, Jobstates.PENDING)
         self.assertTrue(newsfl.exists())
         f3_newdsspath = os.path.join(self.oldstorctrl.path, newdss.storage_loc, self.f3sf.filename)
@@ -245,6 +245,131 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertEqual(mvjob.state, Jobstates.PROCESSING)
         # a new file should now exist in dset folder
         self.assertTrue(os.path.exists(f3_newdsspath))
+
+    def test_upload_file(self):
+        # Scenario: Dset is somehow only on an HPC share with 2FA ssh so we cant rsync it
+        # - thus it will HTTP upload instead to ssnewstore
+        # oldds / oldss is on analocalstor , we move it to ssnewstor
+
+        # webserver share for downloading storage raws, mounted on web
+        uploadshare = rm.ServerShare.objects.create(name='uploads', max_security=1,
+                function=rm.ShareFunction.INBOX)
+        webserver = rm.FileServer.objects.create(name='webserver', uri='web1.test',
+                fqdn='nginx', is_upload_server=True)
+        uploadss = rm.FileserverShare.objects.create(server=webserver,
+                share=uploadshare, path='/storage/uploads')
+        upload_ctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
+                share=uploadshare, path='/storage/uploads')
+
+        # Make sure it wont rsync
+        self.remoteanaserver.rsyncusername, self.remoteanaserver.rsynckeyfile = '', ''
+        self.remoteanaserver.save()
+
+        newdss = dm.DatasetServer.objects.filter(storageshare=self.ssnewstore, dataset=self.oldds)
+        newsfl = rm.StoredFileLoc.objects.filter(sfile=self.oldsf, servershare=self.ssnewstore)
+        self.assertFalse(newdss.exists())
+        self.assertFalse(newsfl.exists())
+        resp = self.post_json(data={'dataset_id': self.oldds.pk, 'project_id': self.oldp.pk,
+            'runname': self.oldrun.name, 'datatype_id': self.dtype.pk, 'prefrac_id': False,
+            'experiment_id': self.oldexp.pk, 'storage_shares': [self.ssnewstore.pk, self.analocalstor.pk],
+            'secclass': 1, 'externalcontact': self.contact.email})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(newdss.exists())
+        self.assertTrue(newsfl.exists())
+
+        self.olddss.refresh_from_db()
+        uploadpath = os.path.join(uploadss.path, 'datasets', f'{self.oldds.pk}', self.oldsf.filename)
+        newdsspath = os.path.join(self.newstorctrl.path, self.olddss.storage_loc_ui, self.oldsf.filename)
+        self.assertFalse(os.path.exists(uploadpath))
+        self.assertFalse(os.path.exists(newdsspath))
+
+        self.run_job() # rename (dtype included in storage_loc)
+        self.run_job() # http upload
+        self.assertTrue(os.path.exists(uploadpath))
+        self.assertFalse(os.path.exists(newdsspath))
+        self.run_job() # rsync to newstore
+        self.assertTrue(os.path.exists(newdsspath))
+        self.run_job() # purge from inbox
+        self.assertFalse(os.path.exists(uploadpath))
+        self.assertTrue(os.path.exists(newdsspath))
+
+    def test_upload_directory_and_mzml(self):
+        # Scenario: Dset is somehow only on an HPC share with 2FA ssh so we cant rsync it
+        # - thus it will HTTP upload instead to ssanalocalstore
+        # - then it HTTP download back to ssnewstore
+        # One of the files to transfer is a directory, so it tests that too
+
+        # webserver share for downloading storage raws, mounted on web
+        uploadshare = rm.ServerShare.objects.create(name='uploads', max_security=1,
+                function=rm.ShareFunction.INBOX)
+        webserver = rm.FileServer.objects.create(name='webserver', uri='web1.test',
+                fqdn='nginx', is_upload_server=True, has_workers=False)
+        uploadss = rm.FileserverShare.objects.create(server=webserver,
+                share=uploadshare, path='/storage/uploads', download_url='/task_downloads/uploads')
+        downloadnewstore = rm.FileserverShare.objects.create(server=webserver,
+                share=self.ssnewstore, path='/storage/newstorage',
+                download_url='/task_downloads/storage')
+        upload_ctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
+                share=uploadshare, download_url='/task_downloads/uploads', path='/storage/uploads')
+
+        # Make sure it wont rsync
+        self.newstorctrl.delete()
+        self.remoteanaserver.rsyncusername, self.remoteanaserver.rsynckeyfile = '', ''
+        self.remoteanaserver.save()
+
+        newdss = dm.DatasetServer.objects.filter(active=True, storageshare=self.analocalstor,
+                    dataset=self.ds)
+        newsfl = rm.StoredFileLoc.objects.filter(active=True, sfile=self.f3sf,
+                    servershare=self.analocalstor)
+        self.assertFalse(newdss.exists())
+        self.assertFalse(newsfl.exists())
+        resp = self.post_json(data={'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
+            'runname': self.run1.name, 'datatype_id': self.dtype.pk, 'prefrac_id': False,
+            'experiment_id': self.exp1.pk, 'storage_shares': [self.analocalstor.pk],
+            'externalcontact': '', 'secclass': 1})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(newdss.exists())
+        self.assertTrue(newsfl.exists())
+
+        resp = self.post_json(data={'dataset_id': self.ds.pk, 'project_id': self.p1.pk,
+            'runname': self.run1.name, 'datatype_id': self.dtype.pk, 'prefrac_id': False,
+            'experiment_id': self.exp1.pk, 'storage_shares': [self.ssnewstore.pk],
+            'externalcontact': '', 'secclass': 1})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(newdss.exists())
+        self.assertFalse(newsfl.exists())
+
+        old_newstorepath = os.path.join(self.newstorctrl.path, self.dss.storage_loc_ui, self.f3sf.filename)
+        uploadpath = os.path.join(uploadss.path, 'datasets', f'{self.ds.pk}', self.f3sf.filename)
+        newdsspath = os.path.join(self.oldstorctrl.path, self.dss.storage_loc_ui, self.f3sf.filename)
+        newmzmlpath = os.path.join(self.oldstorctrl.path, self.dss.storage_loc_ui, self.f3sfmz.filename)
+        self.assertFalse(os.path.exists(uploadpath))
+        self.assertFalse(os.path.exists(newdsspath))
+        self.assertFalse(os.path.exists(newmzmlpath))
+
+        # First download
+        self.assertFalse(os.path.exists(newdsspath))
+        self.assertFalse(os.path.exists(newmzmlpath))
+        self.run_job() # download from newstore to analocalstor
+        self.assertTrue(os.path.exists(old_newstorepath))
+        self.assertTrue(os.path.exists(newdsspath))
+        self.assertTrue(os.path.exists(newmzmlpath))
+        self.run_job() # rm dset dss from newstore
+        self.assertFalse(os.path.exists(old_newstorepath))
+        self.assertTrue(os.path.exists(newdsspath))
+        self.assertTrue(os.path.exists(newmzmlpath))
+        
+        # Now upload to get it back
+        self.run_job() # upload http to inbox
+        self.assertTrue(os.path.exists(uploadpath))
+        self.run_job() # rsync to ssnewstore
+        self.assertTrue(os.path.exists(old_newstorepath))
+        self.run_job() # purge from inbox
+        self.assertFalse(os.path.exists(uploadpath))
+        self.run_job() # rm dss from analocalstor
+        self.assertTrue(os.path.exists(old_newstorepath))
+        self.assertFalse(os.path.exists(newdsspath))
+        self.assertFalse(os.path.exists(newmzmlpath))
 
 
 class FindFilesTest(BaseTest):
@@ -419,7 +544,7 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
         self.tmpraw.save()
         self.newsfl = rm.StoredFileLoc.objects.create(sfile=self.tmpsf, path=self.dss.storage_loc,
                 servershare=self.dss.storageshare) 
-        jm.Job.objects.create(funcname='rsync_dset_files_to_servershare', state=Jobstates.HOLD,
+        jm.Job.objects.create(funcname='rsync_addfiles_dset', state=Jobstates.HOLD,
                 kwargs={'dss_id': self.dss.pk, 'dstsfloc_ids': [self.newsfl.pk],
                     'dstshare_id': self.ssnewstore.pk, 'sfloc_ids': [self.tmpsss.pk]},
                 timestamp=timezone.now())
@@ -475,7 +600,7 @@ class AcceptRejectPreassocFiles(BaseIntegrationTest):
                 purged=False, active=True)
         rejdstsfl = rm.StoredFileLoc.objects.create(sfile=rejsf, servershare=self.ssnewstore,
                 path=self.dss.storage_loc)
-        jm.Job.objects.create(funcname='rsync_dset_files_to_servershare', state=Jobstates.HOLD,
+        jm.Job.objects.create(funcname='rsync_addfiles_dset', state=Jobstates.HOLD,
                 kwargs={'dss_id': self.dss.pk, 'dstsfloc_ids': [rejdstsfl.pk],
                     'dstshare_id': self.ssnewstore.pk, 'sfloc_ids': [rejsfl.pk]},
                 timestamp=timezone.now())
@@ -615,7 +740,7 @@ class UpdateProjectTest(BaseIntegrationTest):
         self.assertTrue(os.path.exists(os.path.join(self.newstorctrl.path,
             self.dss.storage_loc, self.f3sf.filename)))
         # Check if added files are not there yet, being waited
-        mvjob = jm.Job.objects.filter(funcname='rsync_dset_files_to_servershare').last()
+        mvjob = jm.Job.objects.filter(funcname='rsync_addfiles_dset').last()
         self.assertEqual(mvjob.state, Jobstates.PENDING)
         self.assertEqual(self.tmpsss.servershare, self.ssinbox)
         self.assertEqual(self.tmpsss.path, '')
@@ -1400,6 +1525,27 @@ class TestReactivateDataset(BaseTest):
         self.assertEqual(resp.json()['error'], 'Dataset already in active storage')
 
     def test_ok(self):
+        # Dataset will be reactivated, jobs will be there for restore_from_pdc_archive
+        # and for distributing the dset.
+
+        # webserver share for downloading storage raws, mounted on nginx
+        webserver = rm.FileServer.objects.create(name='webserver', uri='web1.test',
+                fqdn='nginx')
+        websharestorage = rm.FileserverShare.objects.create(server=webserver,
+                share=self.ssnewstore, download_url='/task_downloads/storage')
+
+        # Data server which can only download and not rsync:
+        dlserver = rm.FileServer.objects.create(name='download', uri='dl.test',
+                fqdn='dl_http_1', rsyncusername='', rsynckeyfile='')
+        dlshare = rm.ServerShare.objects.create(name='dlshare', max_security=1,
+                function=rm.ShareFunction.RAWDATA, maxdays_data=1)
+        dlctrl = rm.FileserverShare.objects.create(server=dlserver, share=dlshare,
+                path=os.path.join(self.rootdir, 'dlshare'))
+
+        # Our dataset on download server
+        dss2path = 'testdss2'
+        dss2 = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=dlshare,
+                storage_loc_ui=dss2path, storage_loc=dss2path, startdate=timezone.now(), active=False)
         dm.DatasetRawFile.objects.create(dataset=self.ds, rawfile=self.tmpraw)
         self.ds.deleted = True
         self.ds.save()
@@ -1416,13 +1562,17 @@ class TestReactivateDataset(BaseTest):
         rm.PDCBackedupFile.objects.create(storedfile=self.f3sf, pdcpath=self.f3sf.md5, success=True)
         rm.PDCBackedupFile.objects.create(storedfile=self.tmpsf, pdcpath=self.tmpsf.md5, success=True)
         resp = self.cl.post(self.url, content_type='application/json',
-                data={'dataset_id': self.ds.pk, 'storage_shares': [self.ssnewstore.pk]})
+                data={'dataset_id': self.ds.pk, 'storage_shares': [self.ssnewstore.pk, dlshare.pk]})
+        # Refresh so we get the new storage loc (it changes automatically to prefrac which
+        # was not in there before
+        self.dss.refresh_from_db()
+
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(dm.ProjectLog.objects.last().message,
                 f'User {self.user.pk} reactivated dataset {self.ds.pk}')
 
         jobs = jm.Job.objects.all()
-        self.assertEqual(jobs.count(), 3)
+        self.assertEqual(jobs.count(), 4)
         jobs = jm.Job.objects.all().iterator()
         bupjob = next(jobs)
         self.assertEqual(bupjob.funcname, 'reactivate_dataset')
@@ -1432,11 +1582,18 @@ class TestReactivateDataset(BaseTest):
         self.assertCountEqual(bupjob.kwargs['sfloc_ids'], bupsfl)
 
         rsjob = next(jobs)
-        self.assertEqual(rsjob.funcname, 'rsync_dset_files_to_servershare')
-        self.assertEqual(rsjob.kwargs['dss_id'], self.dss.pk)
+        self.assertEqual(rsjob.funcname, 'rsync_files_to_servershare')
+        self.assertEqual(rsjob.kwargs['dstpath'], self.dss.storage_loc_ui)
         self.assertCountEqual(rsjob.kwargs['sfloc_ids'], bupsfl)
         dstsfls = [x['pk'] for x in dsfiles.filter(servershare=self.ssnewstore).values('pk')]
         self.assertEqual(sorted(rsjob.kwargs['dstsfloc_ids']), sorted(dstsfls))
+
+        dljob = next(jobs)
+        self.assertEqual(dljob.funcname, 'download_files_to_servershare')
+        self.assertEqual(dljob.kwargs['dstpath'], self.dss.storage_loc_ui)
+        self.assertCountEqual(dljob.kwargs['sfloc_ids'], rsjob.kwargs['dstsfloc_ids'])
+        dl_dstsfls = [x['pk'] for x in dsfiles.filter(servershare=dlshare).values('pk')]
+        self.assertEqual(sorted(dljob.kwargs['dstsfloc_ids']), sorted(dl_dstsfls))
 
         rmjob = next(jobs)
         self.assertEqual(rmjob.funcname, 'remove_dset_files_servershare')

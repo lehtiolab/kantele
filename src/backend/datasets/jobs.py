@@ -27,7 +27,7 @@ class RenameDatasetStorageLoc(DatasetJob):
         # Error check too many src locations for dataset:
         if srcloc.count() > 1:
             raise RuntimeError('Dataset source files are spread over more than one location, please '
-                    'contact admin to make sure files are consolicated before renaming path')
+                    'contact admin to make sure files are consolidated before renaming path')
 
         elif srcloc.count():
             srcloc = srcloc.get()
@@ -44,11 +44,12 @@ class RenameDatasetStorageLoc(DatasetJob):
 
 
 class RsyncDatasetServershare(DatasetJob):
-    '''Moves files associated to a dataset to another servershare, in one task.
+    '''Adds files to a dataset on a servershare, in one task.
     After all the files are done, update dset.storage_loc
     - dss_id is TARGET (destination) datasetserver, some files do not come from a dset
+      needed for setting path on created files, and error checks
     '''
-    refname = 'rsync_dset_files_to_servershare'
+    refname = 'rsync_addfiles_dset'
     queue = False
     task = filetasks.rsync_files_to_servershares
 
@@ -115,10 +116,11 @@ class RsyncDatasetServershare(DatasetJob):
         # FIXME move to error checker
         if srcloc.count() > 1:
             raise RuntimeError('Dataset source files are spread over more than one location, please '
-                    'contact admin to make sure files are consolicated before sync to a new location')
+                    'contact admin to make sure files are consolidated before sync to a new location')
         dstshare = ServerShare.objects.values('pk', 'name').get(pk=kwargs['dstshare_id'])
         dst_dss = DatasetServer.objects.values('storage_loc', 'storageshare_id').get(pk=kwargs['dss_id'])
         # Check if target sflocs already exist in a nonpurged state in wrong path?
+        # FIXME this looks wrong, use storage_loc_ui?
         or_wrongloc_q = Q(path=dst_dss['storage_loc']) | Q(servershare_id=dstshare['pk'])
         all_dstsfs = StoredFileLoc.objects.filter(pk__in=kwargs['dstsfloc_ids']) 
         if all_dstsfs.filter(purged=False).exclude(or_wrongloc_q).exists():
@@ -154,6 +156,8 @@ class RemoveDatasetFilesFromServershare(DatasetJob):
     queue = False
     task = filetasks.delete_file
 
+    # FIXME maybe replace this with the rawstatus job
+
     def update_sourcefns_lastused(self, **kwargs):
         '''Normally this updates timestamp on files, but since they
         get deleted here, we do nothing'''
@@ -178,8 +182,11 @@ class RemoveDatasetFilesFromServershare(DatasetJob):
         fields = ['servershare__name', 'path', 'sfile__filename', 'pk', 'sfile__mzmlfile',
                 'sfile__filetype__is_folder', 'servershare__pk']
         for sfl in srcsfs.values(*fields):
+            # Have to exclude is_upload_server since we dont run queue workers on the web
+            # node, but it has an inbox mounted for uploads (e.g. for delete files jobs from inbox)
             fss = FileserverShare.objects.filter(share=sfl['servershare__pk'], server__active=True,
-                    share__active=True).values('server__name', 'path').first()
+                    server__is_upload_server=False, share__active=True).values(
+                    'server__name', 'path').first()
             queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_FASTSTORAGE)
             if sfl['sfile__mzmlfile'] is not None:
                 is_folder = False
@@ -209,7 +216,7 @@ class ConvertDatasetMzml(DatasetJob):
                 pk=kwargs['dss_id'])
         anasrcshareonserver = FileserverShare.objects.filter(server_id=kwargs['server_id'],
                 server__active=True, share__active=True,
-                share_id=dss['storageshare_id']).values('share_id', 'path').first()
+                share_id=dss['storageshare_id']).values('path').first()
 
         runpath = f'{dss["dataset_id"]}_convert_mzml_{kwargs["timestamp"]}'
 
@@ -217,7 +224,7 @@ class ConvertDatasetMzml(DatasetJob):
         for sfl in self.oncreate_getfiles_query(**kwargs):
             mzmlfilename = os.path.splitext(sfl.sfile.filename)[0] + '.mzML'
             mzsfl = get_or_create_mzmlentry(sfl.sfile, pwiz=pwiz, refined=False, path=dss['storage_loc'],
-                    servershare_id=anasrcshareonserver['share_id'], mzmlfilename=mzmlfilename)
+                    servershare_id=dss['storageshare_id'], mzmlfilename=mzmlfilename)
             if mzsfl:
                 dst_sfls.append(mzsfl.pk)
             else:
@@ -289,14 +296,13 @@ class DeleteDatasetPDCBackup(DatasetJob):
 
 
 def get_or_create_mzmlentry(sfile, pwiz, refined, servershare_id, path, mzmlfilename):
-    '''Called when creating mzML files, will return (sfile, sfloc) tuple. The sfl will
+    '''Called when creating mzML files, will return sfloc. The sfloc will
     be on an analysis output servershare with an analysis runpath.
     '''
     fake_md5 = f'mzml_pw{pwiz.pk}_refined:{refined}_raw{sfile.rawfile_id}'
     mzsf, cr = StoredFile.objects.get_or_create(mzmlfile__pwiz=pwiz, mzmlfile__refined=refined,
             rawfile_id=sfile.rawfile_id, filetype_id=sfile.filetype_id, defaults={'md5': fake_md5,
                 'filename': mzmlfilename})
-
 
     # Update sfl path if old (inactive) exists, since new job -> new runpath
     # Do not set active here, first check if that is already the case below, to detect
