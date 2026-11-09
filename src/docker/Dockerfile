@@ -74,9 +74,9 @@ RUN wget https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.43/pcr
     make && \
     make install
 # Build zlib
-RUN wget http://zlib.net/zlib-1.3.2.tar.gz && \
-    tar -zxf zlib-1.3.2.tar.gz && \
-    cd zlib-1.3.2 && \
+RUN wget https://zlib.net/zlib-1.4.tar.gz && \
+    tar -zxf zlib-1.4.tar.gz && \
+    cd zlib-1.4 && \
     ./configure && \
     make && \
     make install
@@ -91,7 +91,7 @@ RUN cd nginx-${NGINX_VERSION} && ./configure \
     --error-log-path=/var/logs/error.log \
     --http-log-path=/var/logs/access.log \
     --with-pcre=../pcre2-10.43 \
-    --with-zlib=../zlib-1.3.2 \
+    --with-zlib=../zlib-1.4 \
     --with-http_ssl_module \
     --with-stream \
     --add-module=../mod_zip && make && make install

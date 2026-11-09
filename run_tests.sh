@@ -33,6 +33,12 @@ $DOCKERCMD run -T web pylint -E --disable E1101,E0307 --ignore-paths '.*\/migrat
 echo Linting OK
 
 echo Prebuilding DB and MQ containers
+# We must bring up nginx since that doesnt go with docker run web. Nginx requires the web
+# backend to be up or it wont start. But it doesnt seem to matter which port the initial
+# backend is running on (maybe only checks host, because it could be multiple ports outside
+# of nginx knowledge?)
+# Need to stop web as well or tests will not work with docker run
+# With docker exec, it works though
 $DOCKERCMD up --detach --wait db mq web nginx
 echo db and mq ready
 
