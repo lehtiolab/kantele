@@ -119,7 +119,7 @@ def run_nextflow(run, params, baseoutdir, gitwfdir, nf_version, scratchdir):
         stdout, stderr = nxf_sub.communicate()
     except exceptions.SoftTimeLimitExceeded:
         # celery has killed the job (task revoked) make sure nextflow is stopped and not left
-        nxf_sub.kill()
+        nxf_sub.terminate()
         print('Job has been revoked, stopping analysis')
         raise
     else:
