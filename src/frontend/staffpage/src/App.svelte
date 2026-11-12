@@ -178,7 +178,7 @@ function newPepsetBlank() {
 function addServer() {
   const server = {pk: false, name: '', uri: '', fqdn: '', active: true, can_backup: false,
     can_rsync_remote: false, rsyncusername: '', rsynckeyfile: '', mounted: [], analysisprofiles: [],
-    has_workers: true,
+    has_workers: true, is_upload_server: false,
   }
   servers = [server, ...servers];
 }
@@ -415,6 +415,11 @@ async function saveShare(share) {
           <span class="field ml-3 mr-3 mt-2">
             <label class="checkbox">
               <input bind:checked={server.has_workers} type="checkbox"> Has workers
+            </label>
+          </span>
+          <span class="field ml-3 mr-3 mt-2">
+            <label class="checkbox">
+              <input bind:checked={server.is_upload_server} type="checkbox"> Upload server
             </label>
           </span>
         </div>

@@ -42,8 +42,8 @@ def show_staffpage(request):
 
     # Populate servers
     servers = {x.pk: {f: getattr(x, f) for f in ['pk', 'name', 'uri', 'fqdn', 'active',
-        'has_workers', 'can_backup', 'can_rsync_remote', 'rsyncusername', 'rsynckeyfile']}
-        for x in rm.FileServer.objects.all()}
+        'has_workers', 'can_backup', 'can_rsync_remote', 'rsyncusername', 'rsynckeyfile',
+        'is_upload_server']} for x in rm.FileServer.objects.all()}
     [servers[x].update({'mounted': [], 'analysisprofiles': []}) for x in servers.keys()]
     for asp in rm.AnalysisServerProfile.objects.all():
         servers[asp.server_id]['analysisprofiles'].append({'pk': asp.pk, 'name': asp.name,
@@ -329,11 +329,12 @@ def save_server(request):
             
     if data['pk']:
         fs.update(**{f: data[f] for f in ['name', 'uri', 'fqdn', 'active', 'can_backup',
-            'can_rsync_remote', 'rsyncusername', 'rsynckeyfile']})
+            'has_workers', 'is_upload_server', 'can_rsync_remote', 'rsyncusername', 'rsynckeyfile']})
         fs = fs.get()
     else:
         fs = rm.FileServer.objects.create(**{f: data[f] for f in ['name', 'uri', 'fqdn', 'active',
-            'can_backup', 'can_rsync_remote', 'rsyncusername', 'rsynckeyfile']})
+            'has_workers', 'is_upload_server', 'can_backup', 'can_rsync_remote', 'rsyncusername',
+            'rsynckeyfile']})
 
     for mount in data['mounted']:
         rm.FileserverShare.objects.update_or_create(server=fs, share_id=mount['share'],
