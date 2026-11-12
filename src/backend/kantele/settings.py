@@ -122,8 +122,9 @@ PROCNAMES = {THERMORAW: ['ThermoFisher.Foundation.AcquisitionService.exe'],
         BRUKERRAW: ['timsEngine.exe'],
         }
 # Injection waiting time until file becomes "findable" by psutil Proc.open_files(), in seconds
-# Bruker just gets an extra minute to rule out problem
-INJ_WAITTIMES = {THERMORAW: os.environ.get('THERMO_WAIT', 15 * 60), BRUKERRAW: os.environ.get('BRUKERWAIT', 60)}
+# We set to 2h to avoid failing uploads due to instrument waiting time for acquisition and/or
+# online QC searches on the instrument
+INJ_WAITTIMES = {THERMORAW: os.environ.get('THERMO_WAIT', 120 * 60), BRUKERRAW: os.environ.get('BRUKERWAIT', 120 * 60)}
 
 # The thermo reader command
 THERMOREADER_DOCKER = os.environ.get('THERMOREAD_DOCKER', 'ghcr.io/lehtiolab/kantele_nf_thermoreader:1.4')
