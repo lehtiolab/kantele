@@ -21,7 +21,7 @@ urlpatterns = [
     path('logappend/', views.append_analysis_log, name='appendlog'),
     path('nflogappend/', views.nextflow_analysis_log, name='nflog'),
     path('log/<int:ana_id>', views.show_analysis_log),
-    path('showfile/<int:arf_id>', views.serve_analysis_file),
+    path('showfile/<int:sfl_id>', views.serve_analysis_file),
     path('find/datasets/', views.find_datasets),
     path('token/renew/', views.renew_token),
 ]
