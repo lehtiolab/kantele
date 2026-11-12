@@ -262,8 +262,11 @@ class FileserverShare(models.Model):
     #writable = models.BooleanField(default=False)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=['server', 'share'], name='uni_fsshare')]
-        constraints = [models.UniqueConstraint(fields=['server', 'path'], name='uni_fspath')]
+        constraints = [
+                models.UniqueConstraint(fields=['server', 'share'], name='uni_fsshare'),
+                models.UniqueConstraint(fields=['server', 'path'], condition=~Q(path=''), name='uni_fspath'),
+                models.UniqueConstraint(fields=['server', 'download_url'], condition=~Q(download_url=''), name='uni_dlurl')
+                ]
 
 
 class AnalysisServerProfile(models.Model):
