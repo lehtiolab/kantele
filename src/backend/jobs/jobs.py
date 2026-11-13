@@ -220,7 +220,9 @@ class BaseJob:
         if sfpks := self._get_extrafiles_to_rsync(**kwargs):
             # This is run for any job that has extrafiles (i.e. analysis jobs)
             sfl_q = Q()
-            for sfl in StoredFileLoc.objects.filter(sfile_id__in=sfpks, active=True).values('pk'):
+            # Do not filter active=True since a file can already have been set to deleted
+            # before this checks if we have a job waiting for it
+            for sfl in StoredFileLoc.objects.filter(sfile_id__in=sfpks).values('pk'):
                 sfl_q = sfl_q | Q(kwargs__sfloc_ids__contains=sfl['pk'])
             return Job.objects.filter(sfl_q)
 
