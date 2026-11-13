@@ -1268,11 +1268,14 @@ def download_file_to_share(request, sfloc_id, task_id):
         for wpath, _subdirs, wfns in os.walk(fs_webpath):
             for wfn in wfns:
                 wfnpath = os.path.join(wpath, wfn)
-                # path as inside zip fn e.g. "filename123.d/123.m/something.sqlite"
-                zip_fn = os.path.relpath(wfnpath, fs_webpath)
-                downloadpath = wfnpath.replace(sfloc['servershare__fileservershare__path'],
-                    sfloc['servershare__fileservershare__download_url'])
-                ziplist.append(f'- {os.path.getsize(wfnpath)} {downloadpath} {zip_fn}')
+                if os.path.getsize(wfnpath) > 0:
+                    # Skip sqlite journal files which are 0 in size, as they error on unzipping.
+                    # Should probably cull these already on uploading.
+                    # path as inside zip fn e.g. "filename123.d/123.m/something.sqlite"
+                    zip_fn = os.path.relpath(wfnpath, fs_webpath)
+                    downloadpath = wfnpath.replace(sfloc['servershare__fileservershare__path'],
+                        sfloc['servershare__fileservershare__download_url'])
+                    ziplist.append(f'- {os.path.getsize(wfnpath)} {downloadpath} {zip_fn}')
         resp = HttpResponse('\n'.join(ziplist))
         resp['X-Archive-Files'] = 'zip'
     else:
