@@ -265,7 +265,7 @@ def rsync_transfer_file_web(self, sfloc_id, srcpath, dstsharepath, dstpath, dsts
     print(msg)
 
 
-@shared_task(bind=True)
+@shared_task(bind=True, max_retries=None)
 def download_files_to_servershare(self, dstbasepath, dstpath, src_dst_sfloc_ids_fns):
     '''Download file over HTTP to some server share that we cannot rsync-push to
 
@@ -341,15 +341,13 @@ def download_files_to_servershare(self, dstbasepath, dstpath, src_dst_sfloc_ids_
                                 'client_id': settings.APIKEY, 'task_id': self.request.id}
                         update_db(upd_url, json=postdata)
                     else:
-                        try:
-                            self.retry(countdown=60)
-                        except MaxRetriesExceededError as e:
-                            # Possibly write or network error
-                            taskfail_update_db(self.request.id, 'Could not download or write file '
-                                f'{fname}: {e}')
-                            raise
+                        # Some kind of error which is not connection problem (below)
+                        msg = (f'Could not download or write file {fname}, MD5 {dighash} '
+                               f'does not match source {md5_check}')
+                        taskfail_update_db(self.request.id, msg)
+                        raise RuntimeError(msg)
         except requests.exceptions.ChunkedEncodingError:
-            self.retry(countdown=60)
+            self.retry()
     taskurl = urljoin(settings.KANTELEHOST, reverse('jobs:settask'))
     update_db(taskurl, json={'client_id': settings.APIKEY, 'task_id': self.request.id,
         'state': states.SUCCESS})
