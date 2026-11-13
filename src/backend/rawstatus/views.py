@@ -1241,11 +1241,33 @@ def show_old_new_projects(request):
     pass
 
 
+def verify_files_to_download(request):
+    '''Return files which are still to be downloaded, in case the 
+    download_files_to_servershare job failed half way with a connection error or something
+    '''
+    data = json.loads(request.body.decode('utf-8'))
+    # Authenticate with task id
+    if job := jm.Job.objects.filter(funcname='download_files_to_servershare',
+            state=jj.Jobstates.PROCESSING, task__asyncid=data['task_id']):
+        job = job.values().get()
+    else:
+        return JsonResponse({'msg': 'Not authenticated to view download file status'}, status=403)
+    if set(data['sfloc_ids']).difference(job['kwargs']['dstsfloc_ids']):
+        return JsonResponse({'msg': 'Not authenticated to view download file status for those '
+                'files'}, status=403)
+
+    # Return files that are in purged (i.e. not existing on disk) state
+    sfloc_q = StoredFileLoc.objects.filter(pk__in=data['sfloc_ids'], purged=True)
+    if not sfloc_q.filter(servershare__fileservershare__in=FileserverShare.objects.exclude(download_url='')):
+        # Cannot download file if not on downloadable share TODO remove this or error?
+        pass
+    return JsonResponse({'sfl_to_download': [x['pk'] for x in sfloc_q.values('pk')]})
+
+
 def download_file_to_share(request, sfloc_id, task_id):
     '''View to download files over HTTP to new servershares, using a job'''
     # Authenticate with task id
-    if job := jm.Job.objects.filter(funcname__in=['download_files_to_servershare',
-                                                  'download_files_to_servershare'],
+    if job := jm.Job.objects.filter(funcname='download_files_to_servershare',
             state=jj.Jobstates.PROCESSING, task__asyncid=task_id):
         job = job.values().get()
     else:

@@ -273,62 +273,83 @@ def download_files_to_servershare(self, dstbasepath, dstpath, src_dst_sfloc_ids_
     dstpath: storage path of file, e.g. project/experiment/file.raw
     src_dst_sfloc_ids_fns: [(srcpk, dstpk, md5 of file, is file a folder (unzip)), ...]
     '''
+    # First check which files are already accounted for, in case this is a rerun 
+    # of a job which failed half way
+    check_url = urljoin(settings.KANTELEHOST, reverse('files:verifylocation'))
+    try:
+        resp_verify = update_db(check_url, json={'sfloc_ids': [x[2] for x in src_dst_sfloc_ids_fns],
+            'dstpath': dstpath, 'task_id': self.request.id})
+    except RuntimeError as e:
+        try:
+            self.retry(countdown=60)
+        except MaxRetriesExceededError as e:
+            # Possibly write or network error
+            taskfail_update_db(self.request.id, f'Could not download or write file: {e}')
+            raise
+    else:
+        verified_files = resp_verify.json()['sfl_to_download']
     upd_url = urljoin(settings.KANTELEHOST, reverse('jobs:updatestorage'))
     for src_sfl_pk, fname, dst_sfl_pk, md5_check, is_dir_stable_fn in src_dst_sfloc_ids_fns:
+        if dst_sfl_pk not in verified_files:
+            print(f'Already downloaded and accounted for file, skipping: {fname}')
+            continue
         urlpath = reverse("files:download_to_share", kwargs={'sfloc_id': src_sfl_pk, 'task_id': self.request.id})
         dl_url = urljoin(settings.KANTELEHOST, urlpath)
         dighash = hashlib.md5()
         basedst_path = os.path.join(dstbasepath, dstpath)
         dst = os.path.join(basedst_path, fname)
         os.makedirs(basedst_path, exist_ok=True) # e.g path/to/dset
-        with requests.get(dl_url, stream=True) as req, TemporaryDirectory(dir=basedst_path) as tmp_unzip:
-            if req.status_code == 500:
-                taskfail_update_db(self.request.id, 'Server error 500. Could not download file '
-                                   f'{fname}, contact admin')
-                return
-            elif req.status_code != 200:
-                msg = req.json()
-                taskfail_update_db(self.request.id, f'Could not download file {fname}: {msg}')
-                return
-            else:
-                # Do everything in a tmp workdir
-                tmp_result = os.path.join(tmp_unzip, fname)
-                if is_dir_stable_fn: # is False, [], or e.g ['analysis_tdf.bin']
-                    # Unzip in case there is a file inside that we need the md5 of
-                    ch_to_mode = 0o755
-                    os.makedirs(tmp_result)
-                    for file_name_bytes, file_size, unzipped_chunks in stream_unzip(req.iter_content(chunk_size=65536)):
-                        file_name = file_name_bytes.decode('utf-8')
-                        subfn = os.path.join(tmp_result, file_name)
-                        with open(subfn, 'wb+') as fp:
-                            for chunk in unzipped_chunks:
-                                fp.write(chunk)
-                                if file_name in is_dir_stable_fn[0]:
-                                    dighash.update(chunk)
+        try:
+            with requests.get(dl_url, stream=True) as req, TemporaryDirectory(dir=basedst_path) as tmp_unzip:
+                if req.status_code == 500:
+                    taskfail_update_db(self.request.id, 'Server error 500. Could not download file '
+                                       f'{fname}, contact admin')
+                    return
+                elif req.status_code != 200:
+                    msg = req.json()
+                    taskfail_update_db(self.request.id, f'Could not download file {fname}: {msg}')
+                    return
                 else:
-                    # No predictable file inside zipped folder if any, so we instead do MD5 on
-                    # entire zipped folder or non-zipped file which is downloaded.
-                    ch_to_mode = 0o644
-                    with open(tmp_result, 'wb+') as fp:
-                        for chunk in req.iter_content(chunk_size=65536):
-                            if chunk:
-                                fp.write(chunk)
-                            dighash.update(chunk)
-                dighash = dighash.hexdigest() 
-                if dighash == md5_check:
-                    shutil.move(tmp_result, dst)
-                    os.chmod(dst, ch_to_mode)
-                    postdata = {'sfloc_id': dst_sfl_pk, 'dst_path': dstpath,
-                            'client_id': settings.APIKEY, 'task_id': self.request.id}
-                    update_db(upd_url, json=postdata)
-                else:
-                    try:
-                        self.retry(countdown=60)
-                    except MaxRetriesExceededError as e:
-                        # Possibly write or network error
-                        taskfail_update_db(self.request.id, 'Could not download or write file '
-                            f'{fname}: {e}')
-                        raise
+                    # Do everything in a tmp workdir
+                    tmp_result = os.path.join(tmp_unzip, fname)
+                    if is_dir_stable_fn: # is False, [], or e.g ['analysis_tdf.bin']
+                        # Unzip in case there is a file inside that we need the md5 of
+                        ch_to_mode = 0o755
+                        for file_name_bytes, file_size, unzipped_chunks in stream_unzip(req.iter_content(chunk_size=65536)):
+                            file_name = file_name_bytes.decode('utf-8')
+                            subfn = os.path.join(tmp_result, file_name)
+                            os.makedirs(os.path.split(subfn)[0], exist_ok=True)
+                            with open(subfn, 'wb+') as fp:
+                                for chunk in unzipped_chunks:
+                                    fp.write(chunk)
+                                    if file_name == is_dir_stable_fn[0]:
+                                        dighash.update(chunk)
+                    else:
+                        # No predictable file inside zipped folder if any, so we instead do MD5 on
+                        # entire zipped folder or non-zipped file which is downloaded.
+                        ch_to_mode = 0o644
+                        with open(tmp_result, 'wb+') as fp:
+                            for chunk in req.iter_content(chunk_size=65536):
+                                if chunk:
+                                    fp.write(chunk)
+                                dighash.update(chunk)
+                    dighash = dighash.hexdigest() 
+                    if dighash == md5_check:
+                        shutil.move(tmp_result, dst)
+                        os.chmod(dst, ch_to_mode)
+                        postdata = {'sfloc_id': dst_sfl_pk, 'dst_path': dstpath,
+                                'client_id': settings.APIKEY, 'task_id': self.request.id}
+                        update_db(upd_url, json=postdata)
+                    else:
+                        try:
+                            self.retry(countdown=60)
+                        except MaxRetriesExceededError as e:
+                            # Possibly write or network error
+                            taskfail_update_db(self.request.id, 'Could not download or write file '
+                                f'{fname}: {e}')
+                            raise
+        except requests.exceptions.ChunkedEncodingError:
+            self.retry(countdown=60)
     taskurl = urljoin(settings.KANTELEHOST, reverse('jobs:settask'))
     update_db(taskurl, json={'client_id': settings.APIKEY, 'task_id': self.request.id,
         'state': states.SUCCESS})
