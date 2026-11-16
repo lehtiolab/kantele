@@ -106,13 +106,15 @@ class NextflowWfVersionParamset(models.Model):
 
 class NfConfigVersion(models.Model):
     '''Versioning of server config for this pipeline. Needed since pipeline upgrades come with
-    different processes to config. The config_commit is passed to --config_commit
+    different processes to config.
     '''
     nfservercfg = models.ForeignKey(NfRepoServerConfig, on_delete=models.CASCADE)
     nfpipe = models.ForeignKey(NextflowWfVersionParamset, on_delete=models.CASCADE)
     # FIXME use config_ccmmit!
     config_commit = models.CharField(max_length=50,
             help_text='Commit of version of config file for this pipeline on this server, will be passed to --config_commit')
+    includeconfig = models.TextField(help_text='E.g. https://raw.githubusercontent.com/lehtiolab/'
+            'static-resources/$COMMIT_HASH/nf-configs/spectronaut_lehtio.config, with the correct hash for this pipeline.')
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['nfpipe', 'nfservercfg'], name='uni_nfserverpipe')]
