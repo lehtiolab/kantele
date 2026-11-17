@@ -474,12 +474,9 @@ class TestUploadScript(BaseIntegrationTest):
         classifytask = jm.Task.objects.filter(job__funcname='classify_msrawfile', job__kwargs__sfloc_id=newsfloc.pk)
         rsjobs = jm.Job.objects.filter(funcname='rsync_files_to_servershare', kwargs__sfloc_ids=[newsfloc.pk], kwargs__dstshare_id=self.ssnewstore.pk,
             kwargs__dstpath=os.path.join(settings.QC_STORAGE_DIR, self.prod.name))
-        nfrsjobs = jm.Job.objects.filter(funcname='rsync_files_to_servershare',
-                kwargs__sfloc_ids=[self.nfc_loc.pk], kwargs__dstshare_id=self.ssnewstore.pk)
         self.assertEqual(classifyjob.count(), 1)
         self.assertEqual(classifytask.count(), 0)
         self.assertEqual(rsjobs.count(), 0)
-        self.assertEqual(nfrsjobs.count(), 0)
         # Run classify
         self.run_job()
         newraw.refresh_from_db()
@@ -492,11 +489,10 @@ class TestUploadScript(BaseIntegrationTest):
         self.assertEqual(classifytask.filter(state=states.SUCCESS).count(), 1)
         self.assertEqual(dashm.QCRun.objects.filter(rawfile=newraw).count(), 1)
         self.assertEqual(rsjobs.count(), 1)
-        self.assertEqual(nfrsjobs.count(), 1)
         self.assertEqual(qcjobs.count(), 1)
         self.run_job() # run backup
         jm.Task.objects.filter(job__funcname='create_pdc_archive').update(state=states.SUCCESS)
-        self.run_job() # run rsync to analysis of both raw and nfconfig files
+        self.run_job() # run rsync to analysis of raw files
         self.anaprofile.nfparams = [] # reset params so we dont pass project to argparse in qc.py
         self.anaprofile.save()
         self.run_job() # run qc
@@ -794,8 +790,8 @@ class TestUploadScript(BaseIntegrationTest):
             'rejected_files': []})
         self.assertEqual(resp.status_code, 200)
         self.url = '/mzml/create/'
-        nfrepo = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf, repolocation=self.nfw.repo)
-        am.NfConfigVersion.objects.create(nfservercfg=nfrepo, nfpipe=self.nfwv, config_commit='123jkl')
+        nfrepo = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, repolocation=self.nfw.repo)
+        am.NfConfigVersion.objects.create(nfservercfg=nfrepo, nfpipe=self.nfwv, includeconfig='testtest/123jkl')
         resp = self.cl.post(self.url, content_type='application/json', data={'pwiz_id': self.pwiz.pk,
             'dsid': self.oldds.pk})
         self.assertEqual(resp.status_code, 200)
@@ -1948,8 +1944,9 @@ class TestAutoDelete(BaseIntegrationTest):
         rm.StoredFileLoc.objects.filter(pk=self.expreportsfl.pk).update(last_date_used=last_date_used)
 
         # Library file expired
-        rm.PDCBackedupFile.objects.create(success=True, storedfile=self.sfnfc, pdcpath='expreport')
-        rm.StoredFileLoc.objects.filter(pk=self.nfc_loc.pk).update(last_date_used=last_date_used)
+        rm.PDCBackedupFile.objects.create(success=True, storedfile=self.sflib, pdcpath='expreport')
+        rm.StoredFileLoc.objects.filter(pk=self.sflibloc.pk).update(servershare=self.sslib,
+                    last_date_used=last_date_used)
 
         # Analysis files expired
         self.ana2 = am.Analysis.objects.create(user=self.user, name='ana2', base_rundir='ana2',
@@ -2028,7 +2025,7 @@ class TestAutoDelete(BaseIntegrationTest):
 
         # Refresh everything
         for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
-                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss,
+                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.sflibloc, self.f3mzsss,
                 self.oldds, self.tmpsf, self.anasf3, self.anasf4, self.f3sssinbox]:
             fn.refresh_from_db()
 
@@ -2038,7 +2035,7 @@ class TestAutoDelete(BaseIntegrationTest):
 
         for fn in [self.oldsss, self.f3sssana, self.f3sssinbox, self.reportsfl, self.anasfl,
                 self.anasfl2, self.tmpsss,  self.expreportsfl, self.anasfl3, self.anasfl4,
-                self.nfc_loc, self.f3mzsss]:
+                self.sflibloc, self.f3mzsss]:
             # Nothing deleted, dry run
             self.assertTrue(fn.active)
             self.assertFalse(rmjob.filter(kwargs__sfloc_ids=[fn.pk]).exists())
@@ -2052,7 +2049,7 @@ class TestAutoDelete(BaseIntegrationTest):
 
         # Sfile deleted check
         for sf in [self.tmpsf, self.oldsf, self.f3sfmz, self.expreportsf, self.anasf3,
-                self.anasf4, self.sfnfc]:
+                self.anasf4, self.sflib]:
             sf.refresh_from_db()
             try:
                 self.assertFalse(sf.deleted)
@@ -2063,7 +2060,7 @@ class TestAutoDelete(BaseIntegrationTest):
     def check_files_deleted(self):
         # Refresh everything
         for fn in [self.f3sssana, self.oldsss, self.tmpsss, self.reportsfl, self.expreportsfl,
-                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.nfc_loc, self.f3mzsss,
+                self.anasfl, self.anasfl2, self.anasfl3, self.anasfl4, self.sflibloc, self.f3mzsss,
                 self.f3sssinbox]:
             fn.refresh_from_db()
 
@@ -2123,10 +2120,10 @@ class TestAutoDelete(BaseIntegrationTest):
 
         self.not_deleted_sfl = [self.f3sssana, self.reportsfl, self.anasfl, self.anasfl2]
         self.deleted_sfl = [self.tmpsss, self.f3sssinbox, self.expreportsfl, self.anasfl3,
-                self.anasfl4, self.nfc_loc, self.f3mzsss]
+                self.anasfl4, self.sflibloc, self.f3mzsss]
         # Sfile deleted check
         self.deleted_sf = [self.tmpsf, self.oldsf, self.f3sfmz, self.expreportsf, self.anasf3,
-                self.anasf4, self.sfnfc]
+                self.anasf4, self.sflib]
         self.not_deleted_sf = []
         self.check_files_deleted()
             
@@ -2158,11 +2155,11 @@ class TestAutoDelete(BaseIntegrationTest):
 
         # Not deleting old ds file, tmp file, newer ana files
         self.not_deleted_sfl = [self.oldsss, self.tmpsss,  self.f3sssana, self.f3sssinbox,
-                self.reportsfl, self.anasfl, self.anasfl2, self.expreportsfl, self.nfc_loc,
+                self.reportsfl, self.anasfl, self.anasfl2, self.expreportsfl, self.sflibloc,
                 self.f3mzsss]
         self.deleted_sfl = [self.anasfl3, self.anasfl4]
         # Sfile deleted check
-        self.not_deleted_sf = [self.tmpsf, self.oldsf, self.f3sfmz, self.expreportsf, self.sfnfc]
+        self.not_deleted_sf = [self.tmpsf, self.oldsf, self.f3sfmz, self.expreportsf, self.sflib]
         self.deleted_sf = [self.anasf3, self.anasf4]
         self.check_files_deleted()
             
@@ -2176,11 +2173,11 @@ class TestAutoDelete(BaseIntegrationTest):
 
         # Not deleting old ds file, ana files, newer inbox
         self.not_deleted_sfl = [self.oldsss, self.f3sssana, self.reportsfl, self.anasfl,
-                self.anasfl2, self.expreportsfl, self.anasfl3, self.anasfl4, self.nfc_loc,
+                self.anasfl2, self.expreportsfl, self.anasfl3, self.anasfl4, self.sflibloc,
                 self.f3mzsss]
         self.deleted_sfl = [self.tmpsss, self.f3sssinbox]
         # Sfile deleted check
-        self.not_deleted_sf = [self.oldsf, self.f3sfmz, self.expreportsf, self.sfnfc, self.anasf3,
+        self.not_deleted_sf = [self.oldsf, self.f3sfmz, self.expreportsf, self.sflib, self.anasf3,
                 self.anasf4]
         self.deleted_sf = [self.tmpsf]
         self.check_files_deleted()
@@ -2198,12 +2195,12 @@ class TestAutoDelete(BaseIntegrationTest):
 
         # Not deleting old ds file, ana files, newer inbox
         self.not_deleted_sfl = [self.oldsss, self.f3sssana, self.reportsfl, self.anasfl,
-                self.anasfl2, self.expreportsfl, self.anasfl3, self.anasfl4, self.nfc_loc,
+                self.anasfl2, self.expreportsfl, self.anasfl3, self.anasfl4, self.sflibloc,
                 self.f3mzsss, self.tmpsss]
         # f3sssinbox is deleted since it is in a dataset
         self.deleted_sfl = [self.f3sssinbox]
         # Sfile deleted check
-        self.not_deleted_sf = [self.oldsf, self.f3sfmz, self.expreportsf, self.sfnfc, self.anasf3,
+        self.not_deleted_sf = [self.oldsf, self.f3sfmz, self.expreportsf, self.sflib, self.anasf3,
                 self.anasf4, self.f3sf, self.tmpsf]
         self.deleted_sf = []
         self.check_files_deleted()
@@ -2233,10 +2230,10 @@ class TestAutoDelete(BaseIntegrationTest):
         # Files not deleted
         self.not_deleted_sfl = [self.f3sssana, self.f3sssinbox, self.reportsfl, self.anasfl,
                 self.anasfl2, self.tmpsss,  self.expreportsfl, self.anasfl3, self.anasfl4,
-                self.nfc_loc, self.f3mzsss]
+                self.sflibloc, self.f3mzsss]
         self.deleted_sfl = []
         # Sfile deleted check
-        self.not_deleted_sf = [self.f3sfmz, self.expreportsf, self.sfnfc, self.anasf3, self.anasf4,
+        self.not_deleted_sf = [self.f3sfmz, self.expreportsf, self.sflib, self.anasf3, self.anasf4,
                 self.tmpsf]
         self.deleted_sf = [self.oldsf]
         self.check_files_deleted()
@@ -2254,9 +2251,9 @@ class TestAutoDelete(BaseIntegrationTest):
 
         self.not_deleted_sfl = [self.oldsss, self.f3sssana, self.f3sssinbox, self.anasfl,
                 self.anasfl2, self.tmpsss,  self.anasfl3, self.anasfl4, self.reportsfl]
-        self.deleted_sfl = [self.expreportsfl, self.nfc_loc, self.f3mzsss]
+        self.deleted_sfl = [self.expreportsfl, self.sflibloc, self.f3mzsss]
         # Sfile deleted check
-        self.deleted_sf = [self.f3sfmz, self.expreportsf, self.sfnfc]
+        self.deleted_sf = [self.f3sfmz, self.expreportsf, self.sflib]
         self.not_deleted_sf = [self.oldsf, self.tmpsf, self.anasf3, self.anasf4]
         self.check_files_deleted()
 
@@ -2296,12 +2293,12 @@ class TestAutoDeleteExpiredProject(TestAutoDelete):
             kwargs__share_id=self.anasfl3.servershare_id).exists())
 
         self.not_deleted_sfl = [self.tmpsss, self.f3sssana, self.reportsfl, self.anasfl,
-                self.expreportsfl, self.nfc_loc, self.anasfl2]
+                self.expreportsfl, self.sflibloc, self.anasfl2]
         self.deleted_sfl = [self.f3sssinbox, self.anasfl3,
                 self.anasfl4, self.f3mzsss]
         # Sfile deleted check
         self.deleted_sf = [self.oldsf, self.f3sfmz, self.anasf3, self.anasf4]
-        self.not_deleted_sf = [self.tmpsf, self.expreportsf, self.sfnfc]
+        self.not_deleted_sf = [self.tmpsf, self.expreportsf, self.sflib]
         self.check_files_deleted()
 
         self.assertFalse(self.ana3.deleted)
@@ -2321,12 +2318,12 @@ class TestAutoDeleteExpiredProject(TestAutoDelete):
 
         # Not deleting old ds file, ana files, newer inbox
         self.not_deleted_sfl = [self.oldsss, self.f3sssana, self.reportsfl, self.anasfl,
-                self.anasfl2, self.expreportsfl, self.anasfl3, self.anasfl4, self.nfc_loc,
+                self.anasfl2, self.expreportsfl, self.anasfl3, self.anasfl4, self.sflibloc,
                 self.f3mzsss, self.tmpsss]
         self.deleted_sfl = [self.f3sssinbox]
         self.deleted_sf = []
         # Sfile deleted check
-        self.not_deleted_sf = [self.oldsf, self.f3sfmz, self.expreportsf, self.sfnfc, self.anasf3,
+        self.not_deleted_sf = [self.oldsf, self.f3sfmz, self.expreportsf, self.sflib, self.anasf3,
                 self.anasf4, self.tmpsf]
         self.check_files_deleted()
 
@@ -2339,12 +2336,12 @@ class TestAutoDeleteExpiredProject(TestAutoDelete):
 
         self.not_deleted_sfl = [self.oldsss, self.f3sssana, self.f3sssinbox, self.anasfl,
                 self.anasfl2, self.tmpsss,  self.anasfl3, self.anasfl4, self.reportsfl,
-                self.expreportsfl, self.nfc_loc]
+                self.expreportsfl, self.sflibloc]
         self.deleted_sfl = [self.f3mzsss]
         self.deleted_sf = [self.f3sfmz]
         # Sfile deleted check
         self.not_deleted_sf = [self.oldsf, self.tmpsf, self.anasf3, self.anasf4,
-                self.expreportsf, self.sfnfc]
+                self.expreportsf, self.sflib]
         self.check_files_deleted()
 
         self.ana3.refresh_from_db()

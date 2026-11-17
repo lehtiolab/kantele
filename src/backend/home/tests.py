@@ -30,11 +30,11 @@ class MzmlTests(BaseIntegrationTest):
         self.wf = am.UserWorkflow.objects.create(name='refine', wftype=am.UserWorkflow.WFTypeChoices.SPEC,
                 public=False)
         self.wf.nfwfversionparamsets.add(self.refinewf)
-        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf, repolocation=self.nfw.repo)
-        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwv, config_commit='123jkl')
-        am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwv, config_commit='123jkl')
-        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.refinewf, config_commit='123jkl')
-        am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.refinewf, config_commit='123jkl')
+        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, repolocation=self.nfw.repo)
+        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwv, includeconfig='testtest/123jkl')
+        am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwv, includeconfig='testtest/123jkl')
+        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.refinewf, includeconfig='testtest/123abc')
+        am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.refinewf, includeconfig='testtest/123abc')
 
 
 class TestCreateMzmls(MzmlTests):
@@ -264,9 +264,7 @@ class TestCreateMzmls(MzmlTests):
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 200)
         j = jm.Job.objects.first()
-        self.assertEqual(j.funcname, 'rsync_files_to_servershare')
-        self.run_job() # run rsync of config file
-        j = jm.Job.objects.get(funcname='convert_dataset_mzml')
+        self.assertEqual(j.funcname, 'convert_dataset_mzml')
         exp_kw  = {'options': [], 'filters': ['precursorRefine'], 
                 'dss_id': dss2.pk, 'pwiz_id': self.pwiz.pk,
                 'sfloc_ids': [x['pk'] for x in rm.StoredFileLoc.objects.filter(
@@ -382,8 +380,7 @@ class TestCreateMzmls(MzmlTests):
         resp = self.cl.post(self.url, content_type='application/json', data=postdata)
         self.assertEqual(resp.status_code, 200)
         j = jm.Job.objects.first()
-        self.assertEqual(j.funcname, 'rsync_files_to_servershare')
-        j = jm.Job.objects.get(funcname='convert_dataset_mzml')
+        self.assertEqual(j.funcname, 'convert_dataset_mzml')
         exp_kw  = {'options': ['combineIonMobilitySpectra'], 'filters': ['precursorRefine', '"scanSumming precursorTol=0.02 scanTimeTol=10 ionMobilityTol=0.1"'], 
                 'dss_id': self.dss.pk, 'pwiz_id': self.pwiz.pk,
                 'sfloc_ids': [x['pk'] for x in rm.StoredFileLoc.objects.filter(
@@ -402,7 +399,6 @@ class TestCreateMzmls(MzmlTests):
         mzmlfn2 = os.path.join(dss2_fpath, mzmlfn)
         self.assertFalse(os.path.exists(mzmlfn1))
         self.assertFalse(os.path.exists(mzmlfn2))
-        self.run_job() # rsync nfconfig
         self.run_job() # convert mzml
         self.assertTrue(os.path.exists(mzmlfn1))
         self.assertFalse(os.path.exists(mzmlfn2))

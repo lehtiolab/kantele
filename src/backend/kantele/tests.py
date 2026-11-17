@@ -193,17 +193,6 @@ class BaseTest(TestCase):
                 path=self.storloc, active=True, purged=False)
         self.f3mzml = am.MzmlFile.objects.create(sfile=self.f3sfmz, pwiz=self.pwiz)
 
-        # NF Config file
-        nfc_ft = rm.StoredFileType.objects.create(name='nfconfig', filetype='txt',
-                is_rawdata=False, user_uploadable=True)
-        nfcraw = rm.RawFile.objects.create(name='nf.config', producer=self.adminprod,
-                source_md5='d41d8cd98f00b204e9800998ecf8427e', size=100, claimed=True, date=timezone.now(), usetype=rm.UploadFileType.LIBRARY)
-        self.sfnfc = rm.StoredFile.objects.create(rawfile=nfcraw, md5=nfcraw.source_md5,
-                filetype=nfc_ft, checked=True, filename=nfcraw.name)
-        self.nfc_loc = rm.StoredFileLoc.objects.create(sfile=self.sfnfc, servershare=self.sslib,
-                path='', active=True, purged=False)
-        self.nfc_lf = am.LibraryFile.objects.create(sfile=self.sfnfc, description='NF config')
-
         # QC workflow
         self.qcnfwf = am.NextflowWfVersionParamset.objects.create(update='nf workflow',
                 commit='master', filename='qc.py', nfworkflow=self.nfw,
@@ -212,9 +201,9 @@ class BaseTest(TestCase):
                 wftype=am.UserWorkflow.WFTypeChoices.QC)
         self.qcwf.nfwfversionparamsets.add(self.qcnfwf)
         self.nfrepo = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile, nfrepo=self.nfw,
-                configincluder=self.nfc_lf, repolocation=self.nfw.repo)
+                repolocation=self.nfw.repo)
         am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.qcnfwf,
-                config_commit='123abd')
+                includeconfig='blahablaha/1234abc')
 
 
         # Project/dataset/files on old storage

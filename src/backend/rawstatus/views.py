@@ -1068,13 +1068,9 @@ def run_singlefile_qc(sfloc_q, user_op, acqtype):
     trackpeps = [[x['peptide__pk'], x['peptide__sequence'], x['peptide__charge']] for x in
             dashmodels.PeptideInSet.objects.filter(peptideset=tps).values('peptide__pk',
             'peptide__sequence', 'peptide__charge')]
-    nfconfigver = NfConfigVersion.objects.filter(nfpipe_id=nfwfvid,
-            nfservercfg__serverprofile__server_id=server_id).values('pk',
-            'nfservercfg__configincluder__sfile_id').get()
     create_job('run_longit_qc_workflow', sfloc_id=sfloc.id, analysis_id=analysis.id, wf_id=wf.pk,
             nfwfvid=nfwfvid, fserver_id=server_id, anaserverprofile_id=anaprofile_id,
-            nfconfig_sfid=nfconfigver['nfservercfg__configincluder__sfile_id'], qcrun_id=qcrun.pk,
-            nfconfigver_id=nfconfigver['pk'], params=params, trackpeptides=trackpeps)
+            qcrun_id=qcrun.pk, params=params, trackpeptides=trackpeps)
     return False
 
 

@@ -1178,14 +1178,7 @@ def store_analysis(request):
     for pid, sfid in req['singlefiles'].items():
         afp, created = am.AnalysisFileParam.objects.update_or_create(defaults={'sfile_id': sfid}, analysis=analysis, param_id=pid)
         jobinputs['singlefiles'][afp.param.nfparam] = sfid
-    # Special -c config nextflow file
-    if req['nfwfvid']:
-        # Not doing this for external analysis saves
-        nfconfigver = am.NfConfigVersion.objects.filter(nfpipe=nfwf_ver,
-                nfservercfg__serverprofile_id=req['analysisprofile_id']).values('config_commit',
-                'nfservercfg__configincluder__sfile_id').get()
-        jobinputs['singlefiles']['-c'] = nfconfigver['nfservercfg__configincluder__sfile_id']
-        jobparams['--config_commit'] = [nfconfigver['config_commit']]
+
     # Re-create multifiles, they cannot be updated since all files map to analysis/param_id
     # resulting in only a single row in DB
     for pid, sfids in req['multifiles'].items():

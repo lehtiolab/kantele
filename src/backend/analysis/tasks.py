@@ -262,6 +262,11 @@ def prepare_nextflow_run(run, taskid, rundir, stageparamfiles, params, stagescra
     else:
         stagedir = os.path.join(rundir, 'stage')
         scratchdir = False
+    try:
+        os.makedirs(stagedir, exist_ok=True)
+    except Exception:
+        taskfail_update_db(taskid, f'Could not create dir to stage files')
+        raise
     for flag, files in stageparamfiles.items():
         # Always stage these so they end up in workdirs of their own. In case of multifile
         # on a param, or when having a scratchdir in place
@@ -281,6 +286,13 @@ def prepare_nextflow_run(run, taskid, rundir, stageparamfiles, params, stagescra
         except Exception:
             taskfail_update_db(taskid, f'Could not stage files for {flag} for analysis')
             raise
+    if includeline := run.get('includeconfig'):
+        conffile = os.path.join(rundir, 'nfwf.conf')
+        with open(conffile, 'w') as fp:
+            fp.write(f'includeConfig "{includeline}"')
+        params.extend(['-c', conffile])
+
+
     return params, gitwfdir, stagedir, scratchdir
 
 

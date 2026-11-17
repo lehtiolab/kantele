@@ -73,14 +73,11 @@ class NextflowWorkflowRepo(models.Model):
 
 class NfRepoServerConfig(models.Model):
     '''Not all repos can be sourced from public locations, e.g. when on a server
-    with no network, or when a repo is private. Also get the NF server config includer file
-    which will typically do
-    includeConfig "/path/or/url/to/${config_commit :? master}/servername_pipeline.nf"
+    with no network, or when a repo is private.
     '''
     # link to serverprofile to make sure the server is an analysis server and to
     # possibly limit projects to run specific pipelines only on HPC
     serverprofile = models.ForeignKey(filemodels.AnalysisServerProfile, on_delete=models.CASCADE)
-    configincluder = models.ForeignKey(LibraryFile, on_delete=models.CASCADE)
     nfrepo = models.ForeignKey(NextflowWorkflowRepo, on_delete=models.CASCADE)
     repolocation = models.TextField(help_text='Usually a github repo, but if needed you can '
             'specify a path here')
@@ -110,9 +107,6 @@ class NfConfigVersion(models.Model):
     '''
     nfservercfg = models.ForeignKey(NfRepoServerConfig, on_delete=models.CASCADE)
     nfpipe = models.ForeignKey(NextflowWfVersionParamset, on_delete=models.CASCADE)
-    # FIXME use config_ccmmit!
-    config_commit = models.CharField(max_length=50,
-            help_text='Commit of version of config file for this pipeline on this server, will be passed to --config_commit')
     includeconfig = models.TextField(help_text='E.g. https://raw.githubusercontent.com/lehtiolab/'
             'static-resources/$COMMIT_HASH/nf-configs/spectronaut_lehtio.config, with the correct hash for this pipeline.')
 

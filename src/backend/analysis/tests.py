@@ -734,9 +734,9 @@ class TestStoreAnalysis(AnalysisPageTest):
         self.wftype = am.UserWorkflow.WFTypeChoices.STD
         self.wf = am.UserWorkflow.objects.create(name='testwf', wftype=self.wftype, public=True)
         self.wf.nfwfversionparamsets.add(self.nfwf)
-        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwf, config_commit='123jkl')
-        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf, repolocation=self.nfw.repo)
-        am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwf, config_commit='123jkl')
+        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwf, includeconfig='testtest/123jkl')
+        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, repolocation=self.nfw.repo)
+        am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwf, includeconfig='testtest/123jkl')
 
     def test_store_external_analysis(self):
         params = {'flags': {}, 'inputparams': {}, 'multicheck': {}}
@@ -939,10 +939,10 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
     def test_existing_analysis(self):
         # Save analysis to run on remote ana server, so this will also create jobs to transfer
         # config files and param files
-        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwf, config_commit='123jkl')
-        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf, repolocation=self.nfw.repo)
+        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwf, includeconfig='testtest/123jkl')
+        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, repolocation=self.nfw.repo)
         nfcv = am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwf,
-                config_commit='123jkl')
+                includeconfig='testtest/123jkl')
         quant = self.ds.quantdataset.quanttype
         remotedss = dm.DatasetServer.objects.create(dataset=self.ds, storageshare=self.analocalstor,
                 storage_loc_ui=self.storloc, storage_loc=self.storloc, startdate=timezone.now())
@@ -1036,9 +1036,8 @@ class TestStoreExistingIsoAnalysis(AnalysisPageTest):
                   self.param1.nfparam, # flag so no value
                   self.param3.nfparam, '42',
                   self.param4.nfparam, self.popt4.value,
-                  '--config_commit', nfcv.config_commit,
                   ],
-              'singlefiles': {f'{self.pfn2.nfparam}': self.sflib.pk, '-c': self.sfnfc.pk}},
+              'singlefiles': {f'{self.pfn2.nfparam}': self.sflib.pk}},
           'platenames': {self.ds.pk: f'{self.hirief.start}-{self.hirief.end}'}, 'wfv_id': self.nfwf.pk}
 
         # Check libfile upload
@@ -1105,9 +1104,9 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
     def test_existing_analysis(self):
         afs3 = am.AnalysisFileValue.objects.create(adsfile=self.adsi2, value='something',
                 field='afield')
-        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwf, config_commit='123jkl')
-        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, configincluder=self.nfc_lf, repolocation=self.nfw.repo)
-        am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwf, config_commit='123jkl')
+        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=self.nfwf, includeconfig='testtest/123jkl')
+        nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2, nfrepo=self.nfw, repolocation=self.nfw.repo)
+        am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=self.nfwf, includeconfig='testtest/123jkl')
         c_ch = am.PsetComponent.ComponentChoices
         am.PsetComponent.objects.get_or_create(pset=self.pset,
                 component=am.PsetComponent.ComponentChoices.COMPLEMENT_ANALYSIS)
@@ -1200,7 +1199,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         nfwf = am.NextflowWfVersionParamset.objects.create(update='nf workflow',
                 commit='master', filename='nf.py', nfworkflow=self.nfw,
                 paramset=self.pset, nfversion='', active=True)
-        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=nfwf, config_commit='123jkl')
+        am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=nfwf, includeconfig='testtest/123jkl')
         params = {'flags': {}, 'inputparams': {self.param3.pk: 42}, 
                 'multicheck': {self.param2.pk: [self.popt2.pk]}}
         postdata = {'dsids': [f'{self.oldds.pk}'],
@@ -1345,8 +1344,8 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
                 commit='master', filename='nf.py', nfworkflow=self.nfw,
                 paramset=self.pset, nfversion='', active=True)
         nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2,
-                nfrepo=self.nfw, configincluder=self.nfc_lf, repolocation=self.nfw.repo)
-        am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=nfwf, config_commit='123jkl')
+                nfrepo=self.nfw, repolocation=self.nfw.repo)
+        am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=nfwf, includeconfig='testtest/123jkl')
         params = {'flags': {}, 'inputparams': {self.param3.pk: 42}, 
                 'multicheck': {self.param2.pk: [self.popt2.pk]}}
         postdata = {'dsids': [f'{self.ds.pk}'],
@@ -1399,9 +1398,6 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
         self.assertJSONEqual(resp.content.decode('utf-8'), checkjson)
         self.cl.post('/analysis/start/', content_type='application/json',
                 data={'analysis_id': resp.json()['analysis_id']})
-        self.run_job() # rsync extra files to inbox
-        self.run_job() # download extra files
-        self.run_job() # delete from inbox
         self.run_job() # run the analysis
         ana.refresh_from_db()
         self.assertFalse(ana.editable)

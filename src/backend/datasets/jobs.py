@@ -5,7 +5,7 @@ from django.db.models import Q
 from kantele import settings
 from rawstatus.models import StoredFile, ServerShare, StoredFileLoc, FileServer, FileserverShare
 from datasets.models import Dataset, DatasetServer
-from analysis.models import Proteowizard, MzmlFile, NextflowWfVersionParamset, NfConfigVersion
+from analysis.models import Proteowizard, MzmlFile, NextflowWfVersionParamset, NfConfigVersion, NfRepoServerConfig
 from datasets import tasks
 from rawstatus import tasks as filetasks
 from jobs.jobs import DatasetJob
@@ -202,9 +202,6 @@ class ConvertDatasetMzml(DatasetJob):
     queue = False
     can_be_canceled = True
 
-    def _get_extrafiles_to_rsync(self, **kwargs):
-        return [kwargs['nfconfig_sfid']]
-
     def on_create_addkwargs(self, **kwargs):
         '''Create target SFLs on local analysis server and final destination 
         dataset source. This is needed because the final sflocs (which are rsynced
@@ -242,9 +239,9 @@ class ConvertDatasetMzml(DatasetJob):
         try:
             anaserver = rm.AnalysisServerProfile.objects.get(pk=kwargs['anaserverprofile_id'],
                 server__active=True)
-            nfcv = NfConfigVersion.objects.filter(pk=kwargs['nfconfigver_id']).values(
-                    'nfservercfg__repolocation', 'config_commit').get()
-        except (rm.AnalysisServerProfile.DoesNotExist, NfConfigVersion.DoesNotExist):
+            repoconfig = NfRepoServerConfig.objects.filter(serverprofile=anaserver,
+                    nfrepo=nfwf.nfworkflow).values('pk', 'repolocation').get()
+        except (rm.AnalysisServerProfile.DoesNotExist, NfRepoServerConfig.DoesNotExist):
             raise RuntimeError('Processing server requested does not exist or is not active or is '
                     'not capable of analysis')
         self.queue = self.get_server_based_queue(anaserver.queue_name, settings.QUEUE_NXF)
@@ -260,24 +257,28 @@ class ConvertDatasetMzml(DatasetJob):
             nf_raws.append((srcpath, fn['sfile__filename'], mzsfl['pk'], mzsfl['sfile__filename']))
         if not nf_raws:
             return
+
+        # Nextflow config:
+        if nfconfigver_q := NfConfigVersion.objects.filter(nfpipe=nfwf,
+                        nfservercfg=repoconfig['pk']):
+            includeconfig = nfconfigver_q.values('includeconfig').get()['includeconfig']
+        else:
+            includeconfig = False
+
         print(f'Queuing {len(nf_raws)} raw files for conversion')
         run = {
                'wf_commit': nfwf.commit,
                'nxf_wf_fn': nfwf.filename,
-               'repo': nfcv['nfservercfg__repolocation'],
+               'repo': repoconfig['repolocation'],
+               'includeconfig': includeconfig,
                'runname': kwargs['runpath'],
                'outsharepath': sharemap[mzsfl['servershare_id']],
                'dsspath': kwargs['dsspath'],
                }
-        if nfcloc_q := StoredFileLoc.objects.filter(sfile_id=kwargs['nfconfig_sfid'], active=True,
-                servershare__fileservershare__server_id=kwargs['server_id'],
-                servershare__active=True).values('servershare_id', 'path', 'sfile__filename'):
-            nfcl = nfcloc_q.first()
-        else:
-            raise RuntimeError(f'No NF config file available for server, please fix server config')
-        params = ['--md5out', '-c', os.path.join(sharemap[nfcl['servershare_id']], nfcl['path'], nfcl['sfile__filename'])]
+
+        params = ['--md5out']
         params.extend([x for y in [(f'--{k}', v) for k,v in pwiz.params.items()] for x in y])
-        params.extend([*anaserver.nfparams, '--config_commit', nfcv['config_commit']])
+        params.extend([*anaserver.nfparams])
         for pname in ['options', 'filters']:
             p2parse = kwargs.get(pname, [])
             if len(p2parse):
