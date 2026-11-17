@@ -1596,11 +1596,14 @@ def serve_analysis_file(request, sfl_id):
     fss_download = rm.FileserverShare.objects.exclude(download_url='')
     try:
         sfl = rm.StoredFileLoc.objects.filter(pk=sfl_id, active=True, purged=False,
-            servershare__fileservershare__in=fss_download).values('path', 'sfile__filename').get()
+            servershare__fileservershare__in=fss_download, sfile__analysisresultfile__isnull=False,
+            sfile__filename__in=settings.SERVABLE_FILENAMES).values(
+            'servershare__fileservershare__download_url', 'path', 'sfile__filename').get()
     except rm.StoredFileLoc.DoesNotExist:
         return HttpResponseForbidden()
     resp = HttpResponse()
-    resp['X-Accel-Redirect'] = os.path.join(settings.NGINX_ANALYSIS_REDIRECT, sfl['path'], sfl['sfile__filename'])
+    resp['X-Accel-Redirect'] = os.path.join(sfl['servershare__fileservershare__download_url'],
+            sfl['path'], sfl['sfile__filename'])
     return resp
 
 
