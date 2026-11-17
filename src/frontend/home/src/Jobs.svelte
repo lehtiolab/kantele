@@ -19,7 +19,7 @@ const tablefields = [
   {id: 'datasets', name: '', help: 'Datasets', type: 'icon', icon: 'clipboard-list', multi: false, links: 'dset_ids', linkroute: '#/datasets'},
   {id: 'usr', name: 'Users', type: 'str', multi: false},
   {id: 'date', name: 'Date', type: 'str', multi: false},
-  {id: 'actions', name: 'Actions', type: 'button', multi: true, confirm: ['delete', 'force delete']},
+  {id: 'actions', name: 'Actions', type: 'button', multi: true, confirm: ['delete', 'force retry', 'force delete']},
 ];
 
 const fixedbuttons = [

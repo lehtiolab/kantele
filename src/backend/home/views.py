@@ -294,6 +294,7 @@ def populate_files(dbfns):
               'deleted': fn['deleted'],
               'smallstatus': [],
               'actions': [],
+              'classifyjobs': [],
              }
         it['backup'] = fn['pdcbackedupfile__success']
         if fn['rawfile__usetype'] == filemodels.UploadFileType.QC:
@@ -334,9 +335,11 @@ def populate_files(dbfns):
                 it['smallstatus'].append({'text': 'reading failed'})
                 if not fn['deleted']:
                     it['actions'].extend(['purge', 'keep'])
+                    classifyjob = jm.Job.objects.filter(funcname='classify_msrawfile',
+                            filejob__rawfile_id=fn['rawfile_id']).values('pk').last()
+                    it['classifyjobs'] = [classifyjob['pk']]
             elif fn['pdcbackedupfile__success'] is None:
                 it['actions'].extend(['backup'])
-
         popfiles[fn['pk']] = it
     order = [x['id'] for x in sorted(popfiles.values(), key=lambda x: x['date'], reverse=True)]
     return {'items': popfiles, 'order': order}
@@ -447,7 +450,8 @@ def get_job_actions(job, ownership):
     if job.state in jj.JOBSTATES_RETRYABLE and (ownership['is_staff'] or ownership['owner_loggedin']):
         actions.append('retry')
     if ownership['is_staff']:
-        if job.state not in [jj.Jobstates.REVOKING, jj.Jobstates.HOLD, *jj.JOBSTATES_RETRYABLE]:
+        if job.state not in [jj.Jobstates.REVOKING, jj.Jobstates.HOLD, *jj.JOBSTATES_RETRYABLE,
+                    *jj.JOBSTATES_DONE]:
             actions.append('hold')
         if jwrap.can_be_canceled and job.state in jj.JOBSTATES_PAUSABLE:
             actions.append('pause')
@@ -460,6 +464,8 @@ def get_job_actions(job, ownership):
             actions.append('delete')
         elif job.state not in jj.JOBSTATES_DONE:
             actions.append('force delete')
+        elif job.state in jj.JOBSTATES_DONE:
+            actions.append('force retry')
     return actions
 
 

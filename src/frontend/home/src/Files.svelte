@@ -16,7 +16,7 @@ let detailsVisible = false;
 const tablefields = [
   {id: 'jobstate', name: '__hourglass-half', type: 'state', multi: true, links: 'job_ids', linkroute: '#/jobs'},
   {id: 'name', name: 'File', type: 'str', multi: false},
-  {id: 'smallstatus', name: '', type: 'smallcoloured', multi: true},
+  {id: 'smallstatus', name: '', type: 'smallcoloured', multi: true, links: 'classifyjobs', linkroute: '#/jobs'},
   {id: 'dataset', name: '', type: 'icon', help: 'Dataset', icon: 'clipboard-list', multi: false, links: 'dataset', linkroute: '#/datasets'},
   {id: 'analyses', name: '', type: 'icon', help: 'Analyses', icon: 'cogs', multi: false, links: 'analyses', linkroute: '#/analyses'},
   {id: 'date', name: 'Date', type: 'str', multi: false},

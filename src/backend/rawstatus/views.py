@@ -483,7 +483,10 @@ def classified_rawfile_treatment(request):
         # Errored classify-file task has possibly corrupt file, manual check required so no
         # backup yet
         create_job('create_pdc_archive', sfloc_id=sfloc.pk, isdir=sfloc.sfile.filetype.is_folder)
-    msf, cr = MSFileData.objects.get_or_create(rawfile_id=sfloc.sfile.rawfile_id,
+    
+    # Update, a retry may update the success if there was a problem in the classify
+    # process
+    msf, cr = MSFileData.objects.update_or_create(rawfile_id=sfloc.sfile.rawfile_id,
             defaults={'mstime': mstime, 'errmsg': error, 'success': success})
     if not cr:
         # Somehow script has already run! Maybe retried classify job
