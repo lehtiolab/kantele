@@ -129,7 +129,10 @@ def distribute_file_servershares(src_share_ids, existing_sfl, dstpaths):
         src_share_ids = last_queue[1]
     # delete jobs to remove stuff from inbox after were done with it
     if http_inboxjob:
-        create_job('purge_files', sfloc_ids=http_inboxjob['kwargs']['dstsfloc_ids'])
+        # TODO remove upload_delete_web when we have an upload share mounted on storage
+        # controller!
+        create_job('purge_files', sfloc_ids=http_inboxjob['kwargs']['dstsfloc_ids'],
+                upload_delete_web=True)
         rm.StoredFileLoc.objects.filter(pk__in=http_inboxjob['kwargs']['dstsfloc_ids']
                     ).update(active=False)
     if rs_inboxjob:

@@ -530,7 +530,10 @@ def distribute_dset_files(dset_pk, secclass, srcshares, existing_sfl, dstshare_i
                     existing_sfl)
     # delete jobs to remove stuff from inbox after were done with it
     if http_inboxjob:
-        create_job('purge_files', sfloc_ids=http_inboxjob['kwargs']['dstsfloc_ids'])
+        # TODO remove upload_delete_web when we have an upload share mounted on storage
+        # controller!
+        create_job('purge_files', sfloc_ids=http_inboxjob['kwargs']['dstsfloc_ids'],
+                upload_delete_web=True)
         filemodels.StoredFileLoc.objects.filter(pk__in=http_inboxjob['kwargs']['dstsfloc_ids']
                     ).update(active=False)
     if rs_inboxjob:

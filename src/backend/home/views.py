@@ -797,8 +797,8 @@ def get_analysis_info(request, anid):
     fss_download = filemodels.FileserverShare.objects.exclude(download_url='')
     linkedfiles = [(x['pk'], x['sfile__filename']) for x in
         filemodels.StoredFileLoc.objects.filter(sfile__filename__in=settings.SERVABLE_FILENAMES,
-        sfile__analysisresultfile__analysis=ana,
-        purged=False, servershare__fileservershare__in=fss_download).values('pk', 'sfile__filename')]
+        sfile__analysisresultfile__analysis=ana, active=True, purged=False,
+        servershare__fileservershare__in=fss_download).values('pk', 'sfile__filename')]
     resp = {'nrdsets': len(dsets),
             'nrfiles': dsicount,
             'storage_locs': [{'share': x['servershare__name'], 'path': x['path']} for x in storeloc],

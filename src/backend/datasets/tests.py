@@ -247,9 +247,9 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertTrue(os.path.exists(f3_newdsspath))
 
     def test_upload_file(self):
-        # Scenario: Dset is somehow only on an HPC share with 2FA ssh so we cant rsync it
-        # - thus it will HTTP upload instead to ssnewstore
-        # oldds / oldss is on analocalstor , we move it to ssnewstor
+        # Scenario: Dset on ssanalocalstore must transfer to ssnewstore but the anaserver
+        # does not have rsync (eg bc 2FA).
+        # Thus it will HTTP upload instead to inbox, then it will rsync from there to ssnewstore
 
         # webserver share for downloading storage raws, mounted on web
         uploadshare = rm.ServerShare.objects.create(name='uploads', max_security=1,
@@ -294,8 +294,9 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         self.assertTrue(os.path.exists(newdsspath))
 
     def test_upload_directory_and_mzml(self):
-        # Scenario: Dset is somehow only on an HPC share with 2FA ssh so we cant rsync it
-        # - thus it will HTTP upload instead to ssanalocalstore
+        # Scenario: Dset is put only on an HPC share with 2FA ssh so we cant rsync it
+        # - HTTP download to HPC, then need it back:
+        # - HTTP upload to inbox
         # - then it HTTP download back to ssnewstore
         # One of the files to transfer is a directory, so it tests that too
 
@@ -309,8 +310,6 @@ class SaveUpdateDatasetTest(BaseIntegrationTest):
         downloadnewstore = rm.FileserverShare.objects.create(server=webserver,
                 share=self.ssnewstore, path='/storage/newstorage',
                 download_url='/task_downloads/storage')
-        upload_ctrl = rm.FileserverShare.objects.create(server=self.storagecontroller,
-                share=uploadshare, download_url='/task_downloads/uploads', path='/storage/uploads')
 
         # Make sure it wont rsync
         self.newstorctrl.delete()

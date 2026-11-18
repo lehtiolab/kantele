@@ -1,4 +1,6 @@
 import os
+# TODO remove this when job runner no longer deleting files
+import shutil
 
 from django.db.models import Q
 
@@ -187,13 +189,25 @@ class RemoveDatasetFilesFromServershare(DatasetJob):
             fss = FileserverShare.objects.filter(share=sfl['servershare__pk'], server__active=True,
                     server__is_upload_server=False, share__active=True).values(
                     'server__name', 'path').first()
-            queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_FASTSTORAGE)
-            if sfl['sfile__mzmlfile'] is not None:
-                is_folder = False
+            if not fss and kwargs.get('upload_delete_web', False):
+                # TODO remove this conditional for immediate deletion by web server, as
+                # we want all delete operations done by the queue system
+                webfss = FileserverShare.objects.filter(share=sfl['servershare__pk'],
+                    server__active=True, server__is_upload_server=True, share__active=True).values(
+                    'path').first()
+                del_fpath = os.path.join(webfss['path'], sfl['path'], sfl['sfile__filename'])
+                if sfl['sfile__mzmlfile'] is not None or not sfl['sfile__filetype__is_folder']:
+                    os.unlink(del_fpath)
+                else:
+                    shutil.rmtree(del_fpath)
             else:
-                is_folder = sfl['sfile__filetype__is_folder']
-            self.run_tasks.append(((fss['path'], sfl['path'], sfl['sfile__filename'], sfl['pk'],
-                is_folder), queue))
+                queue = self.get_server_based_queue(fss['server__name'], settings.QUEUE_FASTSTORAGE)
+                if sfl['sfile__mzmlfile'] is not None:
+                    is_folder = False
+                else:
+                    is_folder = sfl['sfile__filetype__is_folder']
+                self.run_tasks.append(((fss['path'], sfl['path'], sfl['sfile__filename'], sfl['pk'],
+                    is_folder), queue))
 
 
 class ConvertDatasetMzml(DatasetJob):
