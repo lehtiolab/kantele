@@ -178,9 +178,10 @@ def load_base_analysis(request, wfversion_id, baseanid):
         dsets[ads['setname__analysisdatasetsetname__dsanalysis__dataset_id']]['setname'] = ads['setname__setname']
         dsets[ads['setname__analysisdatasetsetname__dsanalysis__dataset_id']]['files'] = {}
         analysis_dsfiles[ads['setname__analysisdatasetsetname__dsanalysis__dataset_id']] = {
-                x['sfile_id'] for x in am.AnalysisDSInputFile.objects.filter(
+                x['sfile_id'] for x in am.AnalysisDSInputFile.objects.filter(dsanalysis__analysis=ana,
                 dsanalysis__dataset_id=ads['setname__analysisdatasetsetname__dsanalysis__dataset_id']).values('sfile_id')
                 }
+        dsets[ads['setname__analysisdatasetsetname__dsanalysis__dataset_id']]['allfilessamesample'] = True
 
     for dsid in new_ana_dsids:
         for fn in am.AnalysisFileValue.objects.filter(adsfile__dsanalysis__analysis_id=ana,
@@ -193,9 +194,11 @@ def load_base_analysis(request, wfversion_id, baseanid):
                 dsets[dsid]['files'][fn['adsfile__sfile_id']] = {'id': fn['adsfile__sfile_id'],
                         'fields': {fn['field']: fn['value']}}
                 dsets[dsid]['fields'] = {}
-        if 'files' in dsets[dsid]:
+        if 'files' in dsets[dsid] and not dsets[dsid].get('allfilessamesample', False):
             # Must check if dset is actually in the overlap before setting allfilessamesample, else it errors
-            dsets[dsid]['allfilessamesample'] = all(not x['fields']['__sample'] for x in dsets[dsid]['files'].values())
+            nrsample = len(set(x['fields']['__sample'] for x in dsets[dsid]['files'].values()))
+            nrfiles = len(dsets[dsid]['files'])
+            dsets[dsid]['allfilessamesample'] = nrsample < 2 and nrfiles > 1
     # Clean dsets to only contain dsets from base analysis
     [dsets.pop(x) for x in new_ana_dsids if not dsets[x]]
 
@@ -209,7 +212,6 @@ def load_base_analysis(request, wfversion_id, baseanid):
         rawftype = dset_ftype.get().filetype.name
         dsf_by_type = {rawftype: dsrawfiles}
         if dsrawfiles.filter(rawfile__producer__msinstrument__isnull=False).count():
-            nrrawfiles = dsrawfiles.count()
             ds_msfiles, _ = get_msdataset_files_by_type(dssfiles)
             dsf_by_type.update(ds_msfiles)
 
