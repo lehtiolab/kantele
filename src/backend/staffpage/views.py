@@ -324,7 +324,13 @@ def save_server(request):
         if existing_asp_q.exists():
             return JsonResponse({'state': 'error', 'msg': 'Cannot use name for analysisprofile '
                     'already existing for another profile/server'}, status=400)
-        if asp['analysisoutshare_id'] not in [x['fssid'] for x in data['mounted']]:
+        try:
+            share_id = rm.FileserverShare.objects.filter(pk=asp['analysisoutshare_id']).values(
+                    'share_id').get()['share_id']
+        except rm.FileserverShare.DoesNotExist:
+            return JsonResponse({'state': 'error', 'msg': 'Analysis outputshare must exist'},
+                    status=400)
+        if share_id not in [x['share'] for x in data['mounted']]:
             return JsonResponse({'state': 'error', 'msg': 'Analysis outputshare must be mounted '
                     'on server'}, status=400)
             

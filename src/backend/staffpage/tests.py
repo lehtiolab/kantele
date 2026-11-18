@@ -326,6 +326,12 @@ class TestSaveServers(BaseQCFileTest):
             'mounted': [], 'analysisprofiles': [{'nfparams': '', 'analysisoutshare_id': -1,
                 'name': 'test', 'pk': False}]})
         self.assertEqual(anaproffail.status_code, 400)
+        self.assertEqual(anaproffail.json()['msg'], 'Analysis outputshare must exist')
+        anaproffail = self.cl.post(self.url, content_type='application/json', data={'pk': False,
+            'mounted': [], 'analysisprofiles': [{'nfparams': '',
+                'analysisoutshare_id': rm.FileserverShare.objects.values('pk').first()['pk'],
+                'name': 'test', 'pk': False}]})
+        self.assertEqual(anaproffail.status_code, 400)
         self.assertEqual(anaproffail.json()['msg'], 'Analysis outputshare must be mounted on server')
 
     def test_new_server(self):
