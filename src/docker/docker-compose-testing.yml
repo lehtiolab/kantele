@@ -185,7 +185,6 @@ services:
             RABBITUSER: "${RABBITUSER:-guest}"
             RABBITPASS: "${RABBITPASS:-guest}"
             NXF_COMMAND: 'python3'
-            NEXTFLOW_RUNDIR: '/storage/nf_runs2'
             APIKEY: "${APIKEY_ANALYSIS}"
 
     analysis_storage_2:
@@ -313,7 +312,6 @@ services:
             RABBITUSER: "${RABBITUSER:-guest}"
             RABBITPASS: "${RABBITPASS:-guest}"
             NXF_COMMAND: 'python3'
-            NEXTFLOW_RUNDIR: '/storage/nf_runs'
             APIKEY: "${APIKEY_ANALYSIS}"
 
     analysis_ssh_1:

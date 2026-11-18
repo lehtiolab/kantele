@@ -138,6 +138,7 @@ class RefineMzmls(DatasetJob):
                'repo': repoconfig['repolocation'],
                'includeconfig': includeconfig,
                'runname':  analysis.get_run_base_dir(),
+               'project_nfworkdir': anaserver.rundir,
                'outsharepath': outsharepath,
                'dsspath': dss['storage_loc'],
                }
@@ -192,6 +193,7 @@ class RunLongitudinalQCWorkflow(SingleFileJob):
                'nxf_wf_fn': nfwf.filename,
                'repo': repoconfig['repolocation'],
                'includeconfig': includeconfig,
+               'project_nfworkdir': anaserver.rundir,
                'runname': f'{analysis.id}_longqc_{sfl["sfile__rawfile__producer__name"]}_rawfile{sfl["sfile__rawfile_id"]}_{timestamp}',
                }
         if kwargs['trackpeptides']:
@@ -380,6 +382,7 @@ class RunNextflowWorkflow(MultiDatasetJob):
                'repo': repoconfig['repolocation'],
                'includeconfig': includeconfig,
                'runname': analysis.base_rundir,
+               'project_nfworkdir': anaserver.rundir,
                'outsharepath': sharemap[outshare['share_id']],
                'infiles': [],
                'old_infiles': False,

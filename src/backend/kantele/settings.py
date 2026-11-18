@@ -105,9 +105,6 @@ NXF_COMMAND = os.environ.get('NXF_COMMAND', 'nextflow run').split(' ')
 LIBRARY_FILE_PATH = ''
 LIBRARY_FILE_PATH_INBOX = '__kantele_library'
 
-# Should correspond to server's sharepath for output files also
-NF_RUNDIR = os.environ.get('NEXTFLOW_RUNDIR', 'nf_runs')
-
 # hardcoded name for filetypes fasta DBs, analysis output
 DBFA_FT_NAME = 'database'
 ANALYSIS_FT_NAME = 'analysis_output'

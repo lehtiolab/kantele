@@ -107,13 +107,16 @@ def run_nextflow(run, params, baseoutdir, gitwfdir, nf_version, scratchdir):
     print(cmd)
     env = os.environ
     env['NXF_VER'] = nf_version
+    # put apptainer images / build tmp in the project workdir
+    env['APPTAINER_CACHEDIR'] = os.path.join(run['project_nfworkdir'], 'apptainer')
+    env['APPTAINER_TMPDIR'] = os.path.join(run['project_nfworkdir'], 'apptainer')
     if scratchdir:
         env['TMPDIR'] = scratchdir
     if 'token' in run and run['token']:
         nflogurl = urljoin(settings.KANTELEHOST, reverse('analysis:nflog'))
         cmd.extend(['-name', run['token'], '-with-weblog', nflogurl])
     if 'analysis_id' in run:
-        log_analysis(run['analysis_id'], 'Running command {}, nextflow version {}'.format(' '.join(cmd), env.get('NXF_VER', 'default')))
+        log_analysis(run['analysis_id'], f'Running command {" ".join(cmd)}, nextflow version {nf_version}')
     nxf_sub = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, cwd=gitwfdir, env=env)
     try:
         stdout, stderr = nxf_sub.communicate()
@@ -232,7 +235,7 @@ def refine_mzmls(self, run, params, mzmls, stagefiles, nf_version, stagescratchd
 
 
 def create_runname_dirname(run):
-    return os.path.join(settings.NF_RUNDIR, run['runname']).replace(' ', '_')
+    return os.path.join(run['project_nfworkdir'],  run['runname']).replace(' ', '_')
 
 
 def prepare_nextflow_run(run, taskid, rundir, stageparamfiles, params, stagescratch_basedir):
@@ -399,8 +402,8 @@ def run_nextflow_longitude_qc(self, run, params, stagefiles, nf_version, scratch
     params, gitwfdir, no_stagedir, scratchdir = prepare_nextflow_run(run, self.request.id, rundir,
             stagefiles, params, scratchbasedir)
     # QC has no stagedir, we put the raw in rundir to stage
-    # Also, outsharepath can be NF_RUNDIR since these files are thrown away after run
-    run['outsharepath'] = os.path.join(settings.NF_RUNDIR, 'qc_output')
+    # Also, outsharepath can be in nf workdir since these files are thrown away after run
+    run['outsharepath'] = os.path.join(run['project_nfworkdir'], f'qc_output-{run["qcrun_id"]}')
     try:
         outdir = run_nextflow(run, params, os.path.basename(rundir), gitwfdir, nf_version, scratchdir)
     except subprocess.CalledProcessError:

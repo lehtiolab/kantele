@@ -272,6 +272,7 @@ class ConvertDatasetMzml(DatasetJob):
                'repo': repoconfig['repolocation'],
                'includeconfig': includeconfig,
                'runname': kwargs['runpath'],
+               'project_nfworkdir': anaserver.rundir,
                'outsharepath': sharemap[mzsfl['servershare_id']],
                'dsspath': kwargs['dsspath'],
                }

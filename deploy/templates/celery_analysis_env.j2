@@ -21,13 +21,8 @@ TMPDIR={{ scratch_dir if scratch_dir is defined else '/tmp' }}
 CELERY_PREFETCH=1
 SECRET_KEY={{ secret_key }}
 APIKEY={{ analysis_apikey }}
-NEXTFLOW_RUNDIR="{{ baserun_dir }}"
 
 THERMOKEY=SampleID
 BRUKERKEY=Description
 
 SNKEY="{{ spectronaut_license_key }}"
-
-APPTAINER_CACHEDIR="{{ baserun_dir }}/apptainer-cache"
-APPTAINER_TMPDIR="{{ baserun_dir }}/apptainer-cache"
-

@@ -196,7 +196,15 @@ function addStorageShareToServer(server) {
 }
 
 function addAnaProfileToServer(server) {
-  server.analysisprofiles = [...server.analysisprofiles, {name: '', nfparams: '', queue_name: '', scratchdir: '', analysisoutshare_id: false, pk: false}];
+  server.analysisprofiles = [...server.analysisprofiles, {
+    name: '',
+    nfparams: '',
+    queue_name: '',
+    rundir: '',
+    scratchdir: '',
+    analysisoutshare_id: false,
+    pk: false
+  }];
   servers = servers;
 }
 
@@ -528,6 +536,18 @@ async function saveShare(share) {
               <div class="field">
                 <p class="control">
                   <input class="input" placeholder='JSON, E.g. ["--project", "proj12345"]' bind:value="{profile.nfparams}" />
+                </p>
+              </div>
+            </div>
+          </div>
+          <div class="field is-horizontal">
+            <div class="field-label is-normal">
+              <label class="label">NF workdir</label>
+            </div>
+            <div class="field-body">
+              <div class="field">
+                <p class="control">
+                  <input class="input" placeholder="E.g /path/to/hpc/proj1234/kantele_stuff/nf_workdir" bind:value="{profile.rundir}" />
                 </p>
               </div>
             </div>

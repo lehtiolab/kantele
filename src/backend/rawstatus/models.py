@@ -277,6 +277,7 @@ class AnalysisServerProfile(models.Model):
     queue_name = models.TextField(help_text='Also identifier for which project on HPC')
     nfparams = models.JSONField(default=list, blank=True, help_text='List of parameters to pass '
             'for this server/project, e.g. ["--project", "proj12345"]')
+    rundir = models.TextField(help_text='Directory to run analyses in, e.g. /path/to/hpc/project-123/kantele_stuff/nf_workdir')
     analysisoutshare = models.ForeignKey(FileserverShare, on_delete=models.CASCADE)
 
     def __str__(self):

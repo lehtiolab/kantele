@@ -159,5 +159,4 @@ services:
             #            RABBIT_VHOST: "${RABBIT_VHOST}"
             #            RABBITUSER: "${RABBITUSER:-guest}"
             #            RABBITPASS: "${RABBITPASS:-guest}"
-            #            NEXTFLOW_RUNDIR: /nxf/runs
             #            NXF_COMMAND: "/nxf/nextflow"

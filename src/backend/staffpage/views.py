@@ -47,7 +47,8 @@ def show_staffpage(request):
     [servers[x].update({'mounted': [], 'analysisprofiles': []}) for x in servers.keys()]
     for asp in rm.AnalysisServerProfile.objects.all():
         servers[asp.server_id]['analysisprofiles'].append({'pk': asp.pk, 'name': asp.name,
-            'nfparams': json.dumps(asp.nfparams), 'queue_name': asp.queue_name, 'scratchdir': asp.scratchdir,
+            'nfparams': json.dumps(asp.nfparams), 'queue_name': asp.queue_name,
+            'rundir': asp.rundir, 'scratchdir': asp.scratchdir,
             'analysisoutshare_id': asp.analysisoutshare_id})
     for fss in rm.FileserverShare.objects.all().values('pk', 'share__name', 'share_id', 'path',
             'download_url', 'server_id'):
@@ -349,11 +350,11 @@ def save_server(request):
         if asp['pk']:
             asp_db, cr = rm.AnalysisServerProfile.objects.update_or_create(pk=asp['pk'],
                     server=fs, defaults={f: asp[f] for f in ['nfparams', 'analysisoutshare_id',
-                        'name', 'scratchdir', 'queue_name']})
+                        'name', 'rundir', 'scratchdir', 'queue_name']})
         else:
             asp_db, cr = rm.AnalysisServerProfile.objects.update_or_create(name=asp['name'],
                     server=fs, defaults={f: asp[f] for f in ['nfparams', 'analysisoutshare_id',
-                        'scratchdir', 'queue_name']})
+                        'rundir', 'scratchdir', 'queue_name']})
         if cr:
             passed_asp_pk.append(asp_db.pk)
     rm.AnalysisServerProfile.objects.filter(server=fs).exclude(pk__in=passed_asp_pk).delete()
