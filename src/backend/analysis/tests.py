@@ -102,7 +102,7 @@ class AnalysisPageTest(BaseIntegrationTest):
         am.PsetFileParam.objects.create(pset=self.pset, param=self.pfn2, allow_resultfiles=True)
 
         self.nfwf = am.NextflowWfVersionParamset.objects.create(update='an update', commit='abc123',
-                filename='main.nf', nfworkflow=self.nfw, paramset=self.pset, nfversion='22', active=True)
+                filename='main.nf', nfworkflow=self.nfw, paramset=self.pset, envvars='NXF_VER=22', active=True)
         self.wftype = am.UserWorkflow.WFTypeChoices.STD
         self.wf = am.UserWorkflow.objects.create(name='testwf', wftype=self.wftype, public=True)
         self.wf.nfwfversionparamsets.add(self.nfwf)
@@ -730,7 +730,7 @@ class TestStoreAnalysis(AnalysisPageTest):
         super().setUp()
         self.nfwf = am.NextflowWfVersionParamset.objects.create(update='nf workflow',
                 commit='master', filename='nf.py', nfworkflow=self.nfw,
-                paramset=self.pset, nfversion='', active=True)
+                paramset=self.pset, envvars='', active=True)
         self.wftype = am.UserWorkflow.WFTypeChoices.STD
         self.wf = am.UserWorkflow.objects.create(name='testwf', wftype=self.wftype, public=True)
         self.wf.nfwfversionparamsets.add(self.nfwf)
@@ -1198,7 +1198,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
                 storage_loc_ui=self.oldstorloc, storage_loc=self.oldstorloc, startdate=timezone.now())
         nfwf = am.NextflowWfVersionParamset.objects.create(update='nf workflow',
                 commit='master', filename='nf.py', nfworkflow=self.nfw,
-                paramset=self.pset, nfversion='', active=True)
+                paramset=self.pset, envvars='', active=True)
         am.NfConfigVersion.objects.create(nfservercfg=self.nfrepo, nfpipe=nfwf, includeconfig='testtest/123jkl')
         params = {'flags': {}, 'inputparams': {self.param3.pk: 42}, 
                 'multicheck': {self.param2.pk: [self.popt2.pk]}}
@@ -1342,7 +1342,7 @@ class TestStoreAnalysisLF(AnalysisLabelfreeSamples):
                 storage_loc_ui=self.storloc, storage_loc=self.storloc, startdate=timezone.now())
         nfwf = am.NextflowWfVersionParamset.objects.create(update='nf workflow',
                 commit='master', filename='nf.py', nfworkflow=self.nfw,
-                paramset=self.pset, nfversion='', active=True)
+                paramset=self.pset, envvars='', active=True)
         nfrepo2 = am.NfRepoServerConfig.objects.create(serverprofile=self.anaprofile2,
                 nfrepo=self.nfw, repolocation=self.nfw.repo)
         am.NfConfigVersion.objects.create(nfservercfg=nfrepo2, nfpipe=nfwf, includeconfig='testtest/123jkl')

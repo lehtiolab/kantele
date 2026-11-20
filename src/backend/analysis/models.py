@@ -94,7 +94,7 @@ class NextflowWfVersionParamset(models.Model):
     nfworkflow = models.ForeignKey(NextflowWorkflowRepo, on_delete=models.CASCADE)
     paramset = models.ForeignKey(ParameterSet, on_delete=models.CASCADE)
     date = models.DateTimeField(auto_now=True)
-    nfversion = models.TextField()
+    envvars = models.TextField()
     active = models.BooleanField(default=False)
     
     def __str__(self):

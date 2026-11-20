@@ -299,7 +299,7 @@ class ConvertDatasetMzml(DatasetJob):
             if len(p2parse):
                 params.extend(['--{}'.format(pname), ';'.join(p2parse)])
         self.run_tasks.append((run, params, nf_raws, mzsfl['sfile__filetype__name'],
-            nfwf.nfversion, anaserver.scratchdir))
+            nfwf.envvars, anaserver.scratchdir))
 
 
 class DeleteDatasetPDCBackup(DatasetJob):

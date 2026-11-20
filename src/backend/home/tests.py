@@ -26,7 +26,7 @@ class MzmlTests(BaseIntegrationTest):
                 instrumenttype=self.tims, filetype=self.ft)
         self.refinewf = am.NextflowWfVersionParamset.objects.create(update='refine wf',
                 commit='master', filename='refine.py', nfworkflow=self.nfw, paramset=self.pset, 
-                nfversion='', active=True)
+                envvars='', active=True)
         self.wf = am.UserWorkflow.objects.create(name='refine', wftype=am.UserWorkflow.WFTypeChoices.SPEC,
                 public=False)
         self.wf.nfwfversionparamsets.add(self.refinewf)

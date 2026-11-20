@@ -184,7 +184,7 @@ class BaseTest(TestCase):
                 description='repo_base desc', repo='/storage/nfrepo')
         self.nfwv = am.NextflowWfVersionParamset.objects.create(update='pwiz wfv base',
                 commit='master', filename='pwiz.py', nfworkflow=self.nfw,
-                paramset=self.pset, nfversion='', active=True)
+                paramset=self.pset, envvars='', active=True)
         self.pwiz = am.Proteowizard.objects.create(version_description='pwversion desc1',
                 params={'mzmltool': 'msconvert'}, nf_version=self.nfwv)
         self.f3sfmz = rm.StoredFile.objects.create(rawfile=self.f3raw, filename=f'{os.path.splitext(fn3)[0]}.mzML',
@@ -196,7 +196,7 @@ class BaseTest(TestCase):
         # QC workflow
         self.qcnfwf = am.NextflowWfVersionParamset.objects.create(update='nf workflow',
                 commit='master', filename='qc.py', nfworkflow=self.nfw,
-                paramset=self.pset, nfversion='', active=True)
+                paramset=self.pset, envvars='', active=True)
         self.qcwf = am.UserWorkflow.objects.create(name='testwfqc', public=True,
                 wftype=am.UserWorkflow.WFTypeChoices.QC)
         self.qcwf.nfwfversionparamsets.add(self.qcnfwf)

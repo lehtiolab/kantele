@@ -56,7 +56,7 @@ class BaseTC(BaseIntegrationTest):
         am.AnalysisParam.objects.create(analysis=self.ana, param=pmod, value=[p_opt1.pk, p_opt2.pk])
 
         self.nfwf = am.NextflowWfVersionParamset.objects.create(update='test update', commit='abc123',
-                filename='main.nf', profiles=[], nfworkflow=nfw, paramset=pset, nfversion='22', active=True)
+                filename='main.nf', profiles=[], nfworkflow=nfw, paramset=pset, envvars='NXF_VER=22', active=True)
         am.PipelineVersionOutput.objects.create(nfwfversion=self.nfwf, output=wfo)
         self.wf = am.UserWorkflow.objects.create(name='testwf', public=True,
                 wftype=am.UserWorkflow.WFTypeChoices.STD)
