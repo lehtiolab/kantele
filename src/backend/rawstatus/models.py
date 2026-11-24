@@ -330,6 +330,9 @@ class StoredFile(models.Model):
         return self.rawfile.name
 
     def get_allowed_shares(self):
+        '''For showing which shares are allowed (in home/views), and restricting actual
+        saving to allowed shares, both for single files (in rawstatus/views)
+        '''
         possible_shares = ServerShare.objects.filter(active=True)
         match self.rawfile.usetype:
             case UploadFileType.RAWFILE:
@@ -353,7 +356,8 @@ class StoredFile(models.Model):
                             function__in=[x['servershare__function'] for x in oldsfl])
 
             case UploadFileType.LIBRARY | UploadFileType.USERFILE:
-                allowed_shares = possible_shares.filter(function=ShareFunction.LIBRARY)
+                allowed_q = Q(function=ShareFunction.LIBRARY) | (Q(function=ShareFunction.RAWDATA) & ~Q(fileservershare__server__fileservershare__share__function=ShareFunction.LIBRARY))
+                allowed_shares = possible_shares.filter(allowed_q)
 
             case UploadFileType.QC:
                 allowed_shares = possible_shares.filter(function=ShareFunction.RAWDATA)
