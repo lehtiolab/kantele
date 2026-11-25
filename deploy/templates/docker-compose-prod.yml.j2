@@ -16,7 +16,10 @@ services:
             RABBITHOST: "${HOST_FQDN}"
             KANTELEHOST: "${HOST_FQDN}"
         volumes:
-            - "${HOST_UPLOADPATH}:${CONTAINER_UPLOADPATH}"
+            # Need to write to uploadpath for incoming files
+            - "{{ host_uploadpath }}:{{ web_container_uploadpath }}"
+            # Need to serve reports from storagepath
+            - "{{ storage_mount[0] }}:{{ storage_mount[1] }}:ro"
     
     nginx:
         network_mode: host
@@ -24,10 +27,10 @@ services:
             - web
         image: kantele_nginx # in prod-bake.yml
         volumes:
-            - "${HOST_CERTBOT_PATH}/conf:/etc/letsencrypt"
-            - "${HOST_CERTBOT_PATH}/www:/var/www/certbot"
+          - "{{ host_certbot_path }}/conf:/etc/letsencrypt"
+          - "{{ host_certbot_path }}/www:/var/www/certbot"
           # here go the volumes from which we can task_download
-{% for hostpath, mountpath, _url in nginx_download_mounts %}
+{% for hostpath, mountpath, _domain in nginx_download_mounts %}
           - "{{ hostpath }}:{{ mountpath }}:ro"
 {% endfor %}
         logging:
@@ -38,8 +41,8 @@ services:
     certbot:
       image: certbot/certbot
       volumes:
-        - "${HOST_CERTBOT_PATH}/conf:/etc/letsencrypt"
-        - "${HOST_CERTBOT_PATH}/www:/var/www/certbot"
+        - "{{ host_certbot_path }}/conf:/etc/letsencrypt"
+        - "{{ host_certbot_path }}/www:/var/www/certbot"
           #entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"  # Renew certificates every 12 hours
     db: 
         network_mode: host
@@ -78,3 +81,6 @@ services:
         environment:
             DB_HOST: "${HOST_FQDN}"
             RABBITHOST: "${HOST_FQDN}"
+        # TODO volumes can be removed when we no longer delete files inside the job runner!
+        volumes:
+            - "{{ host_uploadpath }}:{{ web_container_uploadpath }}"

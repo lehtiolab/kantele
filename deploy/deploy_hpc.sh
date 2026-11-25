@@ -16,7 +16,9 @@ source .ansible-env
 
 echo Preparing ssh-agent with key
 eval $(ssh-agent)
-ssh-add ${HPC_SSH_KEY}
+for KEY in "${HPC_SSH_KEYS}"
+do ssh-add ${KEY}
+done;
 
 python3 -m venv .venv-ansible
 source .venv-ansible/bin/activate

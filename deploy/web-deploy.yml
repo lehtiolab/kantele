@@ -43,8 +43,8 @@
             src: "{{ item.1 }}"
             state: mounted
             fstype: cifs
-            opts: "credentials={{ mount_cred }},uid={{ kanteleuser }},domain={{ mount_domain }},iocharset=utf8,vers=3.0,_netdev,ro"
-        loop: "{{ storagedirs | zip(storageservers) | list }}"
+            opts: "credentials={{ mount_cred }},uid={{ kanteleuser }},domain={{ item.2 }},iocharset=utf8,vers=3.0,_netdev,ro"
+        loop: "{{ storagedir_servers }}"
       
       - name: Build compose images
         ansible.builtin.command:

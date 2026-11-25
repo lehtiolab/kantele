@@ -17,7 +17,9 @@ source .ansible-env
 echo Preparing ssh-agent with key
 eval $(ssh-agent)
 ssh-add "${LOCAL_SSH_KEY}"
-ssh-add "${HPC_SSH_KEY}"
+for KEY in "${HPC_SSH_KEYS}"
+do ssh-add "${HPC_SSH_KEY}"
+done
 
 python3 -m venv .venv-ansible
 source .venv-ansible/bin/activate
@@ -39,4 +41,4 @@ echo Updating analysis code
 ansible-playbook -i default_inventory -i "${INVENTORY_PATH}" --extra-vars "analysis_connect_user=${ANALYSIS_USER}" analysis_deploy.yml -K
 
 echo Update HPC analysis code
-ansible-playbook -i default_inventory -i "${INVENTORY_PATH}" --extra-vars "analysis_connect_user=${HPC_USER}" hpc_analysis_deploy.yml -K
+ansible-playbook -i default_inventory -i "${INVENTORY_PATH}" --extra-vars "analysis_connect_user=${HPC_USER}" hpc_analysis_deploy.yml
