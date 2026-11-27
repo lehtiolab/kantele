@@ -198,7 +198,10 @@ def browser_userupload(request):
         return JsonResponse({'success': False, 'msg': 'Can only upload files of raw, library, '
             'or user type'}, status=403)
 
-    dstshare = ServerShare.objects.get(function=ShareFunction.INBOX)
+    # There should only be one such share (inbox which does not do uploads)
+    # FIXME this upload method can be reworked to be OK with upload share being in DB now.
+    dstshare = ServerShare.objects.get(function=ShareFunction.INBOX,
+            fileservershare__server__is_upload_server=False)
     if upload.uploadtype == UploadFileType.RAWFILE and StoredFileLoc.objects.filter(
             sfile__filename=fname, path=dstpath, servershare=dstshare, sfile__deleted=False).exclude(
                     sfile__rawfile__source_md5=raw.source_md5).exists():
